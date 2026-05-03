@@ -5,8 +5,8 @@
 All persistent state lives in a single PostgreSQL 17 instance with the pgvector extension. The schema is organized into three tiers, introduced across implementation phases:
 
 - **Core Tables (Phase 1)** — worlds, characters, scenes, turns
-- **Knowledge Tables (Phase 2)** — wiki_pages, timeline_events, relationships, story_threads, memory_chunks
-- **Multiplayer Tables (Phase 4)** — users, player_characters, notifications
+- **Seeding + Knowledge Tables (Phase 2-3)** — world_sources, wiki_pages, timeline_events, relationships, story_threads, memory_chunks
+- **Multiplayer Tables (Phase 5)** — users, player_characters, notifications
 
 Design principles:
 - UUIDs for all primary keys (safe for distributed systems, prevents enumeration)
@@ -20,7 +20,7 @@ Design principles:
 
 ```
                     ┌──────────┐
-                    │  users   │ (Phase 4)
+                    │  users   │ (Phase 5)
                     └────┬─────┘
                          │ 1:N
                          ▼
@@ -31,9 +31,9 @@ Design principles:
    │ 1:N      │ 1:N      │ 1:N      │ 1:N      │ 1:N
    ▼          ▼          ▼          ▼          ▼
 ┌────────┐ ┌────────┐ ┌─────────┐ ┌──────────┐ ┌─────────────┐
-│ chars  │ │ scenes │ │wiki_page│ │ timeline │ │ story_      │
-│        │ │        │ │  (P2)   │ │ _events  │ │ threads (P2)│
-│        │ │        │ │         │ │  (P2)    │ │             │
+│ chars  │ │ scenes │ │ sources │ │wiki_page │ │ timeline    │
+│        │ │        │ │  (P2)   │ │  (P2)    │ │ events (P2) │
+│        │ │        │ │         │ │          │ │             │
 └───┬────┘ └───┬────┘ └─────────┘ └──────────┘ └─────────────┘
     │          │ 1:N
     │          ▼
@@ -48,19 +48,25 @@ Design principles:
           └──────────────┘
 
 ┌──────────────────┐
+│ story_threads    │ (Phase 2)
+│ world_id FK      │
+│ source_ids UUID[]│
+└──────────────────┘
+
+┌──────────────────┐
 │  memory_chunks   │ (Phase 2)
 │  world_id FK     │
 │  embedding vector│
 └──────────────────┘
 
 ┌──────────────────┐
-│ player_characters│ (Phase 4)
+│ player_characters│ (Phase 5)
 │ user_id FK       │
 │ character_id FK  │
 └──────────────────┘
 
 ┌──────────────────┐
-│  notifications   │ (Phase 4)
+│  notifications   │ (Phase 5)
 │  user_id FK      │
 │  world_id FK     │
 └──────────────────┘
@@ -88,6 +94,27 @@ CREATE TABLE worlds (
 -- setting_details JSONB structure (flexible, not enforced):
 -- {
 --   "time_period": "medieval",
+--   "clock": {
+--     "label": "Day 1, Morning",
+--     "elapsed_minutes": 0,
+--     "calendar_system": "local"
+--   },
+--   "deadlines": [
+--     {
+--       "id": "mission_launch",
+--       "label": "Mission launch",
+--       "due_at_label": "Day 1, Evening",
+--       "remaining_minutes": 360,
+--       "status": "active"
+--     }
+--   ],
+--   "content_boundaries": {
+--     "rating": "mature",
+--     "allowed_intensity": ["battlefield violence", "political horror"],
+--     "restricted_content": ["sexual violence"],
+--     "fade_to_black": ["torture"],
+--     "tone_notes": "grim consequences without eroticized cruelty"
+--   },
 --   "magic_system": "low fantasy",
 --   "geography": "island archipelago",
 --   "key_factions": ["The Iron Council", "The Drift Walkers"],
@@ -98,6 +125,8 @@ CREATE TABLE worlds (
 **Indexes**: Primary key only for Phase 1. Status index added if needed for filtering.
 
 **Status values**: `active` (playable), `paused` (temporarily inactive), `archived` (read-only).
+
+**Content boundaries**: `setting_details.content_boundaries` stores world-level tone and safety constraints. All agents must treat these as authoritative style constraints, not suggestions. This lets a world remain intense or grim while still avoiding content the user has excluded.
 
 ### 3.2 `characters`
 
@@ -125,17 +154,40 @@ CREATE INDEX idx_characters_world_id ON characters(world_id);
 --   "goals": ["find the lost city", "protect their sister"],
 --   "fears": ["deep water", "betrayal"],
 --   "appearance": "tall, weathered, scar across left cheek",
---   "speech_style": "formal, measured, avoids contractions"
+--   "speech_style": "formal, measured, avoids contractions",
+--   "location": {
+--     "label": "Rusty Anchor tavern",
+--     "scene_id": "<uuid>",
+--     "visibility": "present"
+--   },
+--   "identity": {
+--     "species": "human",
+--     "origin": "village herbalist",
+--     "current_titles": ["Warden of Port Haven"],
+--     "former_titles": [],
+--     "factions": ["Drift Walkers"],
+--     "not_facts": ["not nobility"]
+--   },
+--   "presentation": {
+--     "worn_equipment": ["weathered cloak", "iron pendant"],
+--     "visible_markers": ["scar across left cheek"],
+--     "disguise": null,
+--     "public_reputation": "local troublemaker"
+--   }
 -- }
 ```
 
 **Status values**: `active`, `inactive` (left the story), `dead` (killed in narrative).
 
-**Design note**: In Phase 1, each world has exactly one player character (`is_player = true`). In Phase 4, multiple players each have their own character linked through `player_characters`.
+**Identity vs. presentation**: `traits.identity` stores what the character is. `traits.presentation` stores what the character appears to be wearing, carrying, impersonating, or signaling. Narrator and Actor prompts must not infer that equipment changes identity. Use `identity.not_facts` for facts the model is likely to hallucinate, such as "wearing Arch-Confessor armor" becoming "is an Arch-Confessor."
+
+**Locality**: `traits.location` is the character-level current location for Phase 1. It should be kept in sync with the active scene for the player and later extended for NPCs in Phase 4. The context assembler uses it to build the authoritative state block.
+
+**Design note**: In Phase 1, each world has exactly one player character (`is_player = true`). In Phase 5, multiple players each have their own character linked through `player_characters`.
 
 ### 3.3 `scenes`
 
-A scene is a narrative container — a location, situation, or set piece. The story progresses through scenes sequentially, though in Phase 3+ parallel scenes are possible.
+A scene is a narrative container — a location, situation, or set piece. The story progresses through scenes sequentially, though in Phase 4+ parallel scenes are possible.
 
 ```sql
 CREATE TABLE scenes (
@@ -146,6 +198,7 @@ CREATE TABLE scenes (
   scene_number  INTEGER NOT NULL,
   status        VARCHAR(50) NOT NULL DEFAULT 'active',
   location      VARCHAR(255),
+  metadata      JSONB DEFAULT '{}',
   started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   ended_at      TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -158,7 +211,46 @@ CREATE UNIQUE INDEX idx_scenes_world_number ON scenes(world_id, scene_number);
 
 **Status values**: `active` (current scene), `completed` (concluded).
 
-**`scene_number`**: Sequential within a world. The unique index on `(world_id, scene_number)` prevents duplicate numbering. In Phase 3, parallel scenes share a `scene_number` but have different `id`s — the unique constraint will need to be relaxed.
+**`scene_number`**: Sequential within a world. The unique index on `(world_id, scene_number)` prevents duplicate numbering. In Phase 4, parallel scenes share a `scene_number` but have different `id`s — the unique constraint will need to be relaxed.
+
+**Tactical state metadata**: For action-heavy or mission-style scenes, use `scenes.metadata.tactical_state` as the compact current battlefield/mission state. This is intentionally JSONB in Phase 1 so the project can support tactical campaigns without creating premature dedicated tables.
+
+Example:
+```json
+{
+  "tactical_state": {
+    "objectives": [
+      { "id": "kill_cardinal", "label": "Kill Cardinal Varak Thul", "status": "complete" },
+      { "id": "extract_team", "label": "Extract surviving kill-team", "status": "at_risk" }
+    ],
+    "threats": [
+      { "id": "lesser_daemon", "label": "Manifesting Lesser Daemon", "status": "active", "distance_meters": 8 }
+    ],
+    "allies": [
+      { "character_id": "<uuid>", "label": "Sergeant Aulus", "status": "wounded", "wounds": ["head wound", "armor breach"] }
+    ],
+    "casualties": [
+      { "label": "Two battle-brothers", "status": "dead" }
+    ],
+    "resources": [
+      { "label": "Melta bombs", "remaining": 1 },
+      { "label": "Teleport lock", "status": "unstable", "capacity": 4 }
+    ],
+    "extraction": {
+      "method": "Thunderhawk",
+      "status": "contested",
+      "window_seconds": 120
+    },
+    "scene_clock": {
+      "label": "Extraction window",
+      "remaining_seconds": 120,
+      "status": "collapsing"
+    }
+  }
+}
+```
+
+The authoritative state builder should prefer this structured metadata over prose when present, then condense it into a small prompt block.
 
 ### 3.4 `turns`
 
@@ -186,8 +278,8 @@ CREATE UNIQUE INDEX idx_turns_scene_number ON turns(scene_id, turn_number);
 - `scene_opening` — narrator's scene-setting text (no character)
 - `player_action` — player's input (character_id = player character)
 - `narrator_response` — narrator's story continuation (no character)
-- `npc_action` — NPC dialogue/action generated by Character Actor (Phase 3)
-- `system_event` — scene transitions, proxy activations (Phase 3+)
+- `npc_action` — NPC dialogue/action generated by Character Actor (Phase 4)
+- `system_event` — scene transitions, proxy activations (Phase 4+)
 
 **`world_id` denormalization**: Turns belong to scenes which belong to worlds. The denormalized `world_id` on turns avoids a join when querying "all turns in a world" for context assembly. Cost: one extra UUID per row (~16 bytes). Benefit: eliminates joins on the hottest query path.
 
@@ -201,15 +293,64 @@ CREATE UNIQUE INDEX idx_turns_scene_number ON turns(scene_id, turn_number);
   "latency_ms": 1834,
   "estimated_cost_usd": 0.023,
   "context_turns_used": 15,
+  "resolution": {
+    "intent": "strike the heretic's left leg with a power sword",
+    "stance": "attempt",
+    "outcome": "partial_success",
+    "world_state_delta": "heretic left leg wounded; mobility reduced; leg not severed",
+    "input_mode": "tactical_intent"
+  },
   "stream_error": false
 }
 ```
 
+**Action resolution metadata**: Player input is stored verbatim in `content`, but any adjudicated outcome belongs in `metadata.resolution`. This prevents player phrasing from authoring reality directly. The Narrator describes the resolved outcome rather than blindly accepting assertions like "I cut the enemy's leg off."
+
+**Input mode metadata**: `metadata.resolution.input_mode` distinguishes contested tactical intent from player-authored cinematic framing or emotional interiority. Examples: `tactical_intent`, `asserted_outcome`, `cinematic_framing`, `emotional_interiority`, `meta_or_unclear`. Cinematic framing ("everything changes in a burst of light") and emotional interiority ("I am devastated") can shape tone without automatically resolving a contested outcome.
+
 **No `updated_at`**: Turns are never modified after creation. This is a deliberate constraint — the story is an immutable log.
 
-## 4. Phase 2 Tables (Knowledge System)
+## 4. Phase 2-3 Tables (Seeding + Knowledge System)
 
-### 4.1 `wiki_pages`
+The knowledge system follows a Karpathy-style LLM wiki pattern:
+
+1. **Raw sources are immutable** — user seeds, generated seed packets, simulated expedition logs, prior adventure logs, uploaded lore, play turns, and system summaries are preserved as source material.
+2. **Compiled wiki pages evolve** — the LLM updates wiki/timeline/relationship/thread entries as a working layer over the sources.
+3. **Canon is explicit** — generated content starts as soft canon unless accepted, directly established in play, or otherwise promoted.
+4. **Linting flags conflicts** — contradictions and duplicates are reviewed instead of silently overwritten.
+
+### 4.1 `world_sources`
+
+Immutable source documents used by the World Seeder, Archivist, wiki compiler, and linter.
+
+```sql
+CREATE TABLE world_sources (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  world_id        UUID NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  source_type     VARCHAR(50) NOT NULL,
+  title           VARCHAR(255) NOT NULL,
+  content         TEXT NOT NULL,
+  source_turn_id  UUID REFERENCES turns(id) ON DELETE SET NULL,
+  metadata        JSONB DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_sources_world_type ON world_sources(world_id, source_type);
+CREATE INDEX idx_sources_world_created ON world_sources(world_id, created_at);
+```
+
+**Source type values**:
+- `user_seed` — premise, rules, constraints, and preferences entered by the user
+- `seed_packet` — structured output from the World Seeder
+- `expedition_log` — simulated scout or historical POV adventure log
+- `prior_adventure_log` — imported transcript, PDF extraction, or campaign log from earlier play
+- `uploaded_lore` — imported notes or documents
+- `play_turn` — source reference for player/narrator turns established during play
+- `system_summary` — generated scene/world summaries used for compaction
+
+**Design note**: Source documents are append-only. If the LLM revises its interpretation, it updates compiled wiki/timeline/relationship/thread rows, not the original source.
+
+### 4.2 `wiki_pages`
 
 Auto-generated knowledge base entries extracted by the Archivist.
 
@@ -221,14 +362,19 @@ CREATE TABLE wiki_pages (
   content       TEXT NOT NULL,
   category      VARCHAR(100) NOT NULL,
   source_turn_id UUID REFERENCES turns(id) ON DELETE SET NULL,
+  source_ids    UUID[] DEFAULT '{}',
+  canon_status  VARCHAR(50) NOT NULL DEFAULT 'soft',
+  confidence    VARCHAR(50) NOT NULL DEFAULT 'medium',
   embedding     vector(1024),
   metadata      JSONB DEFAULT '{}',
+  last_verified_at TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_wiki_world_id ON wiki_pages(world_id);
 CREATE INDEX idx_wiki_world_category ON wiki_pages(world_id, category);
+CREATE INDEX idx_wiki_world_canon ON wiki_pages(world_id, canon_status);
 CREATE UNIQUE INDEX idx_wiki_world_title ON wiki_pages(world_id, lower(title));
 CREATE INDEX idx_wiki_embedding ON wiki_pages
   USING hnsw (embedding vector_cosine_ops)
@@ -239,11 +385,17 @@ CREATE INDEX idx_wiki_embedding ON wiki_pages
 
 **`source_turn_id`**: Links back to the turn that generated or last updated this wiki page. Enables provenance tracking.
 
+**`source_ids`**: Source document UUIDs that support the compiled page. This is intentionally denormalized for fast provenance display.
+
+**`canon_status`**: `hard`, `soft`, `rumor`, `myth`, `false`, `disputed`. Seeded content defaults to `soft`; directly established gameplay facts can be promoted to `hard`.
+
+**`confidence`**: `low`, `medium`, `high`. Confidence expresses extraction certainty, not narrative truth. A `rumor` can have high confidence if the source clearly states that people believe it.
+
 **`embedding`**: 1024-dimensional Voyage AI vector for semantic search. The HNSW index enables fast approximate nearest neighbor queries.
 
 **Unique title per world**: The `lower(title)` unique index prevents duplicate wiki entries (case-insensitive).
 
-### 4.2 `timeline_events`
+### 4.3 `timeline_events`
 
 Chronological record of significant in-world events.
 
@@ -254,21 +406,28 @@ CREATE TABLE timeline_events (
   title           VARCHAR(255) NOT NULL,
   description     TEXT NOT NULL,
   source_turn_id  UUID REFERENCES turns(id) ON DELETE SET NULL,
+  source_ids      UUID[] DEFAULT '{}',
   scene_id        UUID REFERENCES scenes(id) ON DELETE SET NULL,
   world_timestamp VARCHAR(255),
   significance    VARCHAR(50) NOT NULL DEFAULT 'minor',
+  canon_status    VARCHAR(50) NOT NULL DEFAULT 'soft',
+  confidence      VARCHAR(50) NOT NULL DEFAULT 'medium',
+  metadata        JSONB DEFAULT '{}',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_timeline_world_id ON timeline_events(world_id);
 CREATE INDEX idx_timeline_world_created ON timeline_events(world_id, created_at);
+CREATE INDEX idx_timeline_world_canon ON timeline_events(world_id, canon_status);
 ```
 
 **`world_timestamp`**: In-world time as a string (e.g., "Day 3, Evening", "Year 412, Spring"). Not a real timestamp — narrative worlds have arbitrary time systems.
 
+**Time authority**: `timeline_events` records what happened when. It does not own the current clock. During Phase 1, the current clock and active deadlines live in `worlds.setting_details.clock` and `worlds.setting_details.deadlines`. Later phases may promote that data to dedicated clock/deadline tables if scheduling, travel time, or multiplayer turn order requires stronger constraints.
+
 **`significance`**: `minor` (routine events), `major` (plot turning points), `critical` (world-changing events). Used to filter timeline views and prioritize retrieval.
 
-### 4.3 `relationships`
+### 4.4 `relationships`
 
 Tracks connections between characters.
 
@@ -282,6 +441,10 @@ CREATE TABLE relationships (
   description     TEXT,
   sentiment       VARCHAR(50) DEFAULT 'neutral',
   source_turn_id  UUID REFERENCES turns(id) ON DELETE SET NULL,
+  source_ids      UUID[] DEFAULT '{}',
+  canon_status    VARCHAR(50) NOT NULL DEFAULT 'soft',
+  confidence      VARCHAR(50) NOT NULL DEFAULT 'medium',
+  metadata        JSONB DEFAULT '{}',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -291,6 +454,7 @@ CREATE TABLE relationships (
 CREATE INDEX idx_relationships_world ON relationships(world_id);
 CREATE INDEX idx_relationships_char_a ON relationships(character_a_id);
 CREATE INDEX idx_relationships_char_b ON relationships(character_b_id);
+CREATE INDEX idx_relationships_world_canon ON relationships(world_id, canon_status);
 CREATE UNIQUE INDEX idx_relationships_pair ON relationships(
   world_id,
   LEAST(character_a_id, character_b_id),
@@ -303,9 +467,11 @@ CREATE UNIQUE INDEX idx_relationships_pair ON relationships(
 
 **`sentiment`**: `hostile`, `negative`, `neutral`, `positive`, `devoted`. Tracked over time as relationships evolve.
 
+**NPC knowledge**: Use `metadata` to track what one character believes about another, separate from objective truth. Examples: `known_identity`, `known_titles`, `mistaken_beliefs`, `last_interaction_label`, and `trusts_claimed_rank`. This lets NPCs react differently without letting their assumptions overwrite the canonical character record.
+
 **Unique pair constraint**: The `LEAST/GREATEST` trick ensures only one relationship row exists per pair per type, regardless of insertion order (A→B and B→A are the same relationship).
 
-### 4.4 `story_threads`
+### 4.5 `story_threads`
 
 Tracks open narrative threads (quests, mysteries, conflicts).
 
@@ -318,20 +484,24 @@ CREATE TABLE story_threads (
   status          VARCHAR(50) NOT NULL DEFAULT 'active',
   priority        VARCHAR(50) NOT NULL DEFAULT 'normal',
   source_turn_id  UUID REFERENCES turns(id) ON DELETE SET NULL,
+  source_ids      UUID[] DEFAULT '{}',
   resolved_turn_id UUID REFERENCES turns(id) ON DELETE SET NULL,
+  canon_status    VARCHAR(50) NOT NULL DEFAULT 'soft',
+  confidence      VARCHAR(50) NOT NULL DEFAULT 'medium',
   metadata        JSONB DEFAULT '{}',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_threads_world_status ON story_threads(world_id, status);
+CREATE INDEX idx_threads_world_canon ON story_threads(world_id, canon_status);
 ```
 
 **Status values**: `active` (ongoing), `resolved` (concluded), `abandoned` (dropped), `dormant` (paused).
 
 **Priority**: `background` (ambient world events), `normal` (standard plot threads), `urgent` (immediate narrative tension).
 
-### 4.5 `memory_chunks`
+### 4.6 `memory_chunks`
 
 Chunked, embedded summaries for semantic retrieval. These are NOT raw turns — they are processed, condensed memory units created by the Archivist.
 
@@ -342,24 +512,30 @@ CREATE TABLE memory_chunks (
   content       TEXT NOT NULL,
   chunk_type    VARCHAR(50) NOT NULL,
   source_turn_ids UUID[] DEFAULT '{}',
+  source_ids    UUID[] DEFAULT '{}',
+  canon_status  VARCHAR(50) NOT NULL DEFAULT 'soft',
+  confidence    VARCHAR(50) NOT NULL DEFAULT 'medium',
   embedding     vector(1024),
   metadata      JSONB DEFAULT '{}',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_memory_world_type ON memory_chunks(world_id, chunk_type);
+CREATE INDEX idx_memory_world_canon ON memory_chunks(world_id, canon_status);
 CREATE INDEX idx_memory_embedding ON memory_chunks
   USING hnsw (embedding vector_cosine_ops)
   WITH (m = 16, ef_construction = 64);
 ```
 
-**`chunk_type`**: `scene_summary` (condensed scene), `character_moment` (significant character event), `world_change` (world state change), `dialogue_highlight` (important conversation).
+**`chunk_type`**: `scene_summary` (condensed scene), `character_moment` (significant character event), `relationship_moment` (emotional or social shift), `tactical_state_delta` (objective/threat/resource/casualty update), `world_change` (world state change), `dialogue_highlight` (important conversation).
 
 **`source_turn_ids`**: Array of turn UUIDs that contributed to this memory chunk. Enables provenance tracking without a join table.
 
 **HNSW index parameters**: `m = 16` (connections per node, balances recall vs. build time), `ef_construction = 64` (build-time accuracy). These are good defaults for collections up to ~100K vectors.
 
-## 5. Phase 4 Tables (Multiplayer)
+**`source_ids`**: Source document UUIDs that support the memory chunk. Most chunks also keep `source_turn_ids` because turn provenance is frequently needed in the play UI.
+
+## 5. Phase 5 Tables (Multiplayer)
 
 ### 5.1 `users`
 
@@ -444,28 +620,34 @@ Phase 1 (MVP):
   0003_create_scenes.sql
   0004_create_turns.sql
 
-Phase 2 (Knowledge):
-  0005_create_wiki_pages.sql          (includes pgvector index)
-  0006_create_timeline_events.sql
-  0007_create_relationships.sql
-  0008_create_story_threads.sql
-  0009_create_memory_chunks.sql       (includes pgvector index)
+Phase 2 (World Seeding + LLM Wiki Compiler):
+  0005_create_world_sources.sql
+  0006_create_wiki_pages.sql          (includes pgvector index)
+  0007_create_timeline_events.sql
+  0008_create_relationships.sql
+  0009_create_story_threads.sql
+  0010_create_memory_chunks.sql       (includes pgvector index)
 
-Phase 3 (Agent Orchestra):
+Phase 3 (Memory + Knowledge):
+  (no new tables — live Archivist extraction, embeddings, context retrieval)
+
+Phase 4 (Agent Orchestra):
   (no new tables — scene status changes, thread linking)
-  0010_add_scene_parallel_support.sql (relax unique constraint)
+  0011_add_scene_parallel_support.sql (relax unique constraint)
 
-Phase 4 (Multiplayer):
-  0011_create_users.sql
-  0012_create_player_characters.sql
-  0013_add_world_owner.sql            (add owner_user_id to worlds)
-  0014_create_notifications.sql
-  0015_add_character_controller.sql   (add controller_type to characters)
+Phase 5 (Multiplayer):
+  0012_create_users.sql
+  0013_create_player_characters.sql
+  0014_add_world_owner.sql            (add owner_user_id to worlds)
+  0015_create_notifications.sql
+  0016_add_character_controller.sql   (add controller_type to characters)
 ```
 
-### Key Constraint: Phase 1 Schema Is Additive-Only
+### Key Constraint: Phase 1 Migrations Are Immutable
 
-Phase 2+ adds tables — it does not modify Phase 1 tables. The JSONB columns (`setting_details`, `traits`, `metadata`) absorb any flexible data needed before the next migration. This means Phase 1 migrations never need to be altered retroactively.
+Once a migration has been committed or deployed, never edit it in place. Later phases may add new tables, add columns, or relax constraints through forward migrations, but Phase 1 migration files themselves remain immutable.
+
+The JSONB columns (`setting_details`, `traits`, `metadata`) absorb flexible data during early development so most Phase 2 additions can be modeled as new tables. Known later exceptions are explicit forward migrations, such as relaxing the scene-number constraint for parallel scenes and adding ownership/controller fields for multiplayer.
 
 ## 7. Query Patterns
 
@@ -490,21 +672,23 @@ LIMIT 1;
 -- Uses idx_scenes_world_id
 ```
 
-**Semantic memory retrieval** (Phase 2+):
+**Semantic memory retrieval** (Phase 3+):
 ```sql
 SELECT id, content, chunk_type, 1 - (embedding <=> $1) AS similarity
 FROM memory_chunks
 WHERE world_id = $2
+  AND canon_status IN ('hard', 'soft')
 ORDER BY embedding <=> $1
 LIMIT $3;
 -- Uses idx_memory_embedding (HNSW)
 ```
 
-**Wiki search** (Phase 2+):
+**Wiki search** (Phase 3+):
 ```sql
-SELECT id, title, content, category, 1 - (embedding <=> $1) AS similarity
+SELECT id, title, content, category, canon_status, confidence, 1 - (embedding <=> $1) AS similarity
 FROM wiki_pages
 WHERE world_id = $2
+  AND canon_status IN ('hard', 'soft', 'rumor', 'myth', 'disputed')
 ORDER BY embedding <=> $1
 LIMIT $3;
 -- Uses idx_wiki_embedding (HNSW)
@@ -519,7 +703,20 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 ```
 
-Turn number is determined by `SELECT COALESCE(MAX(turn_number), 0) + 1 FROM turns WHERE scene_id = $1`. In Phase 4 (multiplayer), this becomes a serializable transaction to prevent race conditions.
+Turn number is determined inside the same transaction as the insert. Even in Phase 1, two browser tabs or a double-submit can race, so turn insertion must lock the scene's turn-number sequence before calculating the next value.
+
+Recommended Phase 1 approach:
+```sql
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtext($1::text)); -- scene_id
+SELECT COALESCE(MAX(turn_number), 0) + 1 FROM turns WHERE scene_id = $1;
+INSERT INTO turns (scene_id, world_id, character_id, type, content, turn_number, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+COMMIT;
+```
+
+Phase 5 can keep this strategy or move to serializable transactions if multiplayer turn ordering needs broader world-level locking.
 
 ## 8. Data Lifecycle
 
@@ -530,8 +727,13 @@ Turn number is determined by `SELECT COALESCE(MAX(turn_number), 0) + 1 FROM turn
 - **Archived**: not individually — world archival covers this
 
 ### Wiki Pages
-- **Created**: by Archivist on first mention
-- **Modified**: by Archivist when new information contradicts or extends existing entry
+- **Created**: by the wiki compiler during seeding, or by Archivist on first mention during play
+- **Modified**: by the compiler or Archivist when new information contradicts or extends existing entry
+- **Deleted**: only on world deletion (CASCADE)
+
+### World Sources
+- **Created**: during world seeding, imports, play-turn provenance capture, or compaction
+- **Modified**: never (append-only)
 - **Deleted**: only on world deletion (CASCADE)
 
 ### Memory Chunks
@@ -543,6 +745,7 @@ Turn number is determined by `SELECT COALESCE(MAX(turn_number), 0) + 1 FROM turn
 
 For a single-player world with ~100 turns per session:
 - `turns`: ~100 rows/session, ~1KB/row → ~100KB/session
+- `world_sources`: ~5-15 seeding rows plus optional play/source references → ~50-200KB initial seed
 - `wiki_pages`: ~10-20 pages after first session, growing slowly → ~50KB
 - `memory_chunks`: ~5-10 per scene → ~20KB/session
 - `timeline_events`: ~5-10 per session → ~10KB/session

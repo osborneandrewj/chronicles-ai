@@ -5,12 +5,12 @@ AI-powered multiplayer interactive novel engine. Persistent world, multi-agent n
 ## Tech Stack
 - **Framework**: Next.js 15 App Router + TypeScript
 - **Styling**: Tailwind CSS + shadcn/ui
-- **LLM**: Vercel AI SDK (`ai` + `@ai-sdk/anthropic`) — Claude Sonnet 4 (narrator), Haiku (archivist/conductor)
+- **LLM**: Vercel AI SDK (`ai` + `@ai-sdk/react` + `@ai-sdk/anthropic`) — Claude Sonnet 4 (narrator/seeder/actor), Haiku (compiler/linter/archivist/conductor)
 - **Database**: PostgreSQL 17 + pgvector (Docker Compose for local dev)
 - **ORM**: Drizzle ORM + `postgres` (postgres-js driver)
 - **Validation**: Zod
 - **Embeddings**: Voyage AI (Phase 2+)
-- **Auth**: NextAuth.js (Phase 4+)
+- **Auth**: NextAuth.js (Phase 5+)
 
 ## Commands
 - `docker compose up -d` — start Postgres
@@ -41,7 +41,7 @@ src/
 │   ├── story/               # StoryFeed, StoryInput, TurnEntry, StreamingTurn
 │   └── world/               # WorldCard, CreateWorldForm
 ├── lib/
-│   ├── ai/                  # Agent system: narrator, archivist, conductor, actor
+│   ├── ai/                  # Agent system: narrator, seeder, compiler, linter, archivist, conductor, actor
 │   │   ├── context-assembler.ts  # Builds LLM context from DB (token-budgeted)
 │   │   └── prompts.ts            # Loads prompt templates from prompts/
 │   ├── db/
@@ -57,6 +57,7 @@ docs/                        # Architecture and design docs
 
 ## Database
 - 4 core tables (Phase 1): `worlds`, `characters`, `scenes`, `turns`
+- Seeding/knowledge tables (Phase 2+): `world_sources`, `wiki_pages`, `timeline_events`, `relationships`, `story_threads`, `memory_chunks`
 - Turns are append-only — never modified after creation
 - UUIDs for all primary keys
 - JSONB columns for flexible data (`setting_details`, `traits`, `metadata`)
@@ -65,9 +66,12 @@ docs/                        # Architecture and design docs
 
 ## AI Agent System
 - **Narrator** (Sonnet): generates story prose, streamed via SSE
-- **Archivist** (Haiku): extracts structured data via `generateObject()` with Zod schemas
-- **Conductor** (Haiku): pacing/scene decisions — Phase 3
-- **Actor** (Sonnet): NPC dialogue/actions — Phase 3
+- **World Seeder** (Sonnet): creates seed packet, factions, NPCs, mysteries — Phase 2
+- **Wiki Compiler** (Haiku): compiles immutable sources into wiki/timeline candidates — Phase 2
+- **World Linter** (Haiku): flags contradictions and missing provenance — Phase 2
+- **Archivist** (Haiku): extracts structured data, emotional beats, tactical deltas, and scene summaries via `generateObject()` with Zod schemas — Phase 3
+- **Conductor** (Haiku): pacing/scene decisions — Phase 4
+- **Actor** (Sonnet): NPC dialogue/actions — Phase 4
 - Prompt templates live in `prompts/*.md` — git-diffable, loaded at runtime
 - Context assembler enforces token budget (~8K tokens max per narrator call)
 - Each agent sees only the context it needs — never share full prompts between agents
@@ -76,6 +80,7 @@ docs/                        # Architecture and design docs
 - The LLM does not remember — the system decides what it remembers and injects into context
 - Never dump full conversation history into a prompt
 - Separate creative output (narrator) from factual extraction (archivist)
+- Keep tactical scene state, content boundaries, and action resolution in structured authoritative state, not only in prose
 - Player actions are persisted BEFORE streaming starts; narrator responses AFTER stream completes
 - Treat LLM output as untrusted — sanitize before rendering
 

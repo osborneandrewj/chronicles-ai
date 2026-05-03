@@ -25,7 +25,7 @@ The core endpoint. Accepts a player action and returns a streamed narrator respo
 }
 ```
 
-**Response**: SSE stream (Vercel AI SDK data stream format)
+**Response**: SSE stream (Vercel AI SDK UI message stream format)
 
 The stream emits:
 - Text delta tokens as they generate
@@ -53,7 +53,7 @@ The stream emits:
 
 **Rate Limiting**: Simple in-memory counter per world ID. 30 turns per minute. Resets every 60 seconds. No Redis needed for single-user MVP.
 
-### 2.2 `POST /api/voice/token` (Phase 5)
+### 2.2 `POST /api/voice/token` (Phase 6)
 
 Returns a temporary token for the TTS service. Deferred.
 
@@ -89,6 +89,13 @@ const CreateWorldSchema = z.object({
   premise: z.string().min(10).max(5000),
   genre: z.string().max(100).optional(),
   tone: z.string().max(100).optional(),
+  contentBoundaries: z.object({
+    rating: z.string().max(100).optional(),
+    allowedIntensity: z.array(z.string().max(255)).default([]),
+    restrictedContent: z.array(z.string().max(255)).default([]),
+    fadeToBlack: z.array(z.string().max(255)).default([]),
+    toneNotes: z.string().max(1000).optional(),
+  }).optional(),
   characterName: z.string().min(1).max(255),
   characterDescription: z.string().max(2000).optional(),
 })
@@ -104,7 +111,7 @@ const CreateWorldSchema = z.object({
 
 #### `updateWorld(worldId, formData)`
 
-Updates world name, premise, genre, tone, or setting_details.
+Updates world name, premise, genre, tone, content boundaries, or setting_details.
 
 #### `archiveWorld(worldId)`
 
@@ -166,7 +173,11 @@ Creates a new scene and marks the previous active scene as completed.
 
 #### `retryLastTurn(worldId, sceneId)`
 
-Deletes the last narrator response turn (if it has `metadata.stream_error = true`) and resubmits the player's action. Used by the "Retry" button on stream failures.
+Finds the last failed narrator response turn (where `metadata.stream_error = true`) and resubmits the preceding player action. Used by the "Retry" button on stream failures.
+
+Retry preserves the append-only turn log. It does not delete or mutate the failed narrator turn. Instead it appends:
+1. A `system_event` turn noting the retry attempt and failed turn ID
+2. A new `narrator_response` turn with fresh metadata
 
 ### 3.3 Character Actions (Phase 1+)
 
@@ -180,7 +191,29 @@ Updates character name, description, or traits.
 
 Returns full character details.
 
-### 3.4 Wiki Actions (Phase 2)
+### 3.4 Seeding Actions (Phase 2)
+
+File: `src/lib/actions/seeding-actions.ts`
+
+#### `seedWorld(worldId, options)`
+
+Runs the World Seeder, optional simulated expeditions, Wiki Compiler, and World Linter. Persists all generated material as immutable `world_sources` before compiling candidate knowledge.
+
+Options may include imported prior adventure logs. These are persisted as `world_sources.source_type = "prior_adventure_log"` and compiled into wiki, timeline, relationship, thread, emotional-event, tactical-state, and memory-summary candidates with provenance.
+
+#### `listWorldSources(worldId, type?)`
+
+Returns source documents for provenance and review.
+
+#### `reviewCompiledKnowledge(worldId, decisions)`
+
+Accepts, rejects, or changes canon status for compiled wiki/timeline/relationship/thread candidates.
+
+#### `getLintReport(worldId)`
+
+Returns current duplicate, contradiction, missing-source, and timeline-conflict findings.
+
+### 3.5 Wiki Actions (Phase 2+)
 
 File: `src/lib/actions/wiki-actions.ts`
 
@@ -196,7 +229,7 @@ Returns full wiki page content.
 
 Semantic search over wiki pages using vector similarity.
 
-### 3.5 Timeline Actions (Phase 2)
+### 3.6 Timeline Actions (Phase 2+)
 
 File: `src/lib/actions/timeline-actions.ts`
 
@@ -204,7 +237,7 @@ File: `src/lib/actions/timeline-actions.ts`
 
 Returns timeline events, optionally filtered by significance level.
 
-### 3.6 Multiplayer Actions (Phase 4)
+### 3.7 Multiplayer Actions (Phase 5)
 
 File: `src/lib/actions/multiplayer-actions.ts`
 
@@ -263,9 +296,40 @@ Field-level errors are used for form validation:
 }
 ```
 
-## 6. Data Streaming Protocol
+## 6. Security and Safety Requirements
 
-The narrator streaming endpoint uses the Vercel AI SDK's data stream protocol. The client consumes it via the `useChat()` hook, which handles:
+### Relationship Checks
+
+Every Route Handler and Server Action that receives IDs must verify ownership and relationships before mutating data:
+
+- `sceneId` must belong to `worldId`
+- `characterId` must belong to `worldId`
+- Phase 1: `characterId` must be the world's player character
+- Phase 5+: authenticated user must own or be invited to the world
+
+Do not trust client-provided IDs, even before authentication exists.
+
+### LLM Output Rendering
+
+Narrator, World Seeder, Wiki Compiler, World Linter, Archivist, Conductor, and Actor outputs are untrusted input. Render story text as escaped plain text by default. If markdown is added later, use a sanitizer and an allowlist; never render model output with raw HTML.
+
+### Prompt Injection Boundaries
+
+Player input is always treated as an in-story action. It must never be interpolated into system prompts as instructions, loaded as a prompt template, or used to select files. The narrator prompt should explicitly ignore out-of-character commands from player text.
+
+### Rate Limiting
+
+Phase 1 uses an in-memory per-world limiter because the app is single-process local-first. Phase 5+ must replace or supplement it with authenticated per-user and per-world limits that work across deployment instances.
+
+## 7. Data Streaming Protocol
+
+The narrator streaming endpoint targets the current Vercel AI SDK UI message stream protocol. Pin the AI SDK major version during implementation and verify these APIs against the installed version before writing the route handler.
+
+**Default implementation target**: AI SDK 5+ using `@ai-sdk/react` `useChat()` with explicit input state in the client component, and `streamText().toUIMessageStreamResponse()` or `createUIMessageStreamResponse()` on the server.
+
+Do not use `StreamData`; it is deprecated/removed in current AI SDK versions. Custom metadata should be sent as UI message metadata or custom data parts.
+
+The client consumes the stream via `useChat()`, which handles:
 
 - Token-by-token text accumulation
 - Loading state management (`isLoading`)
@@ -274,29 +338,54 @@ The narrator streaming endpoint uses the Vercel AI SDK's data stream protocol. T
 
 ### Custom Stream Metadata
 
-The `onFinish` callback can send metadata alongside the stream using `StreamData`:
+The stream can include custom data parts for persisted turn IDs and token usage:
 
 ```typescript
 // Server side
-const data = new StreamData()
-data.append({
-  turnId: newTurnId,
-  tokenUsage: { prompt: usage.promptTokens, completion: usage.completionTokens },
-})
-data.close()
+const stream = createUIMessageStream({
+  execute({ writer }) {
+    const result = streamText({
+      model,
+      messages,
+      onFinish: async ({ text, usage }) => {
+        const turn = await saveNarratorTurn({ text, usage })
 
-return result.toDataStreamResponse({ data })
+        writer.write({
+          type: 'data-turn-metadata',
+          id: turn.id,
+          data: {
+            turnId: turn.id,
+            tokenUsage: {
+              prompt: usage.promptTokens,
+              completion: usage.completionTokens,
+            },
+          },
+        })
+      },
+    })
+
+    writer.merge(result.toUIMessageStream())
+  },
+})
+
+return createUIMessageStreamResponse({ stream })
 ```
 
 ```typescript
 // Client side
-const { messages, data } = useChat({ api: '/api/story/stream' })
-// data contains the metadata appended by the server
+const { messages, sendMessage } = useChat({
+  api: '/api/story/stream',
+  onData(dataPart) {
+    if (dataPart.type === 'data-turn-metadata') {
+      // Update local UI with persisted turn ID and usage.
+    }
+  },
+})
 ```
 
 This allows the client to display token usage, link to the persisted turn, or trigger UI updates after the stream completes.
 
-## 7. Endpoint Summary by Phase
+## 8. Endpoint Summary by Phase
 
 ### Phase 1
 | Type | Path/Function | Purpose |
@@ -313,6 +402,10 @@ This allows the client to display token usage, link to the persisted turn, or tr
 ### Phase 2
 | Type | Path/Function | Purpose |
 |------|--------------|---------|
+| Server Action | `seedWorld()` | Generate seed packet, expeditions, compiled knowledge, and lint report |
+| Server Action | `listWorldSources()` | Browse immutable source documents |
+| Server Action | `reviewCompiledKnowledge()` | Accept/reject/change canon status |
+| Server Action | `getLintReport()` | Review world consistency issues |
 | Server Action | `listWikiPages()` | Browse wiki |
 | Server Action | `getWikiPage()` | Read wiki page |
 | Server Action | `searchWiki()` | Semantic wiki search |
@@ -321,10 +414,14 @@ This allows the client to display token usage, link to the persisted turn, or tr
 ### Phase 3
 | Type | Path/Function | Purpose |
 |------|--------------|---------|
-| Server Action | `createScene()` | Manual scene transition |
 | Server Action | `listThreads()` | View story threads |
 
 ### Phase 4
+| Type | Path/Function | Purpose |
+|------|--------------|---------|
+| Server Action | `createScene()` | Manual scene transition |
+
+### Phase 5
 | Type | Path/Function | Purpose |
 |------|--------------|---------|
 | Server Action | `invitePlayer()` | Send world invite |

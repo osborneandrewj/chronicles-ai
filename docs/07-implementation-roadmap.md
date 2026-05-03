@@ -2,9 +2,11 @@
 
 ## Overview
 
-Five phases, each delivering independent value. Phase 1 is the MVP — a playable single-player story engine. Each subsequent phase adds capabilities without restructuring previous work.
+Six phases, each delivering independent value. Phase 1 is the MVP — a playable single-player story engine. Each subsequent phase adds capabilities without restructuring previous work.
 
 **Rule**: Do not start a new phase until the current phase is complete, tested, and played through at least 3 complete story sessions.
+
+**SDK rule**: Pin the AI SDK major version before implementing streaming. The default target is AI SDK 5+ UI message streams; if implementation chooses AI SDK 4, update `docs/05-api-design.md` before coding.
 
 ---
 
@@ -21,7 +23,8 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 **Deliverable**: Next.js project builds and runs with Tailwind + shadcn/ui.
 
 - [ ] Initialize Next.js 15 with App Router, TypeScript, Tailwind, ESLint
-- [ ] Install dependencies: `ai`, `@ai-sdk/anthropic`, `drizzle-orm`, `postgres`, `drizzle-kit`, `zod`, `@tanstack/react-query`
+- [ ] Install dependencies: `ai`, `@ai-sdk/react`, `@ai-sdk/anthropic`, `drizzle-orm`, `postgres`, `drizzle-kit`, `zod`, `@tanstack/react-query`
+- [ ] Pin the chosen AI SDK major version in `package.json` and confirm streaming APIs match `docs/05-api-design.md`
 - [ ] Initialize shadcn/ui: `button`, `input`, `textarea`, `card`, `badge`, `select`, `scroll-area`, `separator`
 - [ ] Create root layout with font loading and global CSS
 - [ ] Create `.env.example` with documented variables
@@ -53,6 +56,11 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 - [ ] `src/lib/db/queries/scenes.ts`: `createScene()`, `getActiveScene()`, `completeScene()`
 - [ ] `src/lib/db/queries/turns.ts`: `createTurn()`, `getRecentTurns()`, `getTurnCount()`, `getNextTurnNumber()`
 - [ ] `src/lib/db/queries/characters.ts`: `createCharacter()`, `getCharacter()`, `getPlayerCharacter()`
+- [ ] Turn creation uses a transaction-safe sequence strategy (advisory lock or equivalent)
+- [ ] World query helpers expose `setting_details.clock` and active deadlines
+- [ ] World query helpers expose `setting_details.content_boundaries` as authoritative agent constraints
+- [ ] Character query helpers expose `traits.location`, `traits.identity`, and `traits.presentation`
+- [ ] Scene query helpers expose `scenes.metadata.tactical_state` for objectives, threats, allies, casualties, resources, clocks, and extraction status
 
 **Acceptance criteria**: Each query function is typed, tested against the running database, and handles not-found cases.
 
@@ -76,10 +84,12 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 - [ ] `prompts/narrator-system.md`: System prompt template
 - [ ] `src/lib/ai/prompts.ts`: Prompt template loader with variable interpolation
 - [ ] `src/lib/ai/context-assembler.ts`: Assembles context from DB state (token-budgeted)
+- [ ] `src/lib/ai/authoritative-state.ts`: Builds compact time, locality, identity, presentation, visible NPC, tactical state, and constraint block
+- [ ] Lightweight action classifier: `stance` (`attempt`, `strong_intent`, `asserted_outcome`, `unclear`) plus `input_mode` (`tactical_intent`, `asserted_outcome`, `cinematic_framing`, `emotional_interiority`, `meta_or_unclear`)
 - [ ] `src/lib/ai/narrator.ts`: Calls `streamText()` with assembled context
 - [ ] Token estimation function (`estimateTokens()`)
 
-**Acceptance criteria**: Given a world, scene, character, and recent turns, the narrator returns a streamed prose response. Context stays within token budget. Prompt template loads correctly with interpolated variables.
+**Acceptance criteria**: Given a world, scene, character, authoritative state, and recent turns, the narrator returns a streamed prose response. Context stays within token budget. Prompt template loads correctly with interpolated variables. The narrator preserves current location, time pressure, tactical state, character identity, content boundaries, and explicit negative facts even when older prose falls out of context.
 
 ### Step 1.6: Streaming Endpoint
 
@@ -90,8 +100,10 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 - [ ] Persist player turn BEFORE streaming starts
 - [ ] Persist narrator turn AFTER stream completes (`onFinish`)
 - [ ] Token usage metadata saved in `turns.metadata`
+- [ ] If action stance is `asserted_outcome`, persist `turns.metadata.resolution` with the accepted, modified, or rejected outcome and classified `input_mode`
 - [ ] Basic rate limiting (30 turns/minute/world)
 - [ ] Error handling: partial content saved on stream failure
+- [ ] Retry behavior appends a `system_event` and fresh narrator turn; no failed turns are deleted
 
 **Acceptance criteria**: POST to `/api/story/stream` with valid payload returns SSE stream. Player turn and narrator turn both appear in DB after completion. Token counts in metadata.
 
@@ -120,12 +132,29 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 - [ ] World dashboard page at `/worlds/[worldId]`
 - [ ] Custom error classes at `src/lib/utils/errors.ts`
 - [ ] Input validation (empty, too long, whitespace-only)
+- [ ] Sanitize or safely render narrator output; never render LLM text as trusted HTML
+- [ ] Reject out-of-world route access by verifying world, scene, and character relationships
 
 **Acceptance criteria**: All error cases handled gracefully. Mobile layout works. Page refresh preserves state. No unhandled errors in console.
+
+### Phase 1 Test Requirements
+
+- [ ] DB integration tests cover core query functions and transaction-safe turn numbering
+- [ ] Server Action tests cover Zod validation and create-world transaction behavior
+- [ ] Streaming route test covers validation, player-turn persistence, narrator-turn persistence, and error metadata
+- [ ] Context assembler tests cover token budget limits and recent-turn ordering
+- [ ] Authoritative state tests cover time/deadline injection, player location, identity vs. presentation, and `not_facts`
+- [ ] Action classifier tests cover "I attempt to strike", "I strike", "I cut off the enemy's leg", "everything changes in a burst of light", and "I am devastated"
+- [ ] Tactical state tests cover objective status, wounded allies, casualties, resources, and extraction clocks in the authoritative state block
+- [ ] Content boundary tests verify restricted content is passed into agent context as authoritative state
+- [ ] Playwright smoke test covers create world -> submit action -> streamed response -> refresh persistence
+- [ ] Accessibility smoke test verifies keyboard submission and story-feed live region behavior
 
 ### Phase 1 Completion Criteria
 
 - [ ] `docker compose up` → `npm run dev` → create world → play 20+ turns
+- [ ] `npm run lint`, `npm run type-check`, and `npm test` pass
+- [ ] Playwright smoke test passes locally
 - [ ] Refresh browser — all turns persist
 - [ ] Mobile layout is usable
 - [ ] Token usage tracked in DB
@@ -134,152 +163,223 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 
 ---
 
-## Phase 2: Memory + Knowledge System
+## Phase 2: World Seeding + LLM Wiki Compiler
+
+**Goal**: A new world can begin with usable depth before the first player turn. User seed text and optional simulated expedition logs are treated as immutable source material, then compiled into a persistent wiki, timeline, relationships, and unresolved story threads.
+
+**New agents**: World Seeder, Wiki Compiler, World Linter
+**New tables**: world_sources, wiki_pages, timeline_events, relationships, story_threads, memory_chunks
+**New dependencies**: `voyageai` (embedding client)
+
+### Step 2.1: Source Documents + Canon Model
+
+- [ ] `world_sources` schema + migration for immutable seed text, generated seed packets, simulated expedition logs, prior adventure logs, and imported lore
+- [ ] Add canon metadata to compiled knowledge: `canon_status`, `confidence`, `source_ids`, `last_verified_at`
+- [ ] Query functions for creating/listing source documents and linking sources to compiled knowledge
+- [ ] Define source types: `user_seed`, `seed_packet`, `expedition_log`, `prior_adventure_log`, `uploaded_lore`, `play_turn`, `system_summary`
+
+### Step 2.2: World Seeder Agent
+
+- [ ] `prompts/world-seeder-system.md`: System prompt template
+- [ ] Zod schema for seed packet output
+- [ ] `src/lib/ai/world-seeder.ts`: Calls `generateObject()` with Sonnet
+- [ ] Seed packet includes world bible, starter locations, factions, NPCs, timeline anchors, mysteries, and initial story threads
+- [ ] Persist the seed packet as a `world_sources` row before compiling it into knowledge tables
+
+### Step 2.3: Simulated Expeditions
+
+- [ ] Generate 3-8 scout or historical POV characters for optional world-depth passes
+- [ ] Each expedition creates a short adventure log focused on one region, faction, conflict, or rumor
+- [ ] Persist each expedition log as immutable `world_sources` material
+- [ ] Hard cap expedition count, token budget, and total estimated cost per seeding run
+- [ ] Expeditions create history, pressure, rumors, and contradictions; they must not resolve the world's central playable conflict
+
+### Step 2.4: LLM Wiki Compiler
+
+- [ ] `prompts/wiki-compiler-system.md`: Compiler prompt for turning sources into wiki/timeline/relationship/thread candidates
+- [ ] Compiler uses the Archivist output schema shape where possible
+- [ ] Store compiled entries as `soft` canon by default unless explicitly promoted
+- [ ] Preserve source provenance for every compiled wiki page, timeline event, relationship, thread, and memory chunk
+- [ ] Extract emotional events, relationship moments, tactical state deltas, and scene summaries from prior adventure logs where supported by source text
+- [ ] Embed compiled wiki pages and memory chunks
+
+### Step 2.5: World Linter Agent
+
+- [ ] `prompts/world-linter-system.md`: System prompt template
+- [ ] Zod schema for contradiction, duplicate, stale fact, and timeline issue reports
+- [ ] `src/lib/ai/world-linter.ts`: Calls `generateObject()` with Haiku
+- [ ] Linter flags conflicts without deleting or overwriting source material
+- [ ] UI/API path to mark linter findings as accepted, ignored, or converted into intentional mystery
+
+### Step 2.6: Seeding Review UI
+
+- [ ] Seeding screen in world creation flow with progressive status for seed packet, expeditions, compiler, and linter
+- [ ] Review queue for accepting, rejecting, or recategorizing generated knowledge
+- [ ] Canon controls: `hard`, `soft`, `rumor`, `myth`, `false`, `disputed`
+- [ ] First play scene is generated only after review or explicit "accept all soft canon"
+
+### Phase 2 Completion Criteria
+
+- [ ] Creating a seeded world produces 10+ wiki page candidates, 5+ timeline anchors, 3+ factions, 5+ NPCs, and 3+ unresolved story threads
+- [ ] Every compiled knowledge entry links back to one or more source documents
+- [ ] Simulated expeditions enrich the setting without solving the player's main conflict
+- [ ] Linter flags at least duplicate-title and contradiction cases in tests
+- [ ] Narrator can start play using accepted seeded knowledge
+
+---
+
+## Phase 3: Memory + Knowledge System
 
 **Goal**: The world builds a persistent knowledge base. Wiki pages, timeline, and relationships are auto-extracted from the narrative. Semantic search enables long-term memory.
 
 **New agents**: Archivist
-**New tables**: wiki_pages, timeline_events, relationships, story_threads, memory_chunks
-**New dependencies**: `voyageai` (embedding client)
+**New tables**: none if Phase 2 is complete
+**New dependencies**: none if Phase 2 is complete
 
-### Step 2.1: Archivist Agent
+### Step 3.1: Archivist Agent
 
 - [ ] `prompts/archivist-system.md`: System prompt template
 - [ ] Zod schema for Archivist structured output
 - [ ] `src/lib/ai/archivist.ts`: Calls `generateObject()` with Haiku
 - [ ] Async execution after narrator turn (non-blocking)
 - [ ] Retry logic (up to 2 retries on schema validation failure)
+- [ ] Persist player/narrator turns as `play_turn` source documents or source references for provenance
+- [ ] Extract emotional events, relationship moments, tactical state deltas, and scene-boundary summaries
+- [ ] Merge tactical state deltas into `scenes.metadata.tactical_state` through deterministic application code
 
-### Step 2.2: Knowledge Tables + Migrations
+### Step 3.2: Knowledge Table Refinement
 
-- [ ] `wiki_pages` schema + migration
-- [ ] `timeline_events` schema + migration
-- [ ] `relationships` schema + migration
-- [ ] `story_threads` schema + migration
-- [ ] `memory_chunks` schema + migration (with vector column)
-- [ ] HNSW indexes on vector columns
-- [ ] Query functions for all new tables
+- [ ] Confirm Phase 2 knowledge tables support live play extraction
+- [ ] Add any missing query helpers for updating wiki pages, timeline events, relationships, story threads, and memory chunks
+- [ ] Preserve canon status on updates; gameplay can promote facts to `hard` canon when directly established in play
+- [ ] Add query helpers for reading/updating tactical state metadata and scene summaries
 
-### Step 2.3: Embedding Pipeline
+### Step 3.3: Embedding Pipeline
 
-- [ ] Install and configure Voyage AI client
 - [ ] `src/lib/ai/embeddings.ts`: Embed text → vector
 - [ ] Embed memory chunks on creation
 - [ ] Embed wiki pages on creation/update
 - [ ] Vector similarity search functions
 
-### Step 2.4: Enhanced Context Assembly
+### Step 3.4: Enhanced Context Assembly
 
 - [ ] Update context assembler to include retrieved memories
 - [ ] Update context assembler to include relevant wiki pages
 - [ ] Update context assembler to include active threads
 - [ ] Token budget allocation across all source types
 - [ ] Relevance score threshold filtering
+- [ ] Prefer `hard` canon, include `soft` canon sparingly, and label `rumor`/`myth`/`disputed` entries clearly in narrator context
 
-### Step 2.5: Knowledge UI
+### Step 3.5: Knowledge Surface (Deferred/Optional)
 
-- [ ] Sidebar component (desktop: right panel, mobile: bottom tabs)
-- [ ] Wiki panel: list + detail view
-- [ ] Timeline panel: chronological event display
-- [ ] Character panel: character cards with relationship info
-- [ ] Thread panel: active/resolved thread list
+- [ ] Keep the primary play surface conversation/narration-first
+- [ ] Expose wiki, timeline, relationship, thread, and tactical-state data through server actions/query helpers before committing to an always-visible UI
+- [ ] Optional later: add inspectable knowledge/timeline surfaces if playtesting shows they help more than they distract
 
-### Phase 2 Completion Criteria
+### Phase 3 Completion Criteria
 
 - [ ] Archivist extracts structured data after each narrator turn
-- [ ] Wiki pages appear in sidebar after relevant narrative events
+- [ ] Wiki/timeline/relationship/thread data is persisted and queryable after relevant narrative events
 - [ ] Timeline updates with significant events
+- [ ] Scene summaries capture objectives, outcomes, casualties, wounds, resources spent, relationship shifts, and unresolved consequences
+- [ ] Tactical state remains consistent beyond the raw turn window
 - [ ] Semantic search returns relevant memories for player actions
 - [ ] Narrator references facts from 50+ turns ago (beyond raw turn window)
+- [ ] Gameplay-established facts can promote seeded soft canon to hard canon
 
 ---
 
-## Phase 3: Full Agent Orchestra
+## Phase 4: Full Agent Orchestra
 
 **Goal**: The Story Conductor manages pacing and scene transitions. NPCs have their own voice via the Character Actor agent. Story threads are actively tracked.
 
 **New agents**: Story Conductor, Character Actor
 **New tables**: none (schema additions to existing tables)
 
-### Step 3.1: Story Conductor Agent
+### Step 4.1: Story Conductor Agent
 
 - [ ] `prompts/conductor-system.md`: System prompt template
 - [ ] Zod schema for Conductor decision output
 - [ ] `src/lib/ai/conductor.ts`: Calls `generateObject()` with Haiku
 - [ ] Replace hardcoded "always proceed" with conductor decisions
 - [ ] Conductor runs BEFORE narrator in pipeline
+- [ ] Conductor adjudicates asserted outcomes against authoritative state and emits `resolution`
+- [ ] Conductor distinguishes tactical intent, asserted outcomes, cinematic framing, and emotional interiority
+- [ ] Conductor advances or preserves in-world deadlines instead of allowing arbitrary time drift
 
-### Step 3.2: Character Actor Agent
+### Step 4.2: Character Actor Agent
 
 - [ ] `prompts/actor-system.md`: System prompt template
 - [ ] `src/lib/ai/actor.ts`: Calls `streamText()` with Sonnet
 - [ ] NPC action insertion into turn history
 - [ ] Actor triggered by conductor's `npc_interlude` decision
 
-### Step 3.3: Scene Management
+### Step 4.3: Scene Management
 
 - [ ] Automatic scene transitions (conductor-driven)
 - [ ] Scene opening generation (narrator called with scene context)
 - [ ] Scene list UI on world dashboard
 - [ ] Manual scene creation option
 
-### Step 3.4: Story Thread Tracking
+### Step 4.4: Story Thread Tracking
 
 - [ ] Active threads displayed in context to narrator
 - [ ] Thread resolution detection by Archivist
-- [ ] Thread UI in sidebar
+- [ ] Thread data queryable through server actions; visible UI remains optional until conversation-first playtesting says it is needed
 
-### Phase 3 Completion Criteria
+### Phase 4 Completion Criteria
 
 - [ ] Conductor makes scene transition decisions naturally
+- [ ] Player phrasing cannot unilaterally author success in contested actions
+- [ ] Time pressure remains consistent across turns and affects available outcomes
 - [ ] NPCs speak in their own voice (distinct from narrator)
 - [ ] Scene transitions feel organic, not abrupt
 - [ ] Story threads are tracked and resolved
 
 ---
 
-## Phase 4: Multiplayer
+## Phase 5: Multiplayer
 
 **Goal**: Multiple users share a world. AI proxy controls inactive players. Async turn system with notifications.
 
 **New tables**: users, player_characters, notifications
 **New dependencies**: `next-auth` (authentication)
 
-### Step 4.1: Authentication
+### Step 5.1: Authentication
 
 - [ ] NextAuth.js setup (email + OAuth providers)
 - [ ] `users` table + migration
 - [ ] Auth middleware on protected routes
 - [ ] Login/signup pages
 
-### Step 4.2: Multi-User World Sharing
+### Step 5.2: Multi-User World Sharing
 
 - [ ] `player_characters` table + migration
 - [ ] World invitation system
 - [ ] World ownership (creator = owner)
 - [ ] Character creation for new players joining a world
 
-### Step 4.3: AI Proxy System
+### Step 5.3: AI Proxy System
 
 - [ ] Proxy mode settings per player character (manual/soft/full)
 - [ ] Proxy activation logic (timeout-based)
 - [ ] Actor agent with proxy constraints
 - [ ] Proxy action UI indicators
 
-### Step 4.4: Async Turn System
+### Step 5.4: Async Turn System
 
 - [ ] Turn ordering for multiple players
 - [ ] Configurable wait window before proxy activation
 - [ ] Conductor evaluates which player should act next
 
-### Step 4.5: Notifications
+### Step 5.5: Notifications
 
 - [ ] `notifications` table + migration
 - [ ] Real-time notification delivery (SSE)
 - [ ] Notification types: turn waiting, proxy activated, world invite
 - [ ] Notification UI (bell icon, dropdown)
 
-### Phase 4 Completion Criteria
+### Phase 5 Completion Criteria
 
 - [ ] Two users can play in the same world asynchronously
 - [ ] AI proxy takes over after configurable inactivity
@@ -288,39 +388,39 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 
 ---
 
-## Phase 5: Polish + Deploy
+## Phase 6: Polish + Deploy
 
 **Goal**: Production-ready deployment with voice I/O and PWA support.
 
-### Step 5.1: Production Database
+### Step 6.1: Production Database
 
 - [ ] Migrate to Supabase or managed Postgres
 - [ ] Connection pooling setup
 - [ ] Database backup strategy
 - [ ] Environment-specific configuration
 
-### Step 5.2: Voice I/O
+### Step 6.2: Voice I/O
 
 - [ ] TTS integration (ElevenLabs or similar)
 - [ ] Voice output toggle per user
 - [ ] Voice input via Web Speech API (optional)
 - [ ] Audio playback controls
 
-### Step 5.3: PWA
+### Step 6.3: PWA
 
 - [ ] `next-pwa` or manual service worker
 - [ ] Web app manifest
 - [ ] Offline reading mode (cached turns)
 - [ ] Install prompt
 
-### Step 5.4: Performance + Cost Optimization
+### Step 6.4: Performance + Cost Optimization
 
 - [ ] Anthropic prompt caching (`cache_control`) for static system prompts
 - [ ] Cost tracking dashboard (per-world, per-session)
 - [ ] Per-world cost caps with user warnings
 - [ ] Response time monitoring
 
-### Step 5.5: Deployment
+### Step 6.5: Deployment
 
 - [ ] CI/CD pipeline (GitHub Actions)
 - [ ] Staging environment
@@ -328,7 +428,7 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 - [ ] Domain + SSL
 - [ ] Error monitoring (Sentry or similar)
 
-### Phase 5 Completion Criteria
+### Phase 6 Completion Criteria
 
 - [ ] Application accessible via public URL
 - [ ] Voice narration works end-to-end
@@ -341,38 +441,46 @@ Five phases, each delivering independent value. Phase 1 is the MVP — a playabl
 ## Dependency Graph
 
 ```
-Phase 1 ────────────────────────────────────────��────┐
-  1.1 Scaffolding                                     │
-    └──▶ 1.2 Docker + DB                             │
-          └──▶ 1.3 Query Layer                        │
-                ├──▶ 1.4 World CRUD                   │
-                └──▶ 1.5 Narrator Agent               │
-                      └──▶ 1.6 Streaming Endpoint     │
-                            └──▶ 1.7 Story Play UI    │
-                                  └──▶ 1.8 Polish     │
-                                                       │
-Phase 2 ◄──────────────────────────────────────────────┘
-  2.1 Archivist Agent ──────────┐
-  2.2 Knowledge Tables ─────────┼──▶ 2.4 Enhanced Context
-  2.3 Embedding Pipeline ───────┘         │
-                                          └──▶ 2.5 Knowledge UI
+Phase 1 ----------------------------------------------------+
+  1.1 Scaffolding                                          |
+    -> 1.2 Docker + DB                                     |
+         -> 1.3 Query Layer                                |
+              -> 1.4 World CRUD                            |
+              -> 1.5 Narrator Agent                        |
+                   -> 1.6 Streaming Endpoint               |
+                        -> 1.7 Story Play UI               |
+                             -> 1.8 Polish                 |
+                                                            |
+Phase 2 <---------------------------------------------------+
+  2.1 Source Documents ----+
+  2.2 World Seeder --------+--> 2.4 LLM Wiki Compiler
+  2.3 Expeditions ---------+             |
+                                        +--> 2.5 World Linter
+                                        |
+                                        +--> 2.6 Seeding Review UI
 
-Phase 3 ◄──────────────────────────────────────────────
-  3.1 Conductor ──┐
-  3.2 Actor ──────┼──▶ 3.3 Scene Management
-                  │         │
-                  └─────────┼──▶ 3.4 Thread Tracking
+Phase 3
+  3.1 Archivist Agent ----+
+  3.2 Knowledge Refinement +--> 3.4 Enhanced Context
+  3.3 Embedding Pipeline -+             |
+                                        +--> 3.5 Knowledge Surface (optional)
 
-Phase 4 ◄──────────────────────────────────────────────
-  4.1 Auth ──▶ 4.2 Multi-User ──▶ 4.3 Proxy System
-                                        │
-                    4.4 Turn System ◄────┘
-                         │
-                         └──▶ 4.5 Notifications
+Phase 4
+  4.1 Conductor --+
+  4.2 Actor ------+--> 4.3 Scene Management
+                  |             |
+                  +-------------+--> 4.4 Thread Tracking
 
-Phase 5 ◄──────────────────────────────────────────────
-  5.1 Prod DB ──────────┐
-  5.2 Voice ────────────┼──▶ 5.5 Deployment
-  5.3 PWA ──────��───────┤
-  5.4 Cost Optimization ┘
+Phase 5
+  5.1 Auth --> 5.2 Multi-User --> 5.3 Proxy System
+                                        |
+                    5.4 Turn System <---+
+                         |
+                         +--> 5.5 Notifications
+
+Phase 6
+  6.1 Prod DB -----------+
+  6.2 Voice -------------+--> 6.5 Deployment
+  6.3 PWA ---------------+
+  6.4 Cost Optimization -+
 ```

@@ -16,14 +16,17 @@ Events, actions, dialogue — the raw story timeline.
 |--------|---------|-------|
 | Player actions | `turns` table (type: `player_action`) | 1 |
 | Narrator responses | `turns` table (type: `narrator_response`) | 1 |
-| NPC actions | `turns` table (type: `npc_action`) | 3 |
+| NPC actions | `turns` table (type: `npc_action`) | 4 |
+| Source documents | `world_sources` table | 2 |
 | Scene summaries | `memory_chunks` (type: `scene_summary`) | 2 |
-| Character moments | `memory_chunks` (type: `character_moment`) | 2 |
+| Character moments | `memory_chunks` (type: `character_moment`) | 3 |
 | Timeline events | `timeline_events` table | 2 |
 
 **Phase 1 retrieval**: Last N turns from the current scene, ordered by `turn_number DESC`.
 
-**Phase 2+ retrieval**: Vector similarity search over `memory_chunks` embeddings, supplemented by recent raw turns.
+**Phase 2 retrieval**: Seeded memories and wiki pages compiled from source documents.
+
+**Phase 3+ retrieval**: Vector similarity search over `memory_chunks` embeddings, supplemented by recent raw turns.
 
 ### 2.2 Semantic Memory (What Is Known)
 
@@ -33,13 +36,16 @@ Facts about the world — character descriptions, locations, lore, relationships
 |--------|---------|-------|
 | World premise | `worlds.premise` | 1 |
 | Character profiles | `characters` table | 1 |
+| Source documents | `world_sources` table | 2 |
 | Wiki pages | `wiki_pages` table (with embeddings) | 2 |
 | Relationships | `relationships` table | 2 |
 | Story threads | `story_threads` table | 2 |
 
 **Phase 1 retrieval**: Direct database lookups — load world, active scene, player character.
 
-**Phase 2+ retrieval**: Direct lookups + vector similarity search over `wiki_pages` embeddings for contextually relevant knowledge.
+**Phase 2 retrieval**: Direct lookups over compiled seeded wiki/timeline/thread data.
+
+**Phase 3+ retrieval**: Direct lookups + vector similarity search over `wiki_pages` embeddings for contextually relevant knowledge.
 
 ### 2.3 Procedural Memory (How to Behave)
 
@@ -48,11 +54,35 @@ System prompts, agent rules, output format instructions.
 | Source | Storage | Phase |
 |--------|---------|-------|
 | Narrator system prompt | `prompts/narrator-system.md` | 1 |
-| Archivist system prompt | `prompts/archivist-system.md` | 2 |
-| Conductor system prompt | `prompts/conductor-system.md` | 3 |
-| Actor system prompt | `prompts/actor-system.md` | 3 |
+| World Seeder system prompt | `prompts/world-seeder-system.md` | 2 |
+| Wiki Compiler system prompt | `prompts/wiki-compiler-system.md` | 2 |
+| World Linter system prompt | `prompts/world-linter-system.md` | 2 |
+| Archivist system prompt | `prompts/archivist-system.md` | 3 |
+| Conductor system prompt | `prompts/conductor-system.md` | 4 |
+| Actor system prompt | `prompts/actor-system.md` | 4 |
 
 **Retrieval**: Loaded from filesystem at server startup, cached in memory. These are static per deployment — they change only when the developer updates the prompt files.
+
+### 2.4 Authoritative State (What Is True Now)
+
+Some facts are too important to leave to prose memory or vector retrieval. The system must maintain an authoritative current-state block and inject it into every runtime agent call. This is the layer that prevents common text-adventure failures: characters forgetting where they are, equipment being mistaken for identity, arbitrary deadlines, and player phrasing overriding action outcomes.
+
+Authoritative state includes:
+
+| State | Example | Storage |
+|-------|---------|---------|
+| In-world time | `Day 12, 13:45`; `mission_launch in 2h 15m` | `worlds.setting_details.clock` in Phase 1; structured tables later |
+| Locality | Player is in `Strategium Antechamber`; NPC is in `Hangar Bay 7` | `scenes.location` + `characters.traits.location` |
+| Identity | Human origin, rank, public titles, species, faction | `characters.traits.identity` |
+| Presentation | Armor, disguise, insignia, visible wounds | `characters.traits.presentation` |
+| Negative facts | `not an Ultramarine`; `not an Arch-Confessor` | `characters.traits.identity.not_facts` |
+| Active constraints | Locked door, launch deadline, wounded enemy behind cover | `scenes.description`, `story_threads`, `turns.metadata` |
+| Tactical state | Objectives, threats, allies, casualties, resources, extraction windows | `scenes.metadata.tactical_state`, `turns.metadata.resolution` |
+| Adjudicated outcome | Attack failed, partial success, full success | `turns.metadata.resolution` |
+
+This state should be short, structured, and higher priority than retrieved memories. The narrator may embellish it, but must not contradict it.
+
+For action-heavy scenes, the authoritative state builder should condense `scenes.metadata.tactical_state` into a few stable lines: current objective, visible threats, ally condition, casualties, resources, clocks, and extraction status. These facts are more important than recent prose because tactical continuity breaks quickly if wounds, distances, remaining resources, or survival counts drift.
 
 ## 3. Retrieval Pipeline
 
@@ -70,23 +100,32 @@ Player submits action
 │  1. Load system prompt (filesystem)      │  ~500 tokens
 │  2. Load world (DB: worlds)             │  ~300 tokens
 │  3. Load scene (DB: scenes)             │  ~200 tokens
-│  4. Load player character (DB: chars)   │  ~200 tokens
-│  5. Load recent turns (DB: turns        │  ~4000-6000 tokens
+│  4. Load authoritative state            │  ~300 tokens
+│     (time, locality, identity, visible  │
+│      NPCs, immediate constraints)       │
+│  5. Load player character (DB: chars)   │  ~200 tokens
+│  6. Load recent turns (DB: turns        │  ~4000-6000 tokens
 │     WHERE world_id = X                  │
 │     ORDER BY created_at DESC            │
 │     LIMIT 20)                           │
-│  6. Append player action                │  ~100 tokens
+│  7. Append player action                │  ~100 tokens
 │                                          │
-│  Total: ~5300-7300 tokens               │
+│  Total: ~5600-7600 tokens               │
 └─────────────────────────────────────────┘
   │
   ▼
 Narrator Agent receives assembled context
 ```
 
-**Why this works for MVP**: With a context window of ~20 turns, a typical story session of 40-60 turns means the narrator "remembers" roughly the last 30-45 minutes of play. Early events drop out of context, but the story remains coherent within the active window. This degradation is the explicit trigger for Phase 2.
+**Why this works for MVP**: With a context window of ~20 turns, a typical story session of 40-60 turns means the narrator "remembers" roughly the last 30-45 minutes of play. Early events drop out of context, but the story remains coherent within the active window. The authoritative state block keeps current reality stable even when older prose falls out of context. This degradation is the explicit trigger for seeded knowledge in Phase 2 and live semantic retrieval in Phase 3.
 
-### 3.2 Phase 2: Semantic Retrieval
+### 3.2 Phase 2: Seeded LLM Wiki Retrieval
+
+Phase 2 introduces source documents and compiled seeded knowledge. User seed text, generated seed packets, simulated expedition logs, imported prior adventure logs, and imported lore are stored in `world_sources`; the wiki compiler turns them into `wiki_pages`, `timeline_events`, `relationships`, `story_threads`, and initial `memory_chunks`.
+
+Seeded knowledge is retrieved directly during play. Canon status is included in context so the narrator can distinguish hard facts from soft canon, rumor, myth, or disputed material.
+
+### 3.3 Phase 3: Semantic Retrieval
 
 Adds vector similarity search for long-term memory.
 
@@ -139,32 +178,33 @@ Player submits action
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  CONTEXT ASSEMBLER (Phase 2)                                 │
+│  CONTEXT ASSEMBLER (Phase 3)                                 │
 │                                                              │
 │  Fill token budget from highest to lowest priority:          │
 │                                                              │
 │  Priority 1: System prompt                    ~500 tokens    │
-│  Priority 2: Current scene + characters       ~400 tokens    │
-│  Priority 3: Active story threads             ~300 tokens    │
-│  Priority 4: Relevant wiki pages (top-3)      ~1200 tokens   │
-│  Priority 5: Relevant memory chunks (top-5)   ~1500 tokens   │
-│  Priority 6: Active relationships             ~300 tokens    │
-│  Priority 7: Recent raw turns (last 10)       ~3000 tokens   │
-│  Priority 8: Player action                    ~100 tokens    │
+│  Priority 2: Authoritative state              ~300-600 tokens│
+│  Priority 3: Current scene + characters       ~400 tokens    │
+│  Priority 4: Active story threads             ~300 tokens    │
+│  Priority 5: Relevant wiki pages (top-3)      ~1200 tokens   │
+│  Priority 6: Relevant memory chunks (top-5)   ~1500 tokens   │
+│  Priority 7: Active relationships             ~300 tokens    │
+│  Priority 8: Recent raw turns (last 10)       ~3000 tokens   │
+│  Priority 9: Player action                    ~100 tokens    │
 │                                                              │
 │  Budget: 8000 tokens max                                     │
-│  If over budget: truncate from Priority 7 first              │
+│  If over budget: truncate from Priority 8 first              │
 └─────────────────────────────────────────────────────────────┘
   │
   ▼
 Narrator Agent receives enriched context
 ```
 
-### 3.3 Phase 3: Smart Context Assembly
+### 3.4 Phase 4: Smart Context Assembly
 
 The conductor's decision informs what context to prioritize.
 
-- **`proceed`**: Standard retrieval (Phase 2 pipeline)
+- **`proceed`**: Standard retrieval (Phase 3 pipeline)
 - **`scene_transition`**: Emphasize world-level context, de-emphasize recent turns
 - **`npc_interlude`**: Load NPC character details at higher priority
 - **`activate_proxy`**: Load proxied character's history and personality
@@ -181,6 +221,7 @@ The conductor's decision informs what context to prioritize.
 
 | Content | When | Stored In |
 |---------|------|-----------|
+| Seeded memory chunks | During Phase 2 wiki compilation | `memory_chunks.embedding` |
 | Memory chunk summaries | After Archivist extraction | `memory_chunks.embedding` |
 | Wiki page content | On wiki page create/update | `wiki_pages.embedding` |
 | Player actions (for retrieval) | On each player turn | Not stored — embedded at query time |
@@ -238,12 +279,37 @@ The Archivist produces memory chunks, not the embedding pipeline. Chunks are sem
 |------------|-------------|-------------|
 | `scene_summary` | Scene ends or every 10 turns | 100-200 words |
 | `character_moment` | Significant character event | 50-100 words |
+| `relationship_moment` | Major emotional shift, betrayal, sacrifice, rescue, grief | 50-100 words |
+| `tactical_state_delta` | Objective, threat, wound, casualty, resource, or extraction state changes | 25-75 words |
 | `world_change` | World state changes | 50-100 words |
 | `dialogue_highlight` | Important conversation | 50-150 words |
 
 **Why Archivist-generated chunks**: Generic text splitting (every 500 tokens) produces fragments that lack semantic coherence. The Archivist understands narrative structure and produces chunks that represent complete concepts — "Elara discovered the hidden passage behind the waterfall" rather than "...passage behind the waterfall. The water was cold and..."
 
+**Scene-boundary summaries**: At scene end, and every 10 turns in long scenes, the Archivist should produce a hard-canon scene summary when the events occurred directly in play. The summary should capture objective, outcome, dead, wounded, escaped, resources spent, relationship shifts, new myths/rumors witnessed, unresolved consequences, and the final scene location. These summaries become the durable bridge once raw turns fall out of context.
+
 ## 5. Context Assembly Algorithm
+
+### Authoritative State Block
+
+Every runtime prompt should include an authoritative state block before relevant memories and recent turns.
+
+Example:
+
+```text
+## Authoritative State
+
+Time: Day 12, 13:45. Mission launch in 2h 15m.
+Location: Strategium Antechamber aboard the Saint Drusus.
+Player: Human; Lord Commander; formerly cogitator tech, Inquisitor, Lord Inquisitor. Wearing Arch-Confessor power armor. Not an Ultramarine. Not an Arch-Confessor.
+Present NPCs: Canoness Vahl, Interrogator Serek.
+Visible Threats: Wounded heretic behind cover, 8m away.
+Tactical State: Objective is extraction; two allies wounded; one melta bomb remains; teleport lock unstable; extraction window 90s.
+Immediate Constraints: Blast door sealed; launch deadline is active; enemy has line of sight to the western aisle.
+Last Resolved Outcome: The player's last sword strike wounded the heretic's leg but did not sever it.
+```
+
+The block is assembled from structured state first and recent extracted facts second. It should be compact enough to fit in every narrator call, even in Phase 1.
 
 ### Token Budgeting
 
@@ -251,6 +317,7 @@ The Archivist produces memory chunks, not the embedding pipeline. Chunks are sem
 interface TokenBudget {
   total: number              // 8000 for Sonnet, 4000 for Haiku
   systemPrompt: number       // reserved, ~500
+  authoritativeState: number  // reserved, ~300-600 depending on tactical state
   worldContext: number        // reserved, ~300
   sceneContext: number        // reserved, ~200
   characterContext: number    // reserved, ~200
@@ -261,6 +328,7 @@ function assembleContext(params: AssemblyParams): AssembledContext {
   const budget: TokenBudget = {
     total: params.maxTokens ?? 8000,
     systemPrompt: 0,
+    authoritativeState: 0,
     worldContext: 0,
     sceneContext: 0,
     characterContext: 0,
@@ -270,6 +338,9 @@ function assembleContext(params: AssemblyParams): AssembledContext {
   // Step 1: Load fixed-priority content and count tokens
   const systemPrompt = loadPrompt("narrator-system", params.world)
   budget.systemPrompt = estimateTokens(systemPrompt)
+
+  const stateBlock = formatAuthoritativeState(params.state)
+  budget.authoritativeState = estimateTokens(stateBlock)
 
   const worldBlock = formatWorldContext(params.world)
   budget.worldContext = estimateTokens(worldBlock)
@@ -283,6 +354,7 @@ function assembleContext(params: AssemblyParams): AssembledContext {
   // Step 2: Calculate remaining budget
   budget.remaining = budget.total
     - budget.systemPrompt
+    - budget.authoritativeState
     - budget.worldContext
     - budget.sceneContext
     - budget.characterContext
@@ -312,6 +384,7 @@ function assembleContext(params: AssemblyParams): AssembledContext {
   // Step 4: Assemble final prompt
   return {
     systemPrompt: injectDynamicContent(systemPrompt, {
+      stateBlock,
       worldBlock,
       sceneBlock,
       characterBlock,
@@ -338,11 +411,11 @@ function estimateTokens(text: string): number {
 }
 ```
 
-For Phase 2+, consider using `@anthropic-ai/tokenizer` for precise counts, but only if budget accuracy becomes a problem.
+For Phase 3+, consider using `@anthropic-ai/tokenizer` for precise counts, but only if budget accuracy becomes a problem.
 
 ### Relevance Scoring
 
-In Phase 2+, retrieved content has a relevance score (cosine similarity from pgvector). The context assembler uses this to prioritize:
+In Phase 3+, retrieved content has a relevance score (cosine similarity from pgvector). The context assembler uses this to prioritize:
 
 ```
 Score > 0.85: Highly relevant — always include if budget allows
@@ -369,7 +442,8 @@ Archivist extracts structured data
   ├──▶ Timeline events created (episodic memory, structured)
   ├──▶ Relationship changes saved (semantic memory)
   ├──▶ Thread updates saved (semantic memory)
-  └──▶ Memory summary embedded and stored as memory_chunk (episodic memory, compressed)
+  ├──▶ Tactical state deltas merged into scene metadata
+  └──▶ Memory summaries embedded and stored as memory_chunks (episodic memory, compressed)
 ```
 
 ### Compaction (Future)
@@ -380,16 +454,16 @@ As worlds grow very long (1000+ turns), memory chunks accumulate. A future compa
 2. Delete low-significance `character_moment` chunks older than N scenes
 3. Re-embed merged chunks for updated vector representations
 
-This is not needed until a world exceeds ~500 turns. Defer to Phase 5 or beyond.
+This is not needed until a world exceeds ~500 turns. Defer to Phase 6 or beyond.
 
 ## 7. Context Window Strategy per Agent
 
 | Agent | Max Context | Content Priority |
 |-------|-------------|-----------------|
-| **Narrator** | ~8000 tokens | System prompt > World/Scene > Threads > Wiki > Memories > Recent turns > Action |
+| **Narrator** | ~8000 tokens | System prompt > Authoritative state > World/Scene > Threads > Wiki > Memories > Recent turns > Action |
 | **Archivist** | ~4000 tokens | System prompt > Current turn > Existing wiki titles > Recent context |
-| **Conductor** | ~3000 tokens | System prompt > World state summary > Current scene stats > Player action > Recent summary |
-| **Actor** | ~4000 tokens | System prompt > Character profile > Scene > Recent context > Action prompt |
+| **Conductor** | ~3000 tokens | System prompt > Authoritative state > World state summary > Current scene stats > Player action > Recent summary |
+| **Actor** | ~4000 tokens | System prompt > Authoritative state > Character profile > Scene > Recent context > Action prompt |
 
 Each agent sees only what it needs. The Narrator gets the richest context. The Conductor gets the sparsest (it makes routing decisions, not creative ones). The Archivist gets the narrator's output plus existing state for diffing. The Actor gets its character's profile and the immediate situation.
 
@@ -400,6 +474,12 @@ Even if it fits in the context window, sending all turns degrades response quali
 
 ### Never Let the LLM Manage Its Own Memory
 The LLM should not decide what to remember — the Archivist does that through structured extraction. Don't ask the narrator to "keep track of important facts." It can't. That's what the database is for.
+
+### Never Let Player Wording Author Outcomes
+A player can state intent, not unilateral reality. Treat "I try to cut the heretic's leg" and "I cut the heretic's leg off" as action proposals. The system or Conductor resolves the result, then the Narrator describes that result. This preserves challenge, risk, and the feeling that the world exists outside the player prompt.
+
+### Never Confuse Presentation With Identity
+Armor, disguise, insignia, titles, rumors, and public reputation can change how NPCs react, but they do not rewrite the character's underlying identity. Keep identity facts and presentation facts separate in structured state, and include explicit negative facts when the model is likely to infer incorrectly.
 
 ### Never Store Raw Turns as Embeddings
 Embedding every raw turn creates a noisy vector space. A turn like "You walk into the tavern" has almost no semantic value. The Archivist's compressed summaries ("The player entered the Rusty Anchor tavern in Port Haven and met Grim, a former soldier who hinted at trouble in the mines") are far better embedding targets.

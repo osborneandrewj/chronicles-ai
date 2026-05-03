@@ -8,7 +8,8 @@ The frontend is a Next.js 15 App Router application using React Server Component
 - **Story-first**: The narrative feed dominates the viewport. Everything else is secondary.
 - **Server Components by default**: Only add `"use client"` when interactivity is required.
 - **Progressive enhancement**: Core read experience works without JavaScript. Interactive features (streaming, input) require JS.
-- **Mobile-native feel**: Touch-friendly, stacked navigation on mobile, sidebar on desktop.
+- **Conversation-first play**: Do not assume an always-visible wiki/timeline/sidebar during play. Knowledge data should be queryable first; visible surfaces are optional and deferred until playtesting shows they help.
+- **Mobile-native feel**: Touch-friendly, stacked navigation on mobile. Optional knowledge surfaces should not reduce the core reading/input space.
 
 ## 2. Routing Structure
 
@@ -25,20 +26,22 @@ src/app/
 │   └── [worldId]/
 │       ├── layout.tsx            # World layout: shared header/nav
 │       ├── page.tsx              # World dashboard (Server Component)
+│       ├── seed/                 # Phase 2
+│       │   └── page.tsx          # Seeding progress + review
 │       ├── play/
 │       │   └── page.tsx          # Story play page (Server + Client Components)
-│       ├── wiki/                 # Phase 2
+│       ├── wiki/                 # Optional knowledge surface
 │       │   ├── page.tsx          # Wiki index
 │       │   └── [pageId]/
 │       │       └── page.tsx      # Wiki page detail
-│       ├── timeline/             # Phase 2
+│       ├── timeline/             # Optional knowledge surface
 │       │   └── page.tsx          # Timeline view
-│       ├── characters/           # Phase 2
+│       ├── characters/           # Optional knowledge surface
 │       │   └── page.tsx          # Character list
 │       └── settings/             # World settings
 │           └── page.tsx
 │
-├── auth/                         # Phase 4
+├── auth/                         # Phase 5
 │   ├── login/page.tsx
 │   └── signup/page.tsx
 │
@@ -53,6 +56,7 @@ src/app/
 | `/worlds` | Server | `listWorlds()` | No (links only) |
 | `/worlds/new` | Server + Client | None | Yes (form) |
 | `/worlds/[id]` | Server | `getWorld()` | No |
+| `/worlds/[id]/seed` | Server + Client | `listWorldSources()`, `getLintReport()` | Yes |
 | `/worlds/[id]/play` | Server + Client | `getStoryState()` | Yes (streaming + input) |
 | `/worlds/[id]/wiki` | Server | `listWikiPages()` | No |
 | `/worlds/[id]/timeline` | Server | `getTimeline()` | No |
@@ -94,7 +98,7 @@ PlayPage (Server Component)
 │       ├── Submit button
 │       └── Character name label ("Playing as Elara")
 │
-└── Sidebar (desktop only, Phase 2+)
+└── OptionalKnowledgeSurface (deferred)
     ├── TabNav: Wiki | Timeline | Characters | Threads
     ├── WikiPanel
     │   └── WikiPageList → WikiPagePreview
@@ -121,11 +125,14 @@ PlayPage (Server Component)
 | `CreateWorldForm` | Client | `components/world/CreateWorldForm.tsx` | World creation form |
 | `WorldHeader` | Server | `components/world/WorldHeader.tsx` | World name, scene, nav |
 
-#### Knowledge Components (Phase 2)
+#### Knowledge Components (Optional/Deferred)
+
+Knowledge records are part of the backend architecture before they are necessarily part of the play UI. Build query helpers and standalone routes first; add an in-play sidebar or panels only after conversation-first playtesting shows a clear need.
 
 | Component | Type | File | Purpose |
 |-----------|------|------|---------|
-| `Sidebar` | Client | `components/sidebar/Sidebar.tsx` | Tabbed sidebar container |
+| `Sidebar` | Client | `components/sidebar/Sidebar.tsx` | Optional tabbed sidebar container |
+| `SeedingReview` | Client | `components/world/SeedingReview.tsx` | Seed progress, source review, canon controls |
 | `WikiPanel` | Server | `components/sidebar/WikiPanel.tsx` | Wiki page list |
 | `WikiPageView` | Server | `components/sidebar/WikiPageView.tsx` | Wiki page content |
 | `TimelinePanel` | Server | `components/sidebar/TimelinePanel.tsx` | Timeline event list |
@@ -134,7 +141,9 @@ PlayPage (Server Component)
 
 ## 4. UI Wireframes
 
-### 4.1 Play Page — Desktop
+### 4.1 Play Page — Desktop With Optional Knowledge Surface
+
+This is an optional future layout, not a Phase 1 requirement. The default play page should remain conversation/narration-first.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -276,7 +285,7 @@ PlayPage (Server Component)
 │  └─────────────────────────────────────────────────────────┘│
 │                                                              │
 │  Genre                         Tone                          │
-│  ┌──────��────────────┐        ┌───────────────────┐         │
+│  ┌───────────────────┐        ┌───────────────────┐         │
 │  │ Fantasy         ▼ │        │ Gritty          ▼ │         │
 │  └───────────────────┘        └───────────────────┘         │
 │                                                              │
@@ -309,17 +318,19 @@ Most data is server state — fetched on the server and rendered via Server Comp
 
 The `useChat()` hook manages:
 - `messages[]` — accumulated turn history (synced with streamed tokens)
-- `input` — current textarea value
-- `isLoading` — whether a stream is active
+- stream status/loading state
 - `error` — stream error state
-- `handleSubmit()` — form submission handler
-- `handleInputChange()` — controlled textarea handler
+- `sendMessage()` / `regenerate()` / `stop()` actions
+- `onData()` handling for custom persisted-turn metadata
+
+The story input textarea uses local React state. AI SDK 5+ no longer manages input state internally, so `StoryInput` owns the text value and calls `sendMessage()` with the current action plus `worldId`, `sceneId`, and `characterId` in the request body.
 
 ### 5.3 Client State (React useState)
 
 Minimal client state for Phase 1:
-- `sidebarOpen: boolean` (desktop sidebar toggle)
-- `sidebarTab: string` (Phase 2: active sidebar tab)
+- Story input text
+- Streaming/submission state from `useChat()`
+- Optional later: knowledge surface open/tab state
 
 No Zustand or global state store until Phase 3+.
 
@@ -362,28 +373,26 @@ No Zustand or global state store until Phase 3+.
 | Breakpoint | Width | Layout |
 |-----------|-------|--------|
 | Mobile | < 768px | Single column, bottom tabs, no sidebar |
-| Tablet | 768-1024px | Single column, collapsible sidebar |
-| Desktop | > 1024px | Two columns (story + sidebar) |
+| Tablet | 768-1024px | Single column; optional knowledge overlay |
+| Desktop | > 1024px | Story-first single column by default; optional collapsible knowledge surface |
 
 ### Mobile Adaptations
-- Sidebar becomes bottom tab bar (Wiki, Timeline, Characters)
-- Tapping a tab opens a full-screen overlay
+- Optional knowledge surfaces open as full-screen overlays
 - Story input stays fixed at bottom
 - Story feed uses full viewport width
 - No horizontal padding — maximize reading width
 
 ### Desktop Adaptations
-- Sidebar occupies ~30% of viewport on right side
-- Story feed occupies ~70% on left side
-- Sidebar is collapsible (toggle button)
+- Story feed remains the primary surface
+- Optional knowledge surface may open as a collapsible right panel or standalone route
 - Story input is fixed at bottom of story column
 
 ## 8. Accessibility
 
 ### Keyboard Navigation
-- Tab through: input → submit → sidebar tabs → sidebar content
+- Tab through: input → submit → optional knowledge controls/content when present
 - Enter submits the action (Shift+Enter for newline)
-- Escape closes sidebar overlays on mobile
+- Escape closes optional overlays on mobile
 
 ### Screen Reader Support
 - Story feed uses `role="log"` with `aria-live="polite"` for new turns
@@ -407,6 +416,6 @@ No Zustand or global state store until Phase 3+.
 ### Optimizations
 - **Server Components**: world list, wiki, timeline rendered on server (zero client JS)
 - **Streaming SSR**: play page streams HTML as turns are fetched
-- **Dynamic imports**: sidebar tabs lazy-loaded on desktop (`next/dynamic`)
+- **Dynamic imports**: optional knowledge panels lazy-loaded if/when they are added (`next/dynamic`)
 - **Scroll virtualization**: if turn count exceeds 200, virtualize the feed (Phase 2+, `@tanstack/react-virtual`)
 - **Image optimization**: not applicable for MVP (text-only), but `next/image` ready for future character portraits
