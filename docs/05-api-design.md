@@ -96,10 +96,15 @@ const CreateWorldSchema = z.object({
     fadeToBlack: z.array(z.string().max(255)).default([]),
     toneNotes: z.string().max(1000).optional(),
   }).optional(),
-  characterName: z.string().min(1).max(255),
+  characterGivenName: z.string().min(1).max(64).regex(/^[A-Za-z]+(?: [A-Za-z]+)*$/),
+  characterHouseName: z.string().min(1).max(64).regex(/^[A-Za-z]+(?: [A-Za-z]+)*$/),
   characterDescription: z.string().max(2000).optional(),
 })
 ```
+
+**Character name policy**: Player names are curated for setting fit, not fully free-form. The UI may let the player choose a given name and a generated family/house/regimental name, or request a full suggested name. Names must reject numbers, handles, emoji, punctuation/symbols, and out-of-world joke strings. The server stores the joined display name in `characters.name` and stores name parts plus provenance in `characters.traits.name_profile`.
+
+For worlds with strongly themed naming, the server should validate the final display name against a world-specific `name_policy` from `worlds.setting_details`. If a user-provided name fails validation, return a field error instead of silently rewriting it.
 
 **Operations** (single transaction):
 1. Insert world
@@ -242,7 +247,7 @@ Returns timeline events, optionally filtered by significance level.
 File: `src/lib/actions/multiplayer-actions.ts`
 
 #### `invitePlayer(worldId, email)`
-#### `joinWorld(worldId, characterName)`
+#### `joinWorld(worldId, characterGivenName, characterHouseName)`
 #### `setProxyMode(playerCharacterId, mode)`
 #### `getNotifications(userId)`
 #### `markNotificationRead(notificationId)`

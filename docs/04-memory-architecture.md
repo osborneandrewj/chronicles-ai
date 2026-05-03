@@ -36,12 +36,13 @@ Facts about the world — character descriptions, locations, lore, relationships
 |--------|---------|-------|
 | World premise | `worlds.premise` | 1 |
 | Character profiles | `characters` table | 1 |
+| NPC relationship anchors | `relationships.metadata` + character profile snippets | 1 |
 | Source documents | `world_sources` table | 2 |
 | Wiki pages | `wiki_pages` table (with embeddings) | 2 |
 | Relationships | `relationships` table | 2 |
 | Story threads | `story_threads` table | 2 |
 
-**Phase 1 retrieval**: Direct database lookups — load world, active scene, player character.
+**Phase 1 retrieval**: Direct database lookups — load world, active scene, player character, and relationship anchors for present major NPCs when available.
 
 **Phase 2 retrieval**: Direct lookups over compiled seeded wiki/timeline/thread data.
 
@@ -104,20 +105,31 @@ Player submits action
 │     (time, locality, identity, visible  │
 │      NPCs, immediate constraints)       │
 │  5. Load player character (DB: chars)   │  ~200 tokens
-│  6. Load recent turns (DB: turns        │  ~4000-6000 tokens
+│  6. Load NPC relationship anchors       │  ~200-500 tokens
+│  7. Load recent turns (DB: turns        │  ~4000-6000 tokens
 │     WHERE world_id = X                  │
 │     ORDER BY created_at DESC            │
 │     LIMIT 20)                           │
-│  7. Append player action                │  ~100 tokens
+│  8. Append player action                │  ~100 tokens
 │                                          │
-│  Total: ~5600-7600 tokens               │
+│  Total: ~5800-8100 tokens               │
 └─────────────────────────────────────────┘
   │
   ▼
 Narrator Agent receives assembled context
 ```
 
-**Why this works for MVP**: With a context window of ~20 turns, a typical story session of 40-60 turns means the narrator "remembers" roughly the last 30-45 minutes of play. Early events drop out of context, but the story remains coherent within the active window. The authoritative state block keeps current reality stable even when older prose falls out of context. This degradation is the explicit trigger for seeded knowledge in Phase 2 and live semantic retrieval in Phase 3.
+**Why this works for MVP**: With a context window of ~20 turns, a typical story session of 40-60 turns means the narrator "remembers" roughly the last 30-45 minutes of play. Early events drop out of context, but the story remains coherent within the active window. The authoritative state block keeps current reality stable even when older prose falls out of context. Relationship anchors keep major NPCs from forgetting who the player is after the raw turn where they met falls out of context. This degradation is the explicit trigger for seeded knowledge in Phase 2 and live semantic retrieval in Phase 3.
+
+### 3.1.1 Relationship Anchors
+
+For every present major NPC, the context assembler should include a compact relationship anchor when one exists:
+
+```text
+Lira Voss knows Joseph Osborne as the officer who negotiated access to the palace bunker. Sentiment: wary-positive. Last meaningful interaction: Joseph protected her from the assassination attempt, then asked for evacuation authority. Known claims: Joseph says he serves Battlefleet command. Open tension: Lira suspects he is withholding intelligence.
+```
+
+Relationship anchors are not long summaries. They are durable, high-signal facts that answer "who is this person to me?" for the NPC currently on screen. They should be updated by the Archivist from major relationship turns and stored on `relationships.metadata` using fields such as `known_identity`, `known_titles`, `last_interaction_label`, `last_meaningful_turn_id`, `trust_level`, `promises`, `threats`, `secrets_shared`, and `open_tensions`.
 
 ### 3.2 Phase 2: Seeded LLM Wiki Retrieval
 

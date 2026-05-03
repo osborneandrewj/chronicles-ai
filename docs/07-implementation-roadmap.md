@@ -74,8 +74,10 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] `src/components/world/WorldCard.tsx`: World preview card
 - [ ] `src/components/world/CreateWorldForm.tsx`: Form with validation
 - [ ] Creating a world also creates initial scene + player character (transaction)
+- [ ] Player character creation validates curated name parts, rejects numbers/symbol handles, and stores `traits.name_profile`
+- [ ] The create-world form offers generated family/house/regimental name choices when the world has a naming policy
 
-**Acceptance criteria**: Navigate to `/worlds/new`, fill form, submit. Redirected to play page. Navigate back to `/worlds` and see the world listed.
+**Acceptance criteria**: Navigate to `/worlds/new`, fill form, submit. Redirected to play page. Navigate back to `/worlds` and see the world listed. Invalid handles such as names with numbers or decorative symbols are rejected, while accepted names store structured `name_profile` data.
 
 ### Step 1.5: Narrator Agent
 
@@ -85,11 +87,12 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] `src/lib/ai/prompts.ts`: Prompt template loader with variable interpolation
 - [ ] `src/lib/ai/context-assembler.ts`: Assembles context from DB state (token-budgeted)
 - [ ] `src/lib/ai/authoritative-state.ts`: Builds compact time, locality, identity, presentation, visible NPC, tactical state, and constraint block
+- [ ] Context assembler includes compact relationship anchors for present major NPCs when available
 - [ ] Lightweight action classifier: `stance` (`attempt`, `strong_intent`, `asserted_outcome`, `unclear`) plus `input_mode` (`tactical_intent`, `asserted_outcome`, `cinematic_framing`, `emotional_interiority`, `meta_or_unclear`)
 - [ ] `src/lib/ai/narrator.ts`: Calls `streamText()` with assembled context
 - [ ] Token estimation function (`estimateTokens()`)
 
-**Acceptance criteria**: Given a world, scene, character, authoritative state, and recent turns, the narrator returns a streamed prose response. Context stays within token budget. Prompt template loads correctly with interpolated variables. The narrator preserves current location, time pressure, tactical state, character identity, content boundaries, and explicit negative facts even when older prose falls out of context.
+**Acceptance criteria**: Given a world, scene, character, authoritative state, relationship anchors, and recent turns, the narrator returns a streamed prose response. Context stays within token budget. Prompt template loads correctly with interpolated variables. The narrator preserves current location, time pressure, tactical state, character identity, content boundaries, relationship continuity, and explicit negative facts even when older prose falls out of context. Narration uses "you" for the player and does not blur player/NPC first-person perspective.
 
 ### Step 1.6: Streaming Endpoint
 
@@ -184,6 +187,8 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Zod schema for seed packet output
 - [ ] `src/lib/ai/world-seeder.ts`: Calls `generateObject()` with Sonnet
 - [ ] Seed packet includes world bible, starter locations, factions, NPCs, timeline anchors, mysteries, and initial story threads
+- [ ] Seed packet includes faction/culture naming styles and structured NPC `nameProfile` values
+- [ ] Name generation consults a per-world name registry and penalizes exact or near-duplicate given/family names
 - [ ] Persist the seed packet as a `world_sources` row before compiling it into knowledge tables
 
 ### Step 2.3: Simulated Expeditions
@@ -266,6 +271,7 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Update context assembler to include retrieved memories
 - [ ] Update context assembler to include relevant wiki pages
 - [ ] Update context assembler to include active threads
+- [ ] Update context assembler to always prioritize relationship anchors for present major NPCs above generic retrieved memories
 - [ ] Token budget allocation across all source types
 - [ ] Relevance score threshold filtering
 - [ ] Prefer `hard` canon, include `soft` canon sparingly, and label `rumor`/`myth`/`disputed` entries clearly in narrator context

@@ -155,6 +155,14 @@ CREATE INDEX idx_characters_world_id ON characters(world_id);
 --   "fears": ["deep water", "betrayal"],
 --   "appearance": "tall, weathered, scar across left cheek",
 --   "speech_style": "formal, measured, avoids contractions",
+--   "name_profile": {
+--     "given_name": "Rameses",
+--     "family_name": "Osborne",
+--     "display_name": "Rameses Osborne",
+--     "culture": "imperial frontier",
+--     "source": "player_curated",
+--     "reuse_key": "osborne"
+--   },
 --   "location": {
 --     "label": "Rusty Anchor tavern",
 --     "scene_id": "<uuid>",
@@ -178,6 +186,10 @@ CREATE INDEX idx_characters_world_id ON characters(world_id);
 ```
 
 **Status values**: `active`, `inactive` (left the story), `dead` (killed in narrative).
+
+**Name curation**: `characters.name` is the display name used in prose, but `traits.name_profile` stores structured parts and generation provenance. User-created player characters must not use raw handles, numbers, emoji, or decorative symbols. In themed worlds, the name profile should include culture/faction/class context so future NPC generation can produce lore-compatible variation without reusing a tiny global name pool.
+
+World creation and seeding should maintain a per-world name registry in `worlds.setting_details.name_registry` or a later dedicated table. The registry tracks `reuse_key` values and recent given/family names so generators can penalize duplicates such as repeated surnames across unrelated NPCs.
 
 **Identity vs. presentation**: `traits.identity` stores what the character is. `traits.presentation` stores what the character appears to be wearing, carrying, impersonating, or signaling. Narrator and Actor prompts must not infer that equipment changes identity. Use `identity.not_facts` for facts the model is likely to hallucinate, such as "wearing Arch-Confessor armor" becoming "is an Arch-Confessor."
 
@@ -468,6 +480,8 @@ CREATE UNIQUE INDEX idx_relationships_pair ON relationships(
 **`sentiment`**: `hostile`, `negative`, `neutral`, `positive`, `devoted`. Tracked over time as relationships evolve.
 
 **NPC knowledge**: Use `metadata` to track what one character believes about another, separate from objective truth. Examples: `known_identity`, `known_titles`, `mistaken_beliefs`, `last_interaction_label`, and `trusts_claimed_rank`. This lets NPCs react differently without letting their assumptions overwrite the canonical character record.
+
+**Relationship anchors**: For major NPC/player relationships, `metadata` should include a compact durable memory used in every scene where both characters are present. Suggested fields: `known_identity`, `known_titles`, `last_interaction_label`, `last_meaningful_turn_id`, `trust_level`, `promises`, `threats`, `secrets_shared`, `open_tensions`, and `private_sentiment`. This prevents an NPC from reverting to pre-meeting behavior once the original conversation falls out of recent-turn context.
 
 **Unique pair constraint**: The `LEAST/GREATEST` trick ensures only one relationship row exists per pair per type, regardless of insertion order (A→B and B→A are the same relationship).
 

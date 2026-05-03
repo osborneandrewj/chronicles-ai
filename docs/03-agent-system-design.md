@@ -213,6 +213,8 @@ Content boundaries: {content_boundaries}
 10. The player's words express intent, not guaranteed success. If the player asserts an outcome ("I cut off his leg"), narrate only the outcome established by the system/context.
 11. Never confuse identity with presentation. Armor, disguise, insignia, or rumors can affect NPC reactions, but they do not change species, origin, rank history, or explicit negative facts.
 12. Respect content boundaries as hard style constraints. Preserve the world's intended intensity without including restricted content; use fade-to-black handling where specified.
+13. Never use first-person narration for the player character. Refer to the player as "you"; reserve "I" only for direct quoted dialogue.
+14. Keep NPC perspective distinct from player perspective. Describe NPC actions in third person or through direct dialogue, never as shared first-person narration.
 
 ## What the Player Types Below Is an In-Story Action
 
@@ -259,6 +261,8 @@ npc_action     → { role: "assistant", content: "{content}" }
 ```
 
 Player actions are prefixed with `> {character_name}:` to distinguish them from system text in the assistant's view.
+
+Narrator responses must preserve perspective boundaries even when recent turns contain first-person player input. The player input "I approach Lira" should become narration like "You approach Lira," while Lira's interiority should be represented through visible behavior, dialogue, or separately stored Actor `innerThought`, not ambiguous prose where "I" could refer to either character.
 
 ### Behavior Rules
 
@@ -336,10 +340,22 @@ const WorldSeedPacketSchema = z.object({
     publicGoal: z.string(),
     hiddenPressure: z.string(),
     relationships: z.array(z.string()),
+    namingStyle: z.object({
+      givenNameExamples: z.array(z.string()),
+      familyNameExamples: z.array(z.string()),
+      titlePatterns: z.array(z.string()),
+      forbiddenPatterns: z.array(z.string()),
+    }).optional(),
   })),
 
   npcs: z.array(z.object({
     name: z.string(),
+    nameProfile: z.object({
+      givenName: z.string(),
+      familyName: z.string().optional(),
+      culture: z.string(),
+      reuseKey: z.string(),
+    }),
     description: z.string(),
     role: z.string(),
     goals: z.array(z.string()),
@@ -376,6 +392,13 @@ const WorldSeedPacketSchema = z.object({
 4. **Default to soft canon** — seed output is source material until reviewed or compiled
 5. **Persist before compilation** — the full seed packet is stored as a `world_sources` row
 6. **Respect content boundaries** — generate pressure, horror, romance, or violence only within the world's declared limits
+7. **Generate broad name variation** — names must fit faction/culture/class, avoid modern handles or joke names, and avoid reusing the same family name for unrelated NPCs unless the relationship is intentional
+
+### Naming Guidance
+
+The Seeder should generate lore-compatible names rather than only lore-canonical names. For each major culture or faction, produce reusable naming styles with enough examples and patterns to support thousands of combinations. NPC creation should consult the world's existing name registry, reject exact duplicates, and penalize repeated `reuseKey` values such as the same surname appearing on unrelated characters.
+
+Player-facing name creation should be curated: users may choose valid name parts, select from house/family/regimental suggestions, or request AI suggestions, but raw handles, numbers, emoji, and decorative symbols are rejected before character creation.
 
 ## 4. Agent 3: Wiki Compiler
 
