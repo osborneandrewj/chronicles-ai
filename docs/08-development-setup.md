@@ -58,7 +58,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 VOYAGE_API_KEY=pa-...
 
 # Next.js
-NEXTAUTH_SECRET=            # Phase 4+: generate with `openssl rand -base64 32`
+NEXTAUTH_SECRET=            # Phase 5+: generate with `openssl rand -base64 32`
 NEXTAUTH_URL=http://localhost:3000
 
 # Development
@@ -150,9 +150,12 @@ chronicles-ai/
 │   ├── lib/
 │   │   ├── ai/                 # Agent system
 │   │   │   ├── narrator.ts     # Narrator agent
-│   │   │   ├── archivist.ts    # Archivist agent (Phase 2)
-│   │   │   ├── conductor.ts    # Story conductor (Phase 3)
-│   │   │   ├── actor.ts        # Character actor (Phase 3)
+│   │   │   ├── world-seeder.ts # World seeder agent (Phase 2)
+│   │   │   ├── wiki-compiler.ts # Wiki compiler agent (Phase 2)
+│   │   │   ├── world-linter.ts # World linter agent (Phase 2)
+│   │   │   ├── archivist.ts    # Archivist agent (Phase 3)
+│   │   │   ├── conductor.ts    # Story conductor (Phase 4)
+│   │   │   ├── actor.ts        # Character actor (Phase 4)
 │   │   │   ├── prompts.ts      # Prompt template loader
 │   │   │   ├── context-assembler.ts  # Context assembly
 │   │   │   └── embeddings.ts   # Embedding pipeline (Phase 2)
