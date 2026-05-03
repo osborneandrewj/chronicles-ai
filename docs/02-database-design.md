@@ -6,6 +6,7 @@ All persistent state lives in a single PostgreSQL 17 instance with the pgvector 
 
 - **Core Tables (Phase 1)** — worlds, characters, scenes, turns
 - **Seeding + Knowledge Tables (Phase 2-3)** — world_sources, wiki_pages, timeline_events, relationships, story_threads, memory_chunks
+- **Living World Tables (Phase 4)** — npc_agendas
 - **Multiplayer Tables (Phase 5)** — users, player_characters, notifications
 
 Design principles:
@@ -57,6 +58,12 @@ Design principles:
 │  memory_chunks   │ (Phase 2)
 │  world_id FK     │
 │  embedding vector│
+└──────────────────┘
+
+┌──────────────────┐
+│  npc_agendas     │ (Phase 4)
+│  character_id FK │
+│  agenda clocks   │
 └──────────────────┘
 
 ┌──────────────────┐
@@ -422,6 +429,7 @@ CREATE TABLE timeline_events (
   scene_id        UUID REFERENCES scenes(id) ON DELETE SET NULL,
   world_timestamp VARCHAR(255),
   significance    VARCHAR(50) NOT NULL DEFAULT 'minor',
+  visibility      VARCHAR(50) NOT NULL DEFAULT 'known',
   canon_status    VARCHAR(50) NOT NULL DEFAULT 'soft',
   confidence      VARCHAR(50) NOT NULL DEFAULT 'medium',
   metadata        JSONB DEFAULT '{}',
@@ -431,6 +439,7 @@ CREATE TABLE timeline_events (
 CREATE INDEX idx_timeline_world_id ON timeline_events(world_id);
 CREATE INDEX idx_timeline_world_created ON timeline_events(world_id, created_at);
 CREATE INDEX idx_timeline_world_canon ON timeline_events(world_id, canon_status);
+CREATE INDEX idx_timeline_world_visibility ON timeline_events(world_id, visibility);
 ```
 
 **`world_timestamp`**: In-world time as a string (e.g., "Day 3, Evening", "Year 412, Spring"). Not a real timestamp — narrative worlds have arbitrary time systems.
@@ -438,6 +447,8 @@ CREATE INDEX idx_timeline_world_canon ON timeline_events(world_id, canon_status)
 **Time authority**: `timeline_events` records what happened when. It does not own the current clock. During Phase 1, the current clock and active deadlines live in `worlds.setting_details.clock` and `worlds.setting_details.deadlines`. Later phases may promote that data to dedicated clock/deadline tables if scheduling, travel time, or multiplayer turn order requires stronger constraints.
 
 **`significance`**: `minor` (routine events), `major` (plot turning points), `critical` (world-changing events). Used to filter timeline views and prioritize retrieval.
+
+**`visibility`**: `known`, `rumored`, or `hidden`. Living World advancement may create hidden events that are true in the world but not yet known to the player, or rumored events that can surface through tavern talk, briefings, augury reports, intercepted messages, and changed location state. The context assembler must not expose hidden events to the player-facing narrator unless the current scene gives the player a plausible way to learn them.
 
 ### 4.4 `relationships`
 
@@ -515,6 +526,8 @@ CREATE INDEX idx_threads_world_canon ON story_threads(world_id, canon_status);
 
 **Priority**: `background` (ambient world events), `normal` (standard plot threads), `urgent` (immediate narrative tension).
 
+**Living World linkage**: `metadata` may include `npc_agenda_ids`, `clock_labels`, `last_advanced_world_time`, and `offscreen_consequences` for threads that can progress while the player is elsewhere.
+
 ### 4.6 `memory_chunks`
 
 Chunked, embedded summaries for semantic retrieval. These are NOT raw turns — they are processed, condensed memory units created by the Archivist.
@@ -549,9 +562,90 @@ CREATE INDEX idx_memory_embedding ON memory_chunks
 
 **`source_ids`**: Source document UUIDs that support the memory chunk. Most chunks also keep `source_turn_ids` because turn provenance is frequently needed in the play UI.
 
-## 5. Phase 5 Tables (Multiplayer)
+## 5. Phase 4 Table (Living World)
 
-### 5.1 `users`
+### 5.1 `npc_agendas`
+
+Tracks durable plans for major NPCs who can act while offscreen. This table is intentionally for major actors only: faction heads, rivals, companions with independent goals, recurring antagonists, patrons, warlords, and other characters whose movement changes the world.
+
+```sql
+CREATE TABLE npc_agendas (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  world_id          UUID NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+  character_id      UUID NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+  title             VARCHAR(255) NOT NULL,
+  goal              TEXT NOT NULL,
+  motivation        TEXT,
+  current_plan      TEXT,
+  status            VARCHAR(50) NOT NULL DEFAULT 'active',
+  priority          VARCHAR(50) NOT NULL DEFAULT 'normal',
+  secrecy           VARCHAR(50) NOT NULL DEFAULT 'rumored',
+  player_relevance  VARCHAR(50) NOT NULL DEFAULT 'medium',
+  clock             JSONB NOT NULL DEFAULT '{}',
+  resources         JSONB NOT NULL DEFAULT '[]',
+  allies            JSONB NOT NULL DEFAULT '[]',
+  enemies           JSONB NOT NULL DEFAULT '[]',
+  constraints       JSONB NOT NULL DEFAULT '[]',
+  consequence       TEXT,
+  next_check_at     VARCHAR(255),
+  last_advanced_at  VARCHAR(255),
+  metadata          JSONB DEFAULT '{}',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_npc_agendas_world_status ON npc_agendas(world_id, status);
+CREATE INDEX idx_npc_agendas_character ON npc_agendas(character_id);
+CREATE INDEX idx_npc_agendas_world_priority ON npc_agendas(world_id, priority);
+```
+
+**Status values**: `active`, `paused`, `completed`, `failed`, `cancelled`.
+
+**Priority values**: `background`, `normal`, `urgent`.
+
+**Secrecy values**: `public`, `rumored`, `hidden`. Secrecy controls what can be shown in narrator context. Hidden agendas can still advance, but their exact facts should not appear in player-facing prose until discovered.
+
+**Player relevance values**: `low`, `medium`, `high`. The Living World service uses this to decide which agendas to advance when token or cost budgets are tight.
+
+**`clock` JSONB structure**:
+```json
+{
+  "label": "Secession crusade preparations",
+  "progress": 40,
+  "max": 100,
+  "step_hint": "Advances quickly if the player leaves Karthax or Imperial patrols are weakened",
+  "consequence_at_full": "Dravik openly declares rebellion and invades Veyr Secundus"
+}
+```
+
+**`metadata` JSONB structure**:
+```json
+{
+  "current_location": {
+    "label": "Karthax Palace-Bastion",
+    "scene_id": "<uuid>",
+    "visibility": "elsewhere"
+  },
+  "linked_thread_ids": ["<uuid>"],
+  "last_player_interference": "The player refused to endorse Dravik's levy request",
+  "advance_history": [
+    {
+      "world_time": "Day 18",
+      "from": 40,
+      "to": 65,
+      "reason": "Player departed the planet; no loyalist blockade remained"
+    }
+  ]
+}
+```
+
+**Design note**: Do not create agendas for every NPC. A good initial heuristic is: create agendas for major seeded NPCs with independent goals, recurring NPCs who gain player relevance, and faction leaders tied to active story threads. Minor NPCs remain in `characters` and relationships only.
+
+**Advancement outputs**: When an agenda clock changes significantly or completes, deterministic application code updates `npc_agendas`, may patch `characters.traits.location`, may update `story_threads.metadata`, and appends `timeline_events` with the appropriate `visibility`.
+
+## 6. Phase 5 Tables (Multiplayer)
+
+### 6.1 `users`
 
 ```sql
 CREATE TABLE users (
@@ -565,7 +659,7 @@ CREATE TABLE users (
 );
 ```
 
-### 5.2 `player_characters`
+### 6.2 `player_characters`
 
 Links users to characters in worlds. One user can have characters in multiple worlds.
 
@@ -595,7 +689,7 @@ CREATE INDEX idx_pc_world ON player_characters(world_id);
 -- }
 ```
 
-### 5.3 `notifications`
+### 6.3 `notifications`
 
 ```sql
 CREATE TABLE notifications (
@@ -616,7 +710,7 @@ CREATE INDEX idx_notifications_user_unread ON notifications(user_id, read)
 
 **Notification types**: `turn_waiting` (your turn), `proxy_activated` (AI took over), `world_invite`, `scene_transition`, `thread_resolved`.
 
-## 6. Migration Strategy
+## 7. Migration Strategy
 
 ### Principles
 - One migration per logical change
@@ -646,15 +740,16 @@ Phase 3 (Memory + Knowledge):
   (no new tables — live Archivist extraction, embeddings, context retrieval)
 
 Phase 4 (Agent Orchestra):
-  (no new tables — scene status changes, thread linking)
-  0011_add_scene_parallel_support.sql (relax unique constraint)
+  0011_create_npc_agendas.sql
+  0012_add_timeline_visibility.sql
+  0013_add_scene_parallel_support.sql (relax unique constraint)
 
 Phase 5 (Multiplayer):
-  0012_create_users.sql
-  0013_create_player_characters.sql
-  0014_add_world_owner.sql            (add owner_user_id to worlds)
-  0015_create_notifications.sql
-  0016_add_character_controller.sql   (add controller_type to characters)
+  0014_create_users.sql
+  0015_create_player_characters.sql
+  0016_add_world_owner.sql            (add owner_user_id to worlds)
+  0017_create_notifications.sql
+  0018_add_character_controller.sql   (add controller_type to characters)
 ```
 
 ### Key Constraint: Phase 1 Migrations Are Immutable
@@ -663,7 +758,7 @@ Once a migration has been committed or deployed, never edit it in place. Later p
 
 The JSONB columns (`setting_details`, `traits`, `metadata`) absorb flexible data during early development so most Phase 2 additions can be modeled as new tables. Known later exceptions are explicit forward migrations, such as relaxing the scene-number constraint for parallel scenes and adding ownership/controller fields for multiplayer.
 
-## 7. Query Patterns
+## 8. Query Patterns
 
 ### Hot Paths (must be fast)
 
@@ -708,6 +803,20 @@ LIMIT $3;
 -- Uses idx_wiki_embedding (HNSW)
 ```
 
+**Active major NPC agendas** (Phase 4+):
+```sql
+SELECT *
+FROM npc_agendas
+WHERE world_id = $1
+  AND status = 'active'
+  AND priority IN ('normal', 'urgent')
+ORDER BY
+  CASE priority WHEN 'urgent' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
+  updated_at ASC
+LIMIT $2;
+-- Uses idx_npc_agendas_world_status and idx_npc_agendas_world_priority
+```
+
 ### Write Paths
 
 **Insert turn** (runs on every player action and narrator response):
@@ -732,7 +841,7 @@ COMMIT;
 
 Phase 5 can keep this strategy or move to serializable transactions if multiplayer turn ordering needs broader world-level locking.
 
-## 8. Data Lifecycle
+## 9. Data Lifecycle
 
 ### Turn Data
 - **Created**: on every player action and narrator response
@@ -755,6 +864,12 @@ Phase 5 can keep this strategy or move to serializable transactions if multiplay
 - **Modified**: never (create new chunks, don't update old ones)
 - **Deleted**: potentially by a future compaction process that merges old chunks
 
+### NPC Agendas
+- **Created**: by World Seeder for major NPCs, by Archivist when live play establishes a new independent agenda, or manually by user/world tools
+- **Modified**: by Living World advancement when time passes, by Archivist when player actions interfere with plans, or by direct gameplay outcomes
+- **Completed/failed**: when the clock consequence resolves, the NPC dies, the goal becomes impossible, or the player decisively resolves the thread
+- **Deleted**: only on world deletion (CASCADE)
+
 ### Growth Estimates
 
 For a single-player world with ~100 turns per session:
@@ -763,5 +878,6 @@ For a single-player world with ~100 turns per session:
 - `wiki_pages`: ~10-20 pages after first session, growing slowly → ~50KB
 - `memory_chunks`: ~5-10 per scene → ~20KB/session
 - `timeline_events`: ~5-10 per session → ~10KB/session
+- `npc_agendas`: ~3-20 rows per world, updated in place → negligible storage
 
 A heavy-use world with 1000 turns would accumulate ~1MB of turn data, ~500KB of wiki, ~200KB of memory chunks. Well within single-instance Postgres capacity.

@@ -187,6 +187,7 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Zod schema for seed packet output
 - [ ] `src/lib/ai/world-seeder.ts`: Calls `generateObject()` with Sonnet
 - [ ] Seed packet includes world bible, starter locations, factions, NPCs, timeline anchors, mysteries, and initial story threads
+- [ ] Seed packet includes initial agenda clocks for major NPCs whose offscreen action would change future locations, factions, or story threads
 - [ ] Seed packet includes faction/culture naming styles and structured NPC `nameProfile` values
 - [ ] Name generation consults a per-world name registry and penalizes exact or near-duplicate given/family names
 - [ ] Persist the seed packet as a `world_sources` row before compiling it into knowledge tables
@@ -203,6 +204,7 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 
 - [ ] `prompts/wiki-compiler-system.md`: Compiler prompt for turning sources into wiki/timeline/relationship/thread candidates
 - [ ] Compiler uses the Archivist output schema shape where possible
+- [ ] Compiler persists reviewed major NPC agendas as `npc_agendas` rows when Phase 4 schema is available
 - [ ] Store compiled entries as `soft` canon by default unless explicitly promoted
 - [ ] Preserve source provenance for every compiled wiki page, timeline event, relationship, thread, and memory chunk
 - [ ] Extract emotional events, relationship moments, tactical state deltas, and scene summaries from prior adventure logs where supported by source text
@@ -226,6 +228,7 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 ### Phase 2 Completion Criteria
 
 - [ ] Creating a seeded world produces 10+ wiki page candidates, 5+ timeline anchors, 3+ factions, 5+ NPCs, and 3+ unresolved story threads
+- [ ] Major seeded NPCs with independent goals have draft agenda clocks available for review
 - [ ] Every compiled knowledge entry links back to one or more source documents
 - [ ] Simulated expeditions enrich the setting without solving the player's main conflict
 - [ ] Linter flags at least duplicate-title and contradiction cases in tests
@@ -250,12 +253,13 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Retry logic (up to 2 retries on schema validation failure)
 - [ ] Persist player/narrator turns as `play_turn` source documents or source references for provenance
 - [ ] Extract emotional events, relationship moments, tactical state deltas, and scene-boundary summaries
+- [ ] Extract newly established major NPC independent agendas when live play clearly creates one
 - [ ] Merge tactical state deltas into `scenes.metadata.tactical_state` through deterministic application code
 
 ### Step 3.2: Knowledge Table Refinement
 
 - [ ] Confirm Phase 2 knowledge tables support live play extraction
-- [ ] Add any missing query helpers for updating wiki pages, timeline events, relationships, story threads, and memory chunks
+- [ ] Add any missing query helpers for updating wiki pages, timeline events, relationships, story threads, `npc_agendas`, and memory chunks
 - [ ] Preserve canon status on updates; gameplay can promote facts to `hard` canon when directly established in play
 - [ ] Add query helpers for reading/updating tactical state metadata and scene summaries
 
@@ -271,6 +275,7 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Update context assembler to include retrieved memories
 - [ ] Update context assembler to include relevant wiki pages
 - [ ] Update context assembler to include active threads
+- [ ] Update context assembler to include visible NPC agenda consequences and exclude hidden offscreen events
 - [ ] Update context assembler to always prioritize relationship anchors for present major NPCs above generic retrieved memories
 - [ ] Token budget allocation across all source types
 - [ ] Relevance score threshold filtering
@@ -297,10 +302,10 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 
 ## Phase 4: Full Agent Orchestra
 
-**Goal**: The Story Conductor manages pacing and scene transitions. NPCs have their own voice via the Character Actor agent. Story threads are actively tracked.
+**Goal**: The Story Conductor manages pacing, scene transitions, and living-world advancement. NPCs have their own voice via the Character Actor agent. Major NPCs can pursue offscreen agendas so the world changes while the player is elsewhere.
 
 **New agents**: Story Conductor, Character Actor
-**New tables**: none (schema additions to existing tables)
+**New table/columns**: npc_agendas, timeline_events.visibility
 
 ### Step 4.1: Story Conductor Agent
 
@@ -312,26 +317,41 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Conductor adjudicates asserted outcomes against authoritative state and emits `resolution`
 - [ ] Conductor distinguishes tactical intent, asserted outcomes, cinematic framing, and emotional interiority
 - [ ] Conductor advances or preserves in-world deadlines instead of allowing arbitrary time drift
+- [ ] Conductor emits `advance_living_world` when travel, downtime, scene transitions, return-to-location, explicit time skips, or multiplayer waits should advance offscreen consequences
 
-### Step 4.2: Character Actor Agent
+### Step 4.2: Living World Advancement
+
+- [ ] `npc_agendas` schema + migration
+- [ ] Add `timeline_events.visibility` with `known`, `rumored`, and `hidden`
+- [ ] Query helpers for creating, listing, and updating active NPC agendas
+- [ ] `src/lib/world/living-world.ts`: deterministic advancement service for simple elapsed-time clock updates
+- [ ] Optional LLM structured advancement path for ambiguous agenda outcomes
+- [ ] Advance only major NPC agendas by priority and player relevance; do not simulate all NPCs
+- [ ] Persist agenda clock changes, status changes, character location patches, timeline events, story thread updates, and memory chunks before narrator context assembly
+- [ ] Hidden agenda events are excluded from player-facing narrator context unless discovered or made plausible by the current scene
+- [ ] Returning to a location loads visible consequences: absent NPCs, changed control, public rumors, new threats, and resolved/offscreen thread state
+
+### Step 4.3: Character Actor Agent
 
 - [ ] `prompts/actor-system.md`: System prompt template
 - [ ] `src/lib/ai/actor.ts`: Calls `streamText()` with Sonnet
 - [ ] NPC action insertion into turn history
 - [ ] Actor triggered by conductor's `npc_interlude` decision
 
-### Step 4.3: Scene Management
+### Step 4.4: Scene Management
 
 - [ ] Automatic scene transitions (conductor-driven)
 - [ ] Scene opening generation (narrator called with scene context)
 - [ ] Scene list UI on world dashboard
 - [ ] Manual scene creation option
+- [ ] Scene transition flow can trigger Living World advancement before the new scene opening is narrated
 
-### Step 4.4: Story Thread Tracking
+### Step 4.5: Story Thread Tracking
 
 - [ ] Active threads displayed in context to narrator
 - [ ] Thread resolution detection by Archivist
 - [ ] Thread data queryable through server actions; visible UI remains optional until conversation-first playtesting says it is needed
+- [ ] Story threads can link to NPC agendas through metadata and reflect offscreen progress notes
 
 ### Phase 4 Completion Criteria
 
@@ -341,6 +361,9 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] NPCs speak in their own voice (distinct from narrator)
 - [ ] Scene transitions feel organic, not abrupt
 - [ ] Story threads are tracked and resolved
+- [ ] Major NPC agendas advance during travel/downtime/return-to-location events
+- [ ] Returning to a previously visited location can reveal changed NPC locations, rumors, faction control, or completed offscreen actions
+- [ ] Hidden offscreen events do not leak into narrator prose before discovery
 
 ---
 
@@ -472,10 +495,12 @@ Phase 3
                                         +--> 3.5 Knowledge Surface (optional)
 
 Phase 4
-  4.1 Conductor --+
-  4.2 Actor ------+--> 4.3 Scene Management
-                  |             |
-                  +-------------+--> 4.4 Thread Tracking
+  4.1 Conductor ----------+
+                          +--> 4.2 Living World
+  4.3 Actor --------------+          |
+                          +--> 4.4 Scene Management
+                          |          |
+                          +----------+--> 4.5 Thread Tracking
 
 Phase 5
   5.1 Auth --> 5.2 Multi-User --> 5.3 Proxy System

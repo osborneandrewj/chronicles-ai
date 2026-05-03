@@ -77,6 +77,7 @@ Chronicles AI is an AI-powered interactive novel engine built on a multi-agent a
 │  │  timeline_events      │    │                            │  │
 │  │  relationships        │    └───────────────────────────┘  │
 │  │  story_threads        │                                   │
+│  │  npc_agendas          │                                   │
 │  │  memory_chunks        │    ┌───────────────────────────┐  │
 │  │  notifications        │    │  Voyage AI (External)      │  │
 │  └──────────────────────┘    │  Embedding generation      │  │
@@ -106,19 +107,25 @@ Key design principle: **Server Components for data fetching, Client Components f
 
 ### 2.3 Story Flow Pipeline
 
-Every player turn triggers a six-step pipeline:
+Every player turn triggers a seven-step pipeline:
 
 ```
 Step 1: INPUT
   Player submits text action
   ↓
-Step 2: RETRIEVAL
+Step 2: LIVING WORLD ADVANCEMENT (Phase 4+)
+  Advance elapsed time, deadlines, and major offscreen NPC agendas
+  Apply due agenda clock outcomes before narration
+  Persist significant hidden/rumored/known world events
+  ↓
+Step 3: RETRIEVAL
   Fetch world state from DB
   Build authoritative state (time, locality, identity, tactical state, content boundaries, constraints)
+  Load relevant NPC agenda state and recent world events
   Retrieve relevant memories (top-N by similarity)
   Load active scene, characters, threads
   ↓
-Step 3: CONDUCTOR DECISION
+Step 4: CONDUCTOR DECISION
   Story Conductor evaluates:
     - Did the player state intent or assert an outcome?
     - What outcome is allowed by current state?
@@ -128,12 +135,12 @@ Step 3: CONDUCTOR DECISION
     - Trigger scene transition?
     - Branch to parallel scene?
   ↓
-Step 4: NARRATIVE GENERATION
+Step 5: NARRATIVE GENERATION
   Narrator Agent generates response
   Context = system prompt + authoritative state + world state + retrieved memories + player action/resolution
   Output = streamed narrative prose
   ↓
-Step 5: EXTRACTION
+Step 6: EXTRACTION
   Archivist Agent parses narrator output
   Extracts structured data:
     - New/updated wiki entries
@@ -141,16 +148,17 @@ Step 5: EXTRACTION
     - Relationship changes
     - Story thread updates
   ↓
-Step 6: PERSISTENCE
+Step 7: PERSISTENCE
   Save narrator turn (with token usage metadata)
   Save resolved action metadata and state deltas
+  Save living world state changes and agenda clock progress
   Update wiki pages
   Append timeline events
   Update relationship graph
   Update story thread statuses
 ```
 
-**MVP simplification**: Steps 2, 3, and 5 are reduced in Phase 1. Retrieval is just "last N turns" plus the authoritative state block. Conductor is implicit (always proceed), though the context assembler still classifies player action stance so asserted outcomes do not automatically become true. Extraction is deferred entirely. The pipeline grows in capability across phases without changing its fundamental shape.
+**MVP simplification**: Steps 2, 3, 4, and 6 are reduced in Phase 1. Living World advancement is disabled. Retrieval is just "last N turns" plus the authoritative state block. Conductor is implicit (always proceed), though the context assembler still classifies player action stance so asserted outcomes do not automatically become true. Extraction is deferred entirely. The pipeline grows in capability across phases without changing its fundamental shape.
 
 ### 2.3.1 Phase 1 Pipeline Slice
 
@@ -191,6 +199,29 @@ Seven specialized agents, each with a distinct role and model tier:
 Agents communicate through the pipeline, not directly with each other. The Conductor is the runtime supervisor — it decides which agents run and in what order during play. In the MVP, the pipeline is hardcoded (narrator only); the Conductor adds dynamic decision-making in Phase 4.
 
 See [Agent System Design](03-agent-system-design.md) for detailed agent specifications.
+
+### 2.4.1 Living World / Offscreen Agency
+
+Major NPCs should continue to act when the player leaves the scene. Chronicles AI models this with a **Living World layer**: a lightweight simulation pass that advances only important actors, factions, deadlines, and story threads. It does not simulate every person in the world. It advances durable plans for major NPCs at meaningful boundaries such as travel, downtime, scene transitions, returning to a location, multiplayer wait windows, or explicit time skips.
+
+Living World advancement has three responsibilities:
+
+1. Advance world time and active deadlines.
+2. Advance major NPC agenda clocks according to motivation, resources, opposition, secrecy, and player interference.
+3. Persist consequences as structured state before the Narrator sees the world.
+
+Example:
+
+```text
+The player met Lord-Castellan Dravik on Karthax.
+Dravik has an active agenda: "Break from Imperial command and launch an unsanctioned crusade."
+The player leaves Karthax for six in-world days.
+Living World advancement moves Dravik's crusade-preparation clock from 40 to 100.
+The system updates Dravik's location to "aboard the battle-barge Pax Irae", appends a rumored timeline event, and advances the related story thread.
+When the player returns, the narrator receives authoritative state saying Dravik is no longer present.
+```
+
+The Narrator may dramatize the results, but it must not invent or reverse offscreen outcomes. Current reality belongs to the structured state layer.
 
 ### 2.5 Memory / Retrieval Layer
 
@@ -291,6 +322,12 @@ The Narrator and World Seeder generate creative material (subjective, stylistic,
 ### 4.3 System Owns Current Reality
 
 The Narrator writes prose, but the system owns current reality. Time, location, identity, presentation, deadlines, visible characters, active constraints, and adjudicated action outcomes are represented as structured state and injected into runtime prompts above retrieved memories. Player text expresses intent; it does not directly rewrite world state. This keeps time pressure meaningful, prevents locality drift, and stops equipment or phrasing from changing who a character is.
+
+### 4.3.1 Major NPCs Have Momentum
+
+Major NPCs are not static scene props. When an NPC has an active agenda, the system tracks desire, means, pressure, visibility, clock progress, and consequences. If the player ignores or leaves that NPC, the agenda may still progress. Returning to a location should reveal changed circumstances through authoritative state, timeline events, rumors, absences, occupied territory, new loyalties, or resolved story threads.
+
+The system should prefer clock-based offscreen advancement over constant simulation. A small number of high-signal agenda updates creates the feeling of a living world without turning every player turn into a full world simulation.
 
 ### 4.4 Append-Only Story State
 

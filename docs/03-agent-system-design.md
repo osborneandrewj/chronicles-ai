@@ -362,6 +362,26 @@ const WorldSeedPacketSchema = z.object({
     secrets: z.array(z.string()),
   })),
 
+  npcAgendas: z.array(z.object({
+    characterName: z.string(),
+    title: z.string(),
+    goal: z.string(),
+    motivation: z.string(),
+    currentPlan: z.string(),
+    priority: z.enum(["background", "normal", "urgent"]),
+    secrecy: z.enum(["public", "rumored", "hidden"]),
+    playerRelevance: z.enum(["low", "medium", "high"]),
+    clock: z.object({
+      label: z.string(),
+      progress: z.number().min(0).max(100),
+      consequenceAtFull: z.string(),
+    }),
+    resources: z.array(z.string()),
+    allies: z.array(z.string()),
+    enemies: z.array(z.string()),
+    constraints: z.array(z.string()),
+  })),
+
   timelineAnchors: z.array(z.object({
     title: z.string(),
     description: z.string(),
@@ -393,6 +413,7 @@ const WorldSeedPacketSchema = z.object({
 5. **Persist before compilation** — the full seed packet is stored as a `world_sources` row
 6. **Respect content boundaries** — generate pressure, horror, romance, or violence only within the world's declared limits
 7. **Generate broad name variation** — names must fit faction/culture/class, avoid modern handles or joke names, and avoid reusing the same family name for unrelated NPCs unless the relationship is intentional
+8. **Give major NPCs momentum** — important NPCs should receive agenda clocks only when their offscreen action would change locations, factions, threads, or future scenes
 
 ### Naming Guidance
 
@@ -748,6 +769,16 @@ interface ConductorInput {
     activeScenes: Array<{ id: string; title: string; turnCount: number }>
     activeCharacters: Array<{ name: string; isPlayer: boolean; lastActiveAt: string }>
     activeThreads: Array<{ title: string; priority: string }>
+    activeNpcAgendas: Array<{
+      id: string
+      characterName: string
+      title: string
+      clockLabel: string
+      progress: number
+      priority: string
+      secrecy: string
+      playerRelevance: string
+    }>
   }
   authoritativeState: {
     timeLabel: string | null
@@ -787,6 +818,7 @@ const ConductorDecisionSchema = z.object({
     "wait_for_player",      // Multiplayer: wait for specific player
     "activate_proxy",       // Multiplayer: AI takes over for inactive player
     "npc_interlude",        // Insert NPC action before narrator response
+    "advance_living_world", // Advance offscreen agendas before narration
   ]),
   reasoning: z.string(),     // Why this decision (for logging/debugging)
 
@@ -805,6 +837,12 @@ const ConductorDecisionSchema = z.object({
   npcAction: z.object({
     characterName: z.string(),
     actionHint: z.string(),
+  }).optional(),
+
+  livingWorldAdvance: z.object({
+    reason: z.string(),
+    elapsedTimeHint: z.string().optional(),
+    agendaIds: z.array(z.string()).optional(),
   }).optional(),
 
   resolution: z.object({
@@ -852,6 +890,10 @@ the pipeline proceeds.
 - "npc_interlude": An NPC should act or speak before the narrator responds.
   Use sparingly — only when an NPC has strong motivation to interrupt.
 
+- "advance_living_world": Significant time has passed, the player is traveling,
+  a scene transition moves away from major NPCs, or the player is returning to a
+  location where offscreen consequences should be resolved before narration.
+
 - "wait_for_player": (Multiplayer only) Another player should act before
   the story continues. Only if their action is narratively relevant to this moment.
 
@@ -891,6 +933,8 @@ Last turn: {last_turn_type}
 8. Respect deadlines and elapsed time; do not treat time pressure as decorative
 9. Distinguish contested tactical outcomes from cinematic framing and emotional interiority
 10. Use tactical state for objectives, wounds, resources, casualties, and extraction clocks whenever present
+11. Advance major NPC agendas at travel, downtime, scene transitions, return-to-location moments, or explicit time skips; do not advance them on every ordinary exchange
+12. Hidden agendas can affect authoritative state, but their secret details must not be exposed to the player unless discovery is plausible in the current scene
 ```
 
 ### Behavior Rules
@@ -900,7 +944,8 @@ Last turn: {last_turn_type}
 3. **Fast** — Haiku model, low temperature (0.3), short context
 4. **Logs reasoning** — `reasoning` field stored for debugging
 5. **Adjudicates asserted outcomes** — classifies player action stance and input mode, then records the resolved result when needed
-6. **Fallback**: if the conductor errors, default to `proceed`
+6. **Triggers Living World advancement** — requests offscreen agenda advancement when meaningful time or locality changes occur
+7. **Fallback**: if the conductor errors, default to `proceed`
 
 ### Phase 1-3 Stub
 
@@ -914,7 +959,135 @@ function conductorDecision(input: ConductorInput): ConductorDecision {
 
 This stub has the same interface as the LLM-based conductor, so the pipeline code never changes.
 
-## 8. Agent 7: Character Actor
+## 8. Runtime Service: Living World Advancement
+
+### Purpose
+Advances major NPC agendas while they are offscreen. This is a runtime service coordinated by the Conductor, not a free-roaming autonomous agent. It may use deterministic rules first and an LLM structured-output call when narrative judgment is needed.
+
+The service exists to prevent major NPCs from freezing in place. If the player meets a warlord, leaves the planet, and returns weeks later, the warlord may have traveled, betrayed an ally, launched a campaign, lost resources, gained enemies, or completed a clocked plan.
+
+### Phase
+Introduced in **Phase 4** alongside the Story Conductor.
+
+### Input Contract
+
+```typescript
+interface LivingWorldAdvanceInput {
+  world: {
+    id: string
+    timeLabel: string | null
+    elapsedTimeHint: string | null
+  }
+  trigger: {
+    type: "travel" | "downtime" | "scene_transition" | "return_to_location" | "time_skip" | "multiplayer_wait"
+    description: string
+  }
+  playerContext: {
+    currentLocation: string | null
+    previousLocation: string | null
+    recentActionsSummary: string
+  }
+  agendas: Array<{
+    id: string
+    characterName: string
+    title: string
+    goal: string
+    motivation: string | null
+    currentPlan: string | null
+    priority: string
+    secrecy: string
+    playerRelevance: string
+    clock: {
+      label: string
+      progress: number
+      max: number
+      consequenceAtFull: string
+    }
+    resources: string[]
+    allies: string[]
+    enemies: string[]
+    constraints: string[]
+    currentLocation: string | null
+  }>
+  activeThreads: Array<{ id: string; title: string; priority: string }>
+}
+```
+
+### Output Contract
+
+```typescript
+const LivingWorldAdvanceSchema = z.object({
+  agendaUpdates: z.array(z.object({
+    agendaId: z.string(),
+    progressDelta: z.number(),
+    newProgress: z.number().min(0).max(100),
+    status: z.enum(["active", "paused", "completed", "failed", "cancelled"]),
+    currentPlan: z.string().optional(),
+    reason: z.string(),
+  })),
+
+  characterUpdates: z.array(z.object({
+    characterName: z.string(),
+    locationLabel: z.string().optional(),
+    status: z.enum(["active", "inactive", "dead"]).optional(),
+    traitsPatch: z.record(z.unknown()).optional(),
+  })),
+
+  timelineEvents: z.array(z.object({
+    title: z.string(),
+    description: z.string(),
+    worldTimestamp: z.string().optional(),
+    significance: z.enum(["minor", "major", "critical"]),
+    visibility: z.enum(["known", "rumored", "hidden"]),
+    involvedCharacterNames: z.array(z.string()),
+  })),
+
+  threadUpdates: z.array(z.object({
+    threadTitle: z.string(),
+    status: z.enum(["active", "resolved", "abandoned", "dormant"]).optional(),
+    progressNote: z.string(),
+  })),
+
+  rumors: z.array(z.object({
+    text: z.string(),
+    sourceLocation: z.string().optional(),
+    reliability: z.enum(["low", "medium", "high"]),
+  })),
+})
+```
+
+### Behavior Rules
+
+1. **Advance only major agendas** — do not simulate every NPC or faction
+2. **Use clocks** — progress agenda clocks instead of generating long hidden scenes
+3. **Persist before narration** — update agenda, character, thread, and timeline state before the Narrator sees context
+4. **Respect secrecy** — hidden events are true but not player-visible unless discovered
+5. **Prefer small deltas** — most advances should move clocks or create rumors; only clock completion should cause large consequences
+6. **Player actions matter** — recent interference, alliances, assassinations, warnings, sabotage, or aid should affect agenda progress
+7. **No contradiction** — do not move dead, captured, present, or otherwise constrained NPCs unless current authoritative state permits it
+
+### Execution Model
+
+```
+Conductor detects travel/downtime/return
+  │
+  ▼
+Load active high-relevance NPC agendas
+  │
+  ▼
+Living World advancement produces structured deltas
+  │
+  ├──▶ Update npc_agendas clock/status/current_plan
+  ├──▶ Patch major NPC character location/status when needed
+  ├──▶ Append timeline_events with known/rumored/hidden visibility
+  ├──▶ Update linked story_threads
+  └──▶ Create memory_chunks for significant world_change events
+  │
+  ▼
+Context assembler builds narrator prompt from updated reality
+```
+
+## 9. Agent 7: Character Actor
 
 ### Purpose
 Generates dialogue and actions for NPCs and AI-proxied player characters. Each NPC or proxied character speaks in their own voice, consistent with their personality, goals, and history.

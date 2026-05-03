@@ -21,6 +21,7 @@ Events, actions, dialogue — the raw story timeline.
 | Scene summaries | `memory_chunks` (type: `scene_summary`) | 2 |
 | Character moments | `memory_chunks` (type: `character_moment`) | 3 |
 | Timeline events | `timeline_events` table | 2 |
+| Offscreen NPC events | `timeline_events` + `npc_agendas` | 4 |
 
 **Phase 1 retrieval**: Last N turns from the current scene, ordered by `turn_number DESC`.
 
@@ -30,7 +31,7 @@ Events, actions, dialogue — the raw story timeline.
 
 ### 2.2 Semantic Memory (What Is Known)
 
-Facts about the world — character descriptions, locations, lore, relationships.
+Facts about the world — character descriptions, locations, lore, relationships, and major NPC agendas.
 
 | Source | Storage | Phase |
 |--------|---------|-------|
@@ -41,6 +42,7 @@ Facts about the world — character descriptions, locations, lore, relationships
 | Wiki pages | `wiki_pages` table (with embeddings) | 2 |
 | Relationships | `relationships` table | 2 |
 | Story threads | `story_threads` table | 2 |
+| NPC agendas | `npc_agendas` table | 4 |
 
 **Phase 1 retrieval**: Direct database lookups — load world, active scene, player character, and relationship anchors for present major NPCs when available.
 
@@ -80,10 +82,13 @@ Authoritative state includes:
 | Active constraints | Locked door, launch deadline, wounded enemy behind cover | `scenes.description`, `story_threads`, `turns.metadata` |
 | Tactical state | Objectives, threats, allies, casualties, resources, extraction windows | `scenes.metadata.tactical_state`, `turns.metadata.resolution` |
 | Adjudicated outcome | Attack failed, partial success, full success | `turns.metadata.resolution` |
+| Major NPC momentum | Warlord left planet; rival's coup clock at 80%; patron is secretly captured | `npc_agendas`, `timeline_events.visibility`, `characters.traits.location` |
 
 This state should be short, structured, and higher priority than retrieved memories. The narrator may embellish it, but must not contradict it.
 
 For action-heavy scenes, the authoritative state builder should condense `scenes.metadata.tactical_state` into a few stable lines: current objective, visible threats, ally condition, casualties, resources, clocks, and extraction status. These facts are more important than recent prose because tactical continuity breaks quickly if wounds, distances, remaining resources, or survival counts drift.
+
+For living-world scenes, the authoritative state builder should include only player-visible agenda consequences: changed NPC locations, public outcomes, plausible rumors, and visible effects on the current location. Hidden agenda details remain available to the Conductor and Living World service, but should not be inserted into player-facing narrator context unless the player has discovered them or the current scene provides a believable source.
 
 ## 3. Retrieval Pipeline
 
@@ -186,6 +191,12 @@ Player submits action
 │    SELECT * FROM relationships                               │
 │    WHERE world_id = $1                                       │
 │    ORDER BY updated_at DESC LIMIT 10                         │
+│                                                              │
+│  Query 7: Player-visible NPC agenda consequences             │
+│    SELECT active npc_agendas + recent timeline_events         │
+│    WHERE agenda.secrecy != 'hidden'                           │
+│       OR event.visibility != 'hidden'                         │
+│    LIMIT by priority/relevance                               │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -198,11 +209,12 @@ Player submits action
 │  Priority 2: Authoritative state              ~300-600 tokens│
 │  Priority 3: Current scene + characters       ~400 tokens    │
 │  Priority 4: Active story threads             ~300 tokens    │
-│  Priority 5: Relevant wiki pages (top-3)      ~1200 tokens   │
-│  Priority 6: Relevant memory chunks (top-5)   ~1500 tokens   │
-│  Priority 7: Active relationships             ~300 tokens    │
-│  Priority 8: Recent raw turns (last 10)       ~3000 tokens   │
-│  Priority 9: Player action                    ~100 tokens    │
+│  Priority 5: Visible NPC agenda consequences  ~300 tokens    │
+│  Priority 6: Relevant wiki pages (top-3)      ~1200 tokens   │
+│  Priority 7: Relevant memory chunks (top-5)   ~1500 tokens   │
+│  Priority 8: Active relationships             ~300 tokens    │
+│  Priority 9: Recent raw turns (last 10)       ~2700 tokens   │
+│  Priority 10: Player action                   ~100 tokens    │
 │                                                              │
 │  Budget: 8000 tokens max                                     │
 │  If over budget: truncate from Priority 8 first              │
@@ -220,6 +232,7 @@ The conductor's decision informs what context to prioritize.
 - **`scene_transition`**: Emphasize world-level context, de-emphasize recent turns
 - **`npc_interlude`**: Load NPC character details at higher priority
 - **`activate_proxy`**: Load proxied character's history and personality
+- **`advance_living_world`**: Load active high-relevance NPC agendas, recent timeline events, linked story threads, and current player locality; after advancement, rebuild context from updated authoritative state
 
 ## 4. Embedding Strategy
 
@@ -294,6 +307,7 @@ The Archivist produces memory chunks, not the embedding pipeline. Chunks are sem
 | `relationship_moment` | Major emotional shift, betrayal, sacrifice, rescue, grief | 50-100 words |
 | `tactical_state_delta` | Objective, threat, wound, casualty, resource, or extraction state changes | 25-75 words |
 | `world_change` | World state changes | 50-100 words |
+| `npc_agenda_update` | Major offscreen NPC plan advances or resolves | 50-100 words |
 | `dialogue_highlight` | Important conversation | 50-150 words |
 
 **Why Archivist-generated chunks**: Generic text splitting (every 500 tokens) produces fragments that lack semantic coherence. The Archivist understands narrative structure and produces chunks that represent complete concepts — "Elara discovered the hidden passage behind the waterfall" rather than "...passage behind the waterfall. The water was cold and..."
@@ -315,6 +329,7 @@ Time: Day 12, 13:45. Mission launch in 2h 15m.
 Location: Strategium Antechamber aboard the Saint Drusus.
 Player: Human; Lord Commander; formerly cogitator tech, Inquisitor, Lord Inquisitor. Wearing Arch-Confessor power armor. Not an Ultramarine. Not an Arch-Confessor.
 Present NPCs: Canoness Vahl, Interrogator Serek.
+Not Present: Lord-Castellan Dravik left Karthax six days ago; public rumor says his fleet moved toward Veyr Secundus.
 Visible Threats: Wounded heretic behind cover, 8m away.
 Tactical State: Objective is extraction; two allies wounded; one melta bomb remains; teleport lock unstable; extraction window 90s.
 Immediate Constraints: Blast door sealed; launch deadline is active; enemy has line of sight to the western aisle.
@@ -377,9 +392,10 @@ function assembleContext(params: AssemblyParams): AssembledContext {
   const dynamicBlocks: ContentBlock[] = []
   let used = 0
 
-  // Priority: threads > wiki > memories > recent turns
+  // Priority: threads > visible NPC agenda consequences > wiki > memories > recent turns
   for (const block of [
     ...formatThreads(params.activeThreads),
+    ...formatVisibleAgendaConsequences(params.visibleNpcAgendas),
     ...formatWikiResults(params.retrievedWiki),
     ...formatMemories(params.retrievedMemories),
     ...formatRecentTurns(params.recentTurns),
@@ -442,6 +458,9 @@ These thresholds will need tuning based on actual retrieval quality.
 ### Creation Flow
 
 ```
+Living World advancement may update NPC agendas first
+  │
+  ▼
 Narrator generates response
   │
   ▼
@@ -455,6 +474,7 @@ Archivist extracts structured data
   ├──▶ Relationship changes saved (semantic memory)
   ├──▶ Thread updates saved (semantic memory)
   ├──▶ Tactical state deltas merged into scene metadata
+  ├──▶ NPC agenda updates created or adjusted when live play establishes independent NPC plans
   └──▶ Memory summaries embedded and stored as memory_chunks (episodic memory, compressed)
 ```
 
@@ -476,6 +496,7 @@ This is not needed until a world exceeds ~500 turns. Defer to Phase 6 or beyond.
 | **Archivist** | ~4000 tokens | System prompt > Current turn > Existing wiki titles > Recent context |
 | **Conductor** | ~3000 tokens | System prompt > Authoritative state > World state summary > Current scene stats > Player action > Recent summary |
 | **Actor** | ~4000 tokens | System prompt > Authoritative state > Character profile > Scene > Recent context > Action prompt |
+| **Living World** | ~4000 tokens | System prompt/rules > Active agendas > Elapsed time trigger > Recent player interference > Linked threads |
 
 Each agent sees only what it needs. The Narrator gets the richest context. The Conductor gets the sparsest (it makes routing decisions, not creative ones). The Archivist gets the narrator's output plus existing state for diffing. The Actor gets its character's profile and the immediate situation.
 
@@ -498,6 +519,9 @@ Embedding every raw turn creates a noisy vector space. A turn like "You walk int
 
 ### Never Share Context Across Agents
 Each agent gets its own assembled context. Don't pass the narrator's full prompt to the archivist — the archivist only needs the narrator's output and existing state. This keeps costs down and prevents prompt confusion.
+
+### Never Expose Hidden Offscreen State
+Hidden agenda events are true in the database but unknown to the player. Do not put hidden timeline events, secret agenda motives, or undiscovered locations into narrator context. Surface them through rumors, investigations, briefings, changed environments, or NPC dialogue only when the current scene gives the player a plausible channel.
 
 ## 9. Monitoring and Debugging
 
