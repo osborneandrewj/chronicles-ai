@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Claude Code (local/personal files)
+.claude/settings.local.json
+.claude/agent-memory-local/
+CLAUDE.local.md
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets
+*.pem
+*.key
+credentials.*
+secrets/
+
+# Database
+*.sqlite
+*.sqlite3
+*.db
+
+# Misc
+tmp/
+temp/
+.cache/
