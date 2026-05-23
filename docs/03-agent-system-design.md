@@ -506,6 +506,11 @@ Claude Haiku via `@ai-sdk/anthropic`
 
 ```typescript
 interface WorldLinterInput {
+  worldConstraints: {
+    existingTechnology: string[]
+    nonexistentTechnology: string[]
+    narrativeRules: string[]
+  }
   wikiPages: Array<{
     id: string
     title: string
@@ -530,6 +535,14 @@ interface WorldLinterInput {
     description: string | null
     canonStatus: string
   }>
+  playerCharacterFacts: Array<{    // accumulated across turns by the Archivist
+    characterId: string
+    fact: string
+    field: string
+    source: string
+    canonStatus: string
+    firstAssertedTurnId: string | null
+  }>
 }
 ```
 
@@ -545,6 +558,8 @@ const WorldLintReportSchema = z.object({
       "missing_source",
       "over_canonized",
       "stale_fact",
+      "anachronism",                 // references tech/concept in world.nonexistent_technology
+      "player_self_contradiction",   // player has asserted incompatible facts about own character
     ]),
     severity: z.enum(["info", "warning", "error"]),
     title: z.string(),
@@ -569,6 +584,8 @@ const WorldLintReportSchema = z.object({
 3. **Protect mystery** — intentional ambiguity can be marked as mystery/disputed rather than fixed
 4. **Require provenance** — any compiled fact without source support is flagged
 5. **Cheap and repeatable** — designed to run after seeding and periodically after major updates
+6. **Anachronism check** — flag any wiki page, timeline event, or extracted player fact that references something listed in `worlds.setting_details.nonexistent_technology`. Suggested resolution defaults to `mark_disputed` or `request_user_review`, not silent deletion — the user may choose to declare that thing exists after all.
+7. **Player self-contradiction check** — for any player character, surface clusters of incompatible self-claims (e.g. "kitchen maid" + "newspaper editor" + "fortune heiress"). Severity is `warning` by default; the user resolves which claim is canonical or whether the world supports their coexistence.
 
 ## 6. Agent 5: Archivist
 
@@ -681,6 +698,17 @@ const ArchivistOutputSchema = z.object({
     significance: z.enum(["minor", "major", "critical"]),
   })),
 
+  playerCharacterFacts: z.array(z.object({
+    fact: z.string(),                                // e.g. "claims to be editor of The Daily Herald"
+    source: z.enum(["player_assertion", "narrator_established", "npc_observation"]),
+    field: z.enum([
+      "identity", "background", "profession", "wealth",
+      "relationship", "ability", "location_history", "other",
+    ]),
+    canonStatusHint: z.enum(["hard", "soft", "disputed"]),
+    conflictsWith: z.array(z.string()).optional(),   // existing fact strings this contradicts
+  })),
+
   sceneSummary: z.object({
     shouldCreate: z.boolean(),
     content: z.string().optional(),
@@ -714,6 +742,8 @@ You are NOT creative. You are precise, factual, and conservative.
 10. A "critical" event changes the world itself
 11. If nothing significant happened, return empty arrays — that is correct behavior
 12. At scene boundaries, create a concise scene summary with objective, outcome, casualties, wounds, escapes, resources spent, relationship shifts, unresolved consequences, and final location
+13. **Do not propose new NPC agendas unless the gating criteria are met** (see § NPC Agenda Extraction Criteria below). Default behavior: return an empty `npcAgendas` array.
+14. **Extract player-asserted self-facts.** The player's input is a source of canon-shaping claims about their own character (profession, wealth, ties, history, abilities). When the player asserts a new fact about themselves — directly or through narration framed in first person — emit a `playerCharacterFacts` entry with `source: "player_assertion"` and `canonStatusHint: "soft"`. If the new fact conflicts with an established fact about the player character, populate `conflictsWith` so the Linter can flag the contradiction. Do not silently merge contradictory self-claims into a single description.
 
 ## Existing World State
 
@@ -749,6 +779,43 @@ Narrator streams response → Player sees it immediately
                           → onFinish: save turn
                           → then: Archivist extracts → persist wiki/timeline/etc.
 ```
+
+### Fails-Open Contract
+
+The Archivist is **eventually-consistent backend infrastructure**, not part of the player-facing critical path. Its failure modes are bounded and explicit:
+
+1. **Never blocks the player.** The player has already seen the narrator turn and the turn is already persisted before the Archivist runs. Any Archivist outcome — success, schema failure after retries, network timeout, cost-cap skip — has zero player-visible effect on the current turn.
+2. **Bounded retries.** Up to 2 schema-validation retries (3 total attempts). After that, log the failure with the turn ID and stop. **Do not surface an error to the UI.**
+3. **No partial persistence.** Each Archivist run writes within a single transaction. If extraction fails, nothing is persisted; the turn simply has no extracted knowledge attached. It can be backfilled by a later batch job.
+4. **Cost-cap skip.** If the world's per-session or per-day LLM cost cap is within 10% of being hit, **skip Archivist extraction entirely** for that turn. Log a `archivist_skipped_cost_cap` event with the turn ID. The turn remains valid; only extraction is deferred.
+5. **Skip-on-trivial heuristic.** If the player action plus narrator response together are under ~150 tokens and contain no proper nouns not already in `characters`/`wiki_pages`, skip extraction (a `archivist_skipped_trivial` event is logged). Most "I sit / you sit down" exchanges produce no durable knowledge.
+6. **Backfill path.** A separate maintenance job (`archivist:backfill`) can re-run extraction over any turn missing an `archivist_run_at` timestamp. This is how missed extractions catch up — never by retrying inline on the next player turn.
+
+These rules are non-negotiable: the player experience must remain unaffected by any Archivist behavior. If the Archivist becomes the source of a perceived stall or error, that is a contract violation, not a degraded mode.
+
+### NPC Agenda Extraction Criteria
+
+Most agendas should come from **Phase 2 seeding** (World Seeder defines them up-front for major NPCs from the seed packet). Live-play agenda extraction is a narrow secondary path, not the default. Without strict gating, the Archivist will hallucinate agendas for minor NPCs, which then cause the Living World service to waste tokens advancing irrelevant clocks and the authoritative state to fill with noise.
+
+**An NPC agenda may be extracted from live play only when ALL of the following hold:**
+
+1. **Recurrence.** The NPC has appeared in **3 or more turns** across the current world (not necessarily the current scene). One-shot NPCs do not get agendas — they are scene-level facts at most.
+2. **Independent motivation.** The narrative explicitly establishes a goal the NPC pursues whether or not the player is present. "The tavern keeper wants payment for the drink" is a scene fact, not an agenda. "The tavern keeper has been laundering coin for the Steel Hand and is racing to clear the cellar before the inquisition arrives Tuesday" is an agenda.
+3. **Conflict or future plan.** The motivation either (a) conflicts with the player's current goal, faction, or known plans, or (b) involves a stated future action with a discernible timeline (deadline, milestone, or trigger event).
+4. **Provenance.** At least one specific turn ID supports each component of the agenda (goal, clock label, secrecy). If the Archivist cannot cite the establishing turn(s), it must not extract.
+
+**Rate ceiling (target):** fewer than 1 new live-extracted agenda per 10 player turns. If the Archivist proposes more than this over any rolling 20-turn window, suppress the extra proposals and log `archivist_agenda_rate_exceeded` for review — this is almost always a sign of false positives.
+
+**Default canon status:** live-extracted agendas are written as **`soft` canon** with `secrecy = hidden` until corroborated by a second narrative beat or directly observed by the player. They are *not* promoted to `hard` canon by extraction alone.
+
+**What this excludes (deliberately):**
+
+- Generic NPC desires implied by role ("guards want order", "merchants want profit") — these are setting flavor, not agendas
+- Single-turn flares of emotion or intent ("she vows revenge" with no further establishment)
+- Faction-level motivations — those belong on `story_threads` or faction records, not individual NPC agendas
+- Player allies acting in support of the player's stated objectives — they are not pursuing independent agendas
+
+When in doubt, return an empty `npcAgendas` array. Agendas are expensive (Living World advances them on every meaningful boundary); the cost of missing one is small, the cost of inventing one is recurring.
 
 ## 7. Agent 6: Story Conductor
 
@@ -1145,6 +1212,7 @@ Description: {character_description}
 Personality: {character_traits.personality}
 Goals: {character_traits.goals}
 Fears: {character_traits.fears}
+Boundaries (things you refuse, regardless of pressure): {character_traits.boundaries}
 Speech style: {character_traits.speech_style}
 
 ## Recent Actions You've Taken
@@ -1163,9 +1231,10 @@ Speech style: {character_traits.speech_style}
 
 1. Act consistently with your personality and goals
 2. You may refuse, resist, or disagree — characters are not obligated to cooperate
-3. Keep dialogue natural to your speech style
-4. Actions should be brief (1-2 sentences)
-5. If you have nothing meaningful to say or do, say so — not every moment demands action
+3. Treat your listed boundaries as hard refusals. If the player presses against a boundary, push back in character. Do not capitulate just because the player insists, repeats, or escalates. The only way past a boundary is for the underlying situation to change (new evidence, removed obstacle, earned trust).
+4. Keep dialogue natural to your speech style
+5. Actions should be brief (1-2 sentences)
+6. If you have nothing meaningful to say or do, say so — not every moment demands action
 {proxy_constraints}
 ```
 

@@ -103,21 +103,26 @@ Player submits action
 ┌─────────────────────────────────────────┐
 │  CONTEXT ASSEMBLER (Phase 1)            │
 │                                          │
-│  1. Load system prompt (filesystem)      │  ~500 tokens
-│  2. Load world (DB: worlds)             │  ~300 tokens
-│  3. Load scene (DB: scenes)             │  ~200 tokens
-│  4. Load authoritative state            │  ~300 tokens
+│  Budget: 8,000 input tokens              │
+│  Reserved: 1,024 output tokens           │
+│                                          │
+│  1. Load system prompt (filesystem)      │  ~500 tokens  [P1, never truncated]
+│  2. Load authoritative state            │  ~300-600 tk  [P2, never truncated]
 │     (time, locality, identity, visible  │
-│      NPCs, immediate constraints)       │
-│  5. Load player character (DB: chars)   │  ~200 tokens
-│  6. Load NPC relationship anchors       │  ~200-500 tokens
-│  7. Load recent turns (DB: turns        │  ~4000-6000 tokens
+│      NPCs, immediate constraints,        │
+│      tactical state if present)         │
+│  3. Load world summary (DB: worlds)     │  ~200-300 tk  [P3]
+│  4. Load scene + active characters      │  ~300-500 tk  [P3]
+│  5. Load player character (DB: chars)   │  ~200 tokens  [P3]
+│  6. Load NPC relationship anchors       │  ~200-500 tk  [P5]
+│  7. Load recent turns (DB: turns        │  ~2500-4000 tk [P8, truncated oldest-first]
 │     WHERE world_id = X                  │
 │     ORDER BY created_at DESC            │
 │     LIMIT 20)                           │
-│  8. Append player action                │  ~100 tokens
+│  8. Append player action                │  ~100-300 tk  [P9, never truncated]
 │                                          │
-│  Total: ~5800-8100 tokens               │
+│  Worst-case total:                       │  ~5,800 tokens
+│  Hard cap:                               │  8,000 tokens
 └─────────────────────────────────────────┘
   │
   ▼
@@ -205,19 +210,23 @@ Player submits action
 │                                                              │
 │  Fill token budget from highest to lowest priority:          │
 │                                                              │
-│  Priority 1: System prompt                    ~500 tokens    │
-│  Priority 2: Authoritative state              ~300-600 tokens│
-│  Priority 3: Current scene + characters       ~400 tokens    │
-│  Priority 4: Active story threads             ~300 tokens    │
-│  Priority 5: Visible NPC agenda consequences  ~300 tokens    │
-│  Priority 6: Relevant wiki pages (top-3)      ~1200 tokens   │
-│  Priority 7: Relevant memory chunks (top-5)   ~1500 tokens   │
-│  Priority 8: Active relationships             ~300 tokens    │
-│  Priority 9: Recent raw turns (last 10)       ~2700 tokens   │
-│  Priority 10: Player action                   ~100 tokens    │
+│  P1: System prompt                            ~500 tokens    │  [never truncated]
+│  P2: Authoritative state                      ~300-600 tk    │  [never truncated]
+│  P3: Current scene + active characters        ~300-500 tk    │
+│  P4: Active story threads                     ~200-300 tk    │
+│  P5: Relationship anchors                     ~200-500 tk    │
+│  P5b: Visible NPC agenda consequences         ~200-400 tk    │
+│  P6: Relevant wiki pages (top-3)              ~800-1200 tk   │
+│  P7: Relevant memory chunks (top-5)           ~1000-1500 tk  │
+│  P8: Recent raw turns (last 8-10)             ~2000-2700 tk  │  [truncated oldest-first]
+│  P9: Player action                            ~100-300 tk    │  [never truncated]
 │                                                              │
-│  Budget: 8000 tokens max                                     │
-│  If over budget: truncate from Priority 8 first              │
+│  Hard cap (input): 8,000 tokens                              │
+│  Reserved (output): 1,024 tokens                             │
+│  Truncation order: drop from P8, then P7, then P6, then P5b/ │
+│  P5, then P4, then P3. P1, P2, P9 are mandatory — if their   │
+│  combined size exceeds 8,000 tokens, fail with               │
+│  ContextOverflowError rather than silently truncate.         │
 └─────────────────────────────────────────────────────────────┘
   │
   ▼

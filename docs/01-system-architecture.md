@@ -107,48 +107,61 @@ Key design principle: **Server Components for data fetching, Client Components f
 
 ### 2.3 Story Flow Pipeline
 
-Every player turn triggers a seven-step pipeline:
+Every player turn triggers a seven-step pipeline. **Note on ordering:** The Conductor decides *whether* Living World advancement runs on a given turn (Phase 4+). The pipeline therefore runs Conductor first, then conditionally runs Living World, then re-fetches any state Living World mutated before assembling narrator context.
 
 ```
 Step 1: INPUT
   Player submits text action
   ↓
-Step 2: LIVING WORLD ADVANCEMENT (Phase 4+)
-  Advance elapsed time, deadlines, and major offscreen NPC agendas
-  Apply due agenda clock outcomes before narration
-  Persist significant hidden/rumored/known world events
+Step 2: PRE-RETRIEVAL (lightweight)
+  Fetch enough world/scene state for the Conductor to decide:
+    - Active scene, player character, recent turn summary
+    - Active NPC agendas (id, clock label, priority, secrecy, player relevance)
+    - Active deadlines and immediate constraints
   ↓
-Step 3: RETRIEVAL
-  Fetch world state from DB
-  Build authoritative state (time, locality, identity, tactical state, content boundaries, constraints)
-  Load relevant NPC agenda state and recent world events
-  Retrieve relevant memories (top-N by similarity)
-  Load active scene, characters, threads
-  ↓
-Step 4: CONDUCTOR DECISION
+Step 3: CONDUCTOR DECISION (Phase 4+; hardcoded "proceed" in Phases 1-3)
   Story Conductor evaluates:
     - Did the player state intent or assert an outcome?
     - What outcome is allowed by current state?
-    - Proceed with narration?
-    - Wait for another player? (multiplayer)
-    - Activate AI proxy? (multiplayer)
-    - Trigger scene transition?
-    - Branch to parallel scene?
+    - Proceed with narration? (default)
+    - Advance the Living World first? (sets action = "advance_living_world")
+    - Trigger scene transition? Wait for player? Activate proxy? Insert NPC interlude?
+  Conductor output determines whether Step 4 runs.
   ↓
-Step 5: NARRATIVE GENERATION
+Step 4: LIVING WORLD ADVANCEMENT (conditional, Phase 4+)
+  Runs ONLY if the Conductor returned action = "advance_living_world",
+  OR on an explicit time skip / scene transition / return-to-location boundary.
+  Does NOT run on ordinary in-scene player actions.
+  When it runs:
+    - Advance elapsed time and active deadlines
+    - Advance major NPC agenda clocks (motivation × resources × opposition × secrecy × player interference)
+    - Persist significant hidden / rumored / known world events
+    - Update character locations and thread statuses
+  Phases 1-3: skipped entirely (no Conductor, no Living World service).
+  ↓
+Step 5: FULL RETRIEVAL
+  Build authoritative state (time, locality, identity, tactical state, content boundaries, constraints)
+    — re-reads any state Living World just mutated
+  Load relationship anchors for present major NPCs
+  Retrieve relevant memories (top-N by similarity) (Phase 3+)
+  Load active wiki pages, threads, visible NPC agenda consequences
+  ↓
+Step 6: NARRATIVE GENERATION
   Narrator Agent generates response
   Context = system prompt + authoritative state + world state + retrieved memories + player action/resolution
   Output = streamed narrative prose
   ↓
-Step 6: EXTRACTION
+Step 7: EXTRACTION (Phase 3+)
   Archivist Agent parses narrator output
   Extracts structured data:
     - New/updated wiki entries
     - Timeline events
     - Relationship changes
     - Story thread updates
+    - Tactical state deltas, scene summaries, NPC agendas (gated — see Agent System Design)
+  Fails open: never blocks the player; the narrator turn is already persisted.
   ↓
-Step 7: PERSISTENCE
+Step 8: PERSISTENCE
   Save narrator turn (with token usage metadata)
   Save resolved action metadata and state deltas
   Save living world state changes and agenda clock progress
@@ -158,7 +171,35 @@ Step 7: PERSISTENCE
   Update story thread statuses
 ```
 
-**MVP simplification**: Steps 2, 3, 4, and 6 are reduced in Phase 1. Living World advancement is disabled. Retrieval is just "last N turns" plus the authoritative state block. Conductor is implicit (always proceed), though the context assembler still classifies player action stance so asserted outcomes do not automatically become true. Extraction is deferred entirely. The pipeline grows in capability across phases without changing its fundamental shape.
+**MVP simplification by phase**:
+
+| Phase | Step 2 | Step 3 (Conductor) | Step 4 (Living World) | Step 5 | Step 6 | Step 7 (Archivist) |
+|-------|--------|--------------------|-----------------------| -------|--------|--------------------|
+| 1     | minimal (last 20 turns + auth state) | hardcoded "proceed" | skipped | merged into Step 2 | full | skipped |
+| 2     | + seeded knowledge | hardcoded "proceed" | skipped | + wiki direct lookup | full | skipped |
+| 3     | + vector retrieval | hardcoded "proceed" | skipped | full | full | full (fails open) |
+| 4+    | full | full Conductor | conditional on Conductor or boundary event | full | full | full (fails open) |
+
+The pipeline grows in capability across phases without changing its fundamental shape. Conductor and Living World are explicit no-ops in Phases 1-3 — they ship as `null`-returning stubs so the call-site shape is stable from day one.
+
+### 2.3.0 Meta-Commands (Out-of-Story Input)
+
+Player input is not always an in-story action. Sometimes the player wants to pause, inspect state, or change the rules ("what do you know about my character?", "show me the established canon", "rewind one turn"). These must bypass the Narrator entirely — feeding them into the prompt invites the LLM to either roleplay an answer or hallucinate one.
+
+A reserved prefix (default: `/`) routes input to a meta-command handler before Step 2 (Pre-retrieval). Handlers are deterministic code, not LLM calls:
+
+| Command | Effect | Phase |
+|---------|--------|-------|
+| `/pause` | Halt narration; freeze the active turn cycle | 1 |
+| `/inspect character` | Render structured `characters.traits` for the player character | 1 |
+| `/inspect scene` | Render `scenes.metadata` including tactical state | 1 |
+| `/canon` | List established facts about the player character, sorted by `canon_status` | 3 |
+| `/rewind <n>` | Revert the last `n` turns (creates a `system_event` turn, does not delete) | 4 |
+| `/rules` | Show the world's `setting_details`, content boundaries, and existence constraints | 1 |
+
+Meta-commands never reach the Narrator, never count against the LLM cost cap, and never modify world canon except where explicitly designed to (e.g. `/rewind`). Anything that does not match a registered command is treated as in-story input. The append-only turn log is preserved: `/rewind` writes a `system_event` turn pointing at the reverted range rather than deleting rows.
+
+The motivation for designing this in Phase 1 (rather than waiting): players will try meta-commands whether or not they are supported. Without explicit handling, the Narrator will improvise responses that contradict structured state — exactly the failure mode the rest of this architecture is designed to prevent.
 
 ### 2.3.1 Phase 1 Pipeline Slice
 
@@ -236,18 +277,24 @@ Three memory types:
 | **Semantic** | Character info, world lore, relationships, emotional beats, discovered truths | `worlds`, `characters`, `wiki_pages`, `relationships` | Direct DB lookup + vector similarity for wiki |
 | **Procedural** | System prompts, agent rules, workflow definitions | `prompts/` directory (files) | Loaded at pipeline start |
 
-The **Context Assembler** is the single function that builds the prompt for any agent call. It takes a token budget and fills it from highest-priority to lowest-priority sources:
+The **Context Assembler** is the single function that builds the prompt for any agent call. It enforces a fixed **8,000-token input budget** (with **1,024 tokens reserved for narrator output**, so 7,000 tokens of usable input headroom by default) and fills it from highest-priority to lowest-priority sources:
 
 ```
 Priority 1: System prompt (procedural memory)     ~500 tokens
-Priority 2: Current scene + active characters      ~300 tokens
-Priority 3: Active story threads                   ~200 tokens
-Priority 4: Retrieved semantic memories (wiki)     ~1500 tokens
-Priority 5: Retrieved episodic memories (turns)    ~4000 tokens
-Priority 6: Player action                          ~100 tokens
+Priority 2: Authoritative state block             ~300-600 tokens
+Priority 3: Current scene + active characters     ~300-500 tokens
+Priority 4: Active story threads                  ~200-300 tokens
+Priority 5: Relationship anchors (present NPCs)   ~200-500 tokens
+Priority 6: Retrieved semantic memories (wiki)    ~1000-1500 tokens (Phase 3+)
+Priority 7: Retrieved episodic memories (chunks)  ~1000-1500 tokens (Phase 3+)
+Priority 8: Recent raw turns                      ~2500-4000 tokens
+Priority 9: Player action                         ~100-300 tokens
 ─────────────────────────────────────────────────────────────
-Target total:                                      ~6600 tokens
+Hard cap (input):                                 8,000 tokens
+Reserved (output):                                1,024 tokens
 ```
+
+**Truncation order (load-bearing rule):** if the assembled context exceeds 8,000 tokens, drop from lowest priority upward. The **system prompt (P1), authoritative state (P2), and player action (P9) are never truncated** — they are the minimum viable prompt. P8 (recent raw turns) is truncated oldest-first; P6/P7 are truncated lowest-relevance-first. If, after dropping P3-P8 entirely, the remainder still exceeds 8,000 tokens, fail the call with a `ContextOverflowError` rather than silently truncating a mandatory section.
 
 See [Memory Architecture](04-memory-architecture.md) for the full retrieval pipeline design.
 

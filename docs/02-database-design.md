@@ -125,7 +125,9 @@ CREATE TABLE worlds (
 --   "magic_system": "low fantasy",
 --   "geography": "island archipelago",
 --   "key_factions": ["The Iron Council", "The Drift Walkers"],
---   "narrative_rules": ["no resurrection", "consequences are permanent"]
+--   "narrative_rules": ["no resurrection", "consequences are permanent"],
+--   "existing_technology": ["sail ships", "iron weapons", "hand-copied manuscripts"],
+--   "nonexistent_technology": ["printing press", "firearms", "telegraph", "newspapers"]
 -- }
 ```
 
@@ -134,6 +136,8 @@ CREATE TABLE worlds (
 **Status values**: `active` (playable), `paused` (temporarily inactive), `archived` (read-only).
 
 **Content boundaries**: `setting_details.content_boundaries` stores world-level tone and safety constraints. All agents must treat these as authoritative style constraints, not suggestions. This lets a world remain intense or grim while still avoiding content the user has excluded.
+
+**Existence constraints**: `setting_details.existing_technology` and `nonexistent_technology` declare what is and is not present in the world. Both lists are authoritative for the World Linter and Archivist — a player or LLM introducing "the Daily Herald" into a world whose `nonexistent_technology` includes `printing press` should be flagged as an anachronism rather than silently absorbed into canon. The lists are non-exhaustive; absence from either list means "not yet declared." Linter behavior is conservative when something is undeclared.
 
 ### 3.2 `characters`
 
@@ -160,6 +164,11 @@ CREATE INDEX idx_characters_world_id ON characters(world_id);
 --   "abilities": ["swordsmanship", "herbalism"],
 --   "goals": ["find the lost city", "protect their sister"],
 --   "fears": ["deep water", "betrayal"],
+--   "boundaries": [
+--     "will not marry under political pressure",
+--     "will not swear fealty to anyone who has not earned it",
+--     "refuses to discuss the death of his brother"
+--   ],
 --   "appearance": "tall, weathered, scar across left cheek",
 --   "speech_style": "formal, measured, avoids contractions",
 --   "name_profile": {
@@ -199,6 +208,8 @@ CREATE INDEX idx_characters_world_id ON characters(world_id);
 World creation and seeding should maintain a per-world name registry in `worlds.setting_details.name_registry` or a later dedicated table. The registry tracks `reuse_key` values and recent given/family names so generators can penalize duplicates such as repeated surnames across unrelated NPCs.
 
 **Identity vs. presentation**: `traits.identity` stores what the character is. `traits.presentation` stores what the character appears to be wearing, carrying, impersonating, or signaling. Narrator and Actor prompts must not infer that equipment changes identity. Use `identity.not_facts` for facts the model is likely to hallucinate, such as "wearing Arch-Confessor armor" becoming "is an Arch-Confessor."
+
+**Boundaries vs. goals**: `traits.goals` describes what the character pursues; `traits.boundaries` describes what they will refuse, resist, or walk away from regardless of player pressure. The Actor agent treats boundaries as hard refusals — the player can persuade an NPC over time only by changing the underlying state (proving loyalty, removing a deal-breaker fact, etc.), not by re-asking. Boundaries are first-class because LLM-controlled characters default to agreement under pressure unless explicitly authored to push back. Player characters may also have boundaries that gate proxy actions in Phase 5.
 
 **Locality**: `traits.location` is the character-level current location for Phase 1. It should be kept in sync with the active scene for the player and later extended for NPCs in Phase 4. The context assembler uses it to build the authoritative state block.
 
@@ -757,6 +768,23 @@ Phase 5 (Multiplayer):
 Once a migration has been committed or deployed, never edit it in place. Later phases may add new tables, add columns, or relax constraints through forward migrations, but Phase 1 migration files themselves remain immutable.
 
 The JSONB columns (`setting_details`, `traits`, `metadata`) absorb flexible data during early development so most Phase 2 additions can be modeled as new tables. Known later exceptions are explicit forward migrations, such as relaxing the scene-number constraint for parallel scenes and adding ownership/controller fields for multiplayer.
+
+### Structural Evolution: JSONB → Typed Columns
+
+JSONB is a deliberate Phase 1-2 convenience, not a permanent home for any field with documented internal structure. Several JSONB blocks already have specified shapes (`scenes.metadata.tactical_state`, `npc_agendas.clock`, `turns.metadata.resolution`, parts of `worlds.setting_details`). These will be promoted to typed columns or sibling tables when **any** of the following triggers fire:
+
+1. **Query trigger.** Any application code reads or writes the field with a JSON-path expression more than twice (e.g. `WHERE setting_details->>'clock'->>'remaining' < 60`). At that point the field is no longer "flexible data" — it is a column wearing a JSONB hat, and indexable structured storage will be faster and safer.
+2. **Constraint trigger.** Any field acquires a non-null requirement, a numeric range, a foreign key reference, or a uniqueness rule. JSONB cannot enforce these without check constraints that are awkward to maintain; a real column with `NOT NULL` / `CHECK` / `REFERENCES` is the right shape.
+3. **Migration trigger.** Any internal field needs renaming, type narrowing, or default backfilling across existing rows. Doing this safely inside JSONB requires hand-rolled UPDATE statements with JSON manipulation; a column migration is straightforward.
+4. **Cross-row aggregation trigger.** Any report or dashboard needs to aggregate the field across worlds (e.g. "average tactical clock progress at scene end"). JSON-path aggregation works but is slow; a column with a btree index is the right answer.
+
+**Expected promotions, by phase:**
+
+- **Phase 3 (Archivist live extraction):** `scenes.metadata.tactical_state` is read on most narrator turns to populate the authoritative state block. Once the Archivist begins writing structured tactical deltas, promote it to a dedicated `scene_tactical_state` row (1-to-1 with `scenes`) with typed columns for `objectives`, `threats`, `allies`, `casualties`, `resources`, `extraction_status`, `scene_clock_progress`, `scene_clock_max`.
+- **Phase 4 (Living World):** `npc_agendas.clock` is advanced on every Living World pass. Promote `clock_label`, `clock_progress`, `clock_max`, `clock_consequence`, and `clock_due_at` to typed columns on `npc_agendas`. Retain a `clock_metadata` JSONB for anything that doesn't fit.
+- **Phase 4 (Conductor logging):** `turns.metadata.resolution.stance` and `turns.metadata.resolution.outcome` are queried for analytics. Promote `resolution_stance` and `resolution_outcome` to columns; leave the rest of `resolution` in JSONB.
+
+Promotions are non-destructive forward migrations: add the new column, backfill from JSONB, switch reads to the column, leave the JSONB in place for one release as a fallback, then drop the JSONB key in a follow-up migration. The point of this section is to make the trigger criteria explicit so that "we'll just leave it in JSONB" never wins by default once the field is being queried structurally.
 
 ## 8. Query Patterns
 

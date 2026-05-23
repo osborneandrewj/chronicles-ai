@@ -152,6 +152,8 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Content boundary tests verify restricted content is passed into agent context as authoritative state
 - [ ] Playwright smoke test covers create world -> submit action -> streamed response -> refresh persistence
 - [ ] Accessibility smoke test verifies keyboard submission and story-feed live region behavior
+- [ ] Meta-command handler test: `/pause`, `/inspect character`, `/rules` route to deterministic handlers and never invoke the Narrator. Unknown `/` prefix falls through to in-story input.
+- [ ] Adopt `docs/09-example-chat-narrative.md` as a regression fixture. Phase 1 must demonstrate the player cannot author identity changes that bypass adjudication (the "kitchen maid → newspaper editor → heiress" sequence should be visible in `playerCharacterFacts` once Phase 3 ships, and `/canon` should expose the accumulation). Phase 2+ Linter runs must produce a `player_self_contradiction` issue on the contradictory cluster. Phase 4+ Actor must produce in-character pushback when a player presses against a major NPC's declared `traits.boundaries` (validated against the Jaron marriage-proposal turn).
 
 ### Phase 1 Completion Criteria
 
@@ -250,10 +252,14 @@ Six phases, each delivering independent value. Phase 1 is the MVP — a playable
 - [ ] Zod schema for Archivist structured output
 - [ ] `src/lib/ai/archivist.ts`: Calls `generateObject()` with Haiku
 - [ ] Async execution after narrator turn (non-blocking)
-- [ ] Retry logic (up to 2 retries on schema validation failure)
+- [ ] Retry logic (up to 2 retries on schema validation failure; **fails open** after that — log and stop, never surface to UI)
+- [ ] **Fails-open contract** (see [Agent System Design § Archivist Fails-Open Contract](03-agent-system-design.md)): Archivist never blocks the player. The narrator turn is already persisted before Archivist runs.
+- [ ] **Cost-cap skip**: if per-world per-session cost cap is within 10% of being hit, skip Archivist extraction for this turn (log `archivist_skipped_cost_cap`)
+- [ ] **Skip-on-trivial heuristic**: skip when player action + narrator response < ~150 tokens combined and contain no new proper nouns (log `archivist_skipped_trivial`)
+- [ ] **Backfill job** (`archivist:backfill`): re-runs extraction over turns missing `archivist_run_at` timestamp; this is the only retry path beyond the inline 2 retries
 - [ ] Persist player/narrator turns as `play_turn` source documents or source references for provenance
 - [ ] Extract emotional events, relationship moments, tactical state deltas, and scene-boundary summaries
-- [ ] Extract newly established major NPC independent agendas when live play clearly creates one
+- [ ] Extract newly established major NPC independent agendas only when criteria are met (see § NPC Agenda Extraction Criteria in [Agent System Design](03-agent-system-design.md))
 - [ ] Merge tactical state deltas into `scenes.metadata.tactical_state` through deterministic application code
 
 ### Step 3.2: Knowledge Table Refinement
