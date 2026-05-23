@@ -7,9 +7,11 @@ import {
   type UIMessage,
 } from 'ai'
 
+import { CLASSIFIER_MODEL, classifyAction } from '@/lib/classifier'
 import {
   getLatestStateJson,
   insertTurn,
+  latestUserContent,
   recentTurns,
   updateTurnMetadata,
   updateTurnState,
@@ -37,7 +39,15 @@ export async function POST(req: Request) {
     return streamMetaResponse(runMetaCommand(playerText))
   }
 
-  insertTurn('user', playerText)
+  // Idempotent on retry: if the trailing player text matches the latest persisted user
+  // turn, skip re-insertion. Lets the client re-fire the same request after a stream
+  // error without duplicating turns.
+  if (latestUserContent() !== playerText) {
+    insertTurn('user', playerText)
+  }
+
+  const classification = await classifyAction(playerText)
+  const { stance, input_mode } = classification
 
   const state = parseState(getLatestStateJson())
   const stateBlock = formatStateBlock(state)
@@ -61,7 +71,7 @@ export async function POST(req: Request) {
 
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${stateBlock}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\nPLAYER ACTION:\n${playerText}`,
   }
 
   const modelMessages: ModelMessage[] = [
@@ -78,6 +88,12 @@ export async function POST(req: Request) {
       if (trimmed.length === 0) return
       const narratorTurn = insertTurn('assistant', trimmed)
       const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
+      const classifierMeta = {
+        model: CLASSIFIER_MODEL,
+        classification: { stance, input_mode },
+        usage: classification.usage,
+        error: classification.error,
+      }
 
       void extractState(state, [
         { role: 'user', content: playerText },
@@ -88,12 +104,14 @@ export async function POST(req: Request) {
           updateTurnMetadata(narratorTurn.id, {
             narrator: narratorMeta,
             extractor: { model: EXTRACTOR_MODEL, usage: extractorUsage },
+            classifier: classifierMeta,
           })
         })
         .catch((err) => {
           updateTurnMetadata(narratorTurn.id, {
             narrator: narratorMeta,
             extractor: { model: EXTRACTOR_MODEL, error: String(err) },
+            classifier: classifierMeta,
           })
           console.error('[state extraction failed]', err)
         })
