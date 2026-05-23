@@ -2,17 +2,26 @@
 
 AI-powered multiplayer interactive novel engine. Persistent world, multi-agent narrator system, living wiki + timeline.
 
+Architecture and design detail lives in `docs/` — read the relevant doc before non-trivial changes:
+- `docs/01-system-architecture.md` — overall structure, project layout
+- `docs/02-database-design.md` — full schema
+- `docs/03-agent-system-design.md` — agent roster, prompts, context flow
+- `docs/04-memory-architecture.md` — memory chunks, retrieval, embeddings
+- `docs/07-implementation-roadmap.md` — phased plan, current phase
+
+## Working in this repo
+
+- **State assumptions before coding.** If the request has multiple reasonable readings, surface them rather than picking silently. If you don't know which agent/table/phase a change belongs in, ask.
+- **Define "done" before starting.** A narrator change isn't done until you've streamed a turn end-to-end in the browser. A schema change isn't done until `db:generate` + `db:migrate` succeed and queries still typecheck. A new agent isn't done until its prompt template is in `prompts/` and a real call returns valid output.
+- **Stay in your lane.** Each agent has its own prompt, context, and Zod schema. Don't merge them, don't share full prompts, don't let the narrator see what the archivist sees.
+- **Respect the budget.** Context assembler enforces 8K input / 1K output per narrator call. System prompt, authoritative state, and player action are pinned; recent turns + retrieved memories drop first. Don't bypass it.
+
 ## Tech Stack
-- **Framework**: Next.js 15 App Router + TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui
-- **LLM**: Vercel AI SDK (`ai` + `@ai-sdk/react` + `@ai-sdk/anthropic`) — Claude Sonnet 4 (narrator/seeder/actor), Haiku (compiler/linter/archivist/conductor)
-- **Database**: PostgreSQL 17 + pgvector (Docker Compose for local dev)
-- **ORM**: Drizzle ORM + `postgres` (postgres-js driver)
-- **Validation**: Zod
-- **Embeddings**: Voyage AI (Phase 2+)
-- **Auth**: NextAuth.js (Phase 5+)
+
+Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (`@ai-sdk/anthropic`) · Claude Sonnet 4 (narrator/seeder/actor) + Haiku (compiler/linter/archivist/conductor) · PostgreSQL 17 + pgvector · Drizzle ORM (postgres-js driver) · Zod · Voyage AI embeddings (Phase 2+) · NextAuth.js (Phase 5+)
 
 ## Commands
+
 - `docker compose up -d` — start Postgres
 - `npm run dev` — start Next.js dev server
 - `npm run build` — production build
@@ -24,6 +33,7 @@ AI-powered multiplayer interactive novel engine. Persistent world, multi-agent n
 - `npm test` — run tests
 
 ## Code Style
+
 - 2-space indentation, TypeScript throughout
 - Named imports, alphabetized within groups (external → internal → relative)
 - `const` / `let` only, never `var`
@@ -32,65 +42,26 @@ AI-powered multiplayer interactive novel engine. Persistent world, multi-agent n
 - Server Components by default, `"use client"` only when interactivity is required
 - Server Actions for mutations, Route Handlers only for streaming endpoints
 
-## Project Structure
-```
-src/
-├── app/                     # Next.js App Router pages + API routes
-├── components/
-│   ├── ui/                  # shadcn/ui base components
-│   ├── story/               # StoryFeed, StoryInput, TurnEntry, StreamingTurn
-│   └── world/               # WorldCard, CreateWorldForm
-├── lib/
-│   ├── ai/                  # Agent system: narrator, seeder, compiler, linter, archivist, conductor, actor
-│   │   ├── context-assembler.ts  # Builds LLM context from DB (token-budgeted)
-│   │   └── prompts.ts            # Loads prompt templates from prompts/
-│   ├── db/
-│   │   ├── schema/          # Drizzle table definitions
-│   │   └── queries/         # Typed query functions
-│   ├── actions/             # Server Actions (world CRUD, story)
-│   └── utils/               # Error classes, helpers
-└── types/                   # Shared TypeScript types
-prompts/                     # LLM prompt templates (.md files, git-tracked)
-docker/                      # Docker init scripts
-docs/                        # Architecture and design docs
-```
-
-## Database
-- 4 core tables (Phase 1): `worlds`, `characters`, `scenes`, `turns`
-- Seeding/knowledge tables (Phase 2+): `world_sources`, `wiki_pages`, `timeline_events`, `relationships`, `story_threads`, `memory_chunks`
-- Turns are append-only — never modified after creation
-- UUIDs for all primary keys
-- JSONB columns for flexible data (`setting_details`, `traits`, `metadata`)
-- Token usage tracked in `turns.metadata` on every LLM call
-- pgvector extension loaded via `docker/init.sql`
-
-## AI Agent System
-- **Narrator** (Sonnet): generates story prose, streamed via SSE
-- **World Seeder** (Sonnet): creates seed packet, factions, NPCs, mysteries — Phase 2
-- **Wiki Compiler** (Haiku): compiles immutable sources into wiki/timeline candidates — Phase 2
-- **World Linter** (Haiku): flags contradictions and missing provenance — Phase 2
-- **Archivist** (Haiku): extracts structured data, emotional beats, tactical deltas, and scene summaries via `generateObject()` with Zod schemas — Phase 3
-- **Conductor** (Haiku): pacing/scene decisions — Phase 4
-- **Actor** (Sonnet): NPC dialogue/actions — Phase 4
-- Prompt templates live in `prompts/*.md` — git-diffable, loaded at runtime
-- Context assembler enforces token budget (~8K tokens max per narrator call)
-- Each agent sees only the context it needs — never share full prompts between agents
-
 ## Key Design Rules
+
 - The LLM does not remember — the system decides what it remembers and injects into context
 - Never dump full conversation history into a prompt
 - Separate creative output (narrator) from factual extraction (archivist)
 - Keep tactical scene state, content boundaries, and action resolution in structured authoritative state, not only in prose
 - Player actions are persisted BEFORE streaming starts; narrator responses AFTER stream completes
+- Turns are append-only — never modified after creation
+- Token usage tracked in `turns.metadata` on every LLM call
 - Treat LLM output as untrusted — sanitize before rendering
+- Prompt templates live in `prompts/*.md` — git-diffable, loaded at runtime
 
 ## Environment
-- `.env.local` for local dev (never commit)
-- `.env.example` documents all required variables
+
+- `.env.local` for local dev (never commit); `.env.example` documents required variables
 - Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`
 - Phase 2+: `VOYAGE_API_KEY`
 
 ## Common Gotchas
+
 - Database must be running (`docker compose up -d`) before dev server or tests
 - Drizzle schema changes require `npm run db:generate` then `npm run db:migrate`
 - Hot-reload breaks on ORM model changes — restart dev server
