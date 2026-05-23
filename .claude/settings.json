@@ -40,8 +40,5 @@
       "Read(**/secrets/**)",
       "Read(**/*credentials*)"
     ]
-  },
-  "env": {
-    "NODE_ENV": "development"
   }
 }
