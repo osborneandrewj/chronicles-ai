@@ -34,6 +34,9 @@ const allStmt = db.prepare(
 const recentStmt = db.prepare(
   'SELECT id, role, content FROM turns ORDER BY id DESC LIMIT ?',
 )
+const latestUserContentStmt = db.prepare(
+  "SELECT content FROM turns WHERE role = 'user' ORDER BY id DESC LIMIT 1",
+)
 const latestStateStmt = db.prepare(
   'SELECT state_json FROM turn_states ORDER BY turn_id DESC LIMIT 1',
 )
@@ -57,6 +60,9 @@ const usageTotalsStmt = db.prepare(`
 const latestMetadataStmt = db.prepare(
   'SELECT id, metadata FROM turns WHERE metadata IS NOT NULL ORDER BY id DESC LIMIT 1',
 )
+const assistantMetadataStmt = db.prepare(
+  "SELECT id, metadata FROM turns WHERE role = 'assistant' AND metadata IS NOT NULL ORDER BY id ASC",
+)
 
 export function insertTurn(role: TurnRole, content: string): Turn {
   return insertStmt.get(role, content) as Turn
@@ -69,6 +75,11 @@ export function allTurns(): Turn[] {
 export function recentTurns(limit: number): Array<Pick<Turn, 'id' | 'role' | 'content'>> {
   const rows = recentStmt.all(limit) as Array<Pick<Turn, 'id' | 'role' | 'content'>>
   return rows.reverse()
+}
+
+export function latestUserContent(): string | null {
+  const row = latestUserContentStmt.get() as { content: string } | undefined
+  return row?.content ?? null
 }
 
 export function getLatestStateJson(): string | null {
@@ -104,4 +115,17 @@ export function getLatestMetadata(): { id: number; metadata: Record<string, unkn
   } catch {
     return null
   }
+}
+
+export type AssistantTurnMetadata = { id: number; metadata: Record<string, unknown> }
+
+export function allAssistantMetadata(): AssistantTurnMetadata[] {
+  const rows = assistantMetadataStmt.all() as Array<{ id: number; metadata: string }>
+  return rows.flatMap((row) => {
+    try {
+      return [{ id: row.id, metadata: JSON.parse(row.metadata) as Record<string, unknown> }]
+    } catch {
+      return []
+    }
+  })
 }
