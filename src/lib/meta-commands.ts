@@ -1,4 +1,5 @@
 import { getLatestMetadata, getLatestStateJson, getUsageTotals } from '@/lib/db'
+import { SLASH_COMMANDS } from '@/lib/slash-commands'
 import { INITIAL_STATE, parseState } from '@/lib/state'
 
 type Handler = () => string
@@ -6,13 +7,13 @@ type Handler = () => string
 const HELP_TEXT = [
   '**Available meta-commands** (not part of the story, not saved to history):',
   '',
-  '- `/inspect` — show the current authoritative state.',
-  '- `/usage` — show token usage totals and the most recent turn.',
-  '- `/help` — this message.',
+  ...SLASH_COMMANDS.map((c) => `- \`${c.name}\` — ${c.description}`),
 ].join('\n')
 
 const handlers: Record<string, Handler> = {
   '/help': () => HELP_TEXT,
+  '/pause': () =>
+    'Paused. The scene holds where it is — take your time. Type when you are ready to continue.',
   '/inspect': () => {
     const json = getLatestStateJson()
     const state = json ? parseState(json) : INITIAL_STATE

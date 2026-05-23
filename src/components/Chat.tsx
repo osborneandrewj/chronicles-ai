@@ -4,7 +4,9 @@ import { useChat, type UIMessage } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { SlashCommandMenu } from "@/components/SlashCommandMenu";
 import { formatUsd } from "@/lib/pricing";
+import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import type { AgentCost, TurnCost } from "@/lib/turn-cost";
 
 type Props = { initialMessages: UIMessage[]; initialUsage: TurnCost[] };
@@ -74,13 +76,87 @@ export function Chat({ initialMessages, initialUsage }: Props) {
     return undefined;
   }, [messages]);
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function submitInput() {
     const text = input.trim();
     if (!text || busy) return;
     sendMessage({ text });
     setInput("");
     setStickToBottom(true);
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submitInput();
+  }
+
+  // Slash-command autocomplete: show menu when input starts with "/" and has no
+  // space yet. Filtered by prefix; Escape dismisses for the current input only.
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissedFor, setSlashDismissedFor] = useState<string | null>(null);
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!input.startsWith("/")) return [];
+    if (input.includes(" ")) return [];
+    const q = input.toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
+  }, [input]);
+
+  const slashOpen = filteredSlashCommands.length > 0 && slashDismissedFor !== input;
+
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [input]);
+
+  const selectSlashCommand = useCallback(
+    (cmd: SlashCommand, submit: boolean) => {
+      if (submit) {
+        if (busy) return;
+        sendMessage({ text: cmd.name });
+        setInput("");
+        setStickToBottom(true);
+        setSlashDismissedFor(null);
+      } else {
+        setInput(cmd.name);
+        setSlashDismissedFor(cmd.name);
+      }
+    },
+    [busy, sendMessage],
+  );
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => (i + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex(
+          (i) => (i - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+        );
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        selectSlashCommand(filteredSlashCommands[slashIndex], false);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        selectSlashCommand(filteredSlashCommands[slashIndex], true);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashDismissedFor(input);
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submitInput();
+    }
   }
 
   return (
@@ -167,15 +243,18 @@ export function Chat({ initialMessages, initialUsage }: Props) {
         className="border-t border-neutral-900/80 bg-neutral-950 px-5 py-4"
       >
         <div className="group relative flex items-end gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3 py-2 transition focus-within:border-neutral-600 focus-within:bg-neutral-900">
+          {slashOpen && (
+            <SlashCommandMenu
+              commands={filteredSlashCommands}
+              activeIndex={slashIndex}
+              onSelect={(cmd) => selectSlashCommand(cmd, true)}
+              onHover={setSlashIndex}
+            />
+          )}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                onSubmit(e);
-              }
-            }}
+            onKeyDown={onKeyDown}
             rows={2}
             placeholder="What do you do?"
             disabled={busy}
