@@ -9,6 +9,14 @@ paths:
   - "**/schema*"
 ---
 
+> **MVP sprint override (active until exit criteria in `docs/10-mvp-sprint.md` are met).**
+> During the MVP sprint the conventions below are intentionally relaxed:
+> - SQLite via raw `better-sqlite3` (no Postgres, no Drizzle, no migrations)
+> - Single `turns(id, role, content, created_at)` table; `id` is INTEGER PRIMARY KEY AUTOINCREMENT
+> - No UUIDs, no `updated_at`, no `deleted_at`, no `fk_*`/`idx_*` ceremony
+> - Inline prepared statements in `src/lib/db.ts` — no model layer
+> The full conventions below resume at Phase 1 proper (Postgres + Drizzle + pgvector).
+
 ## Database Conventions
 
 ### Schema Design

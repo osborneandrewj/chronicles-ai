@@ -2,6 +2,8 @@
 
 AI-powered multiplayer interactive novel engine. Persistent world, multi-agent narrator system, living wiki + timeline.
 
+> **MVP sprint in progress** (target 2026-05-25). Until the exit criteria in `docs/10-mvp-sprint.md` are met, the stack and rules in this file describe the **post-sprint target**, not what's being built right now. Sprint reality: SQLite + raw `better-sqlite3`, no Drizzle, no migrations, no Docker; one `turns` table with autoincrement `id`; one streaming `POST /api/chat` route; Claude **Sonnet 4.6** (`claude-sonnet-4-6`); no auth, no rate limiting, no test suite. Read `docs/10-mvp-sprint.md` for the explicit cuts and accepted tradeoffs before suggesting anything from the long-term stack below.
+
 Architecture and design detail lives in `docs/` — read the relevant doc before non-trivial changes:
 - `docs/01-system-architecture.md` — overall structure, project layout
 - `docs/02-database-design.md` — full schema

@@ -7,6 +7,14 @@ paths:
   - "src/api/**"
 ---
 
+> **MVP sprint override (active until exit criteria in `docs/10-mvp-sprint.md` are met).**
+> During the MVP sprint the conventions below are intentionally relaxed:
+> - Only one route exists: `POST /api/chat` (Next.js Route Handler)
+> - It returns an AI SDK 5 UI message stream — **not** JSON, **not** the `{data, meta, error}` envelope
+> - No `/api/v1/` prefix, no plural-noun resources, no pagination, no auth
+> - Player turn is persisted before streaming; narrator turn is persisted in `onFinish`
+> The full conventions below resume at Phase 1 proper.
+
 ## API Design Conventions
 
 ### Endpoint Structure
