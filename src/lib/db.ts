@@ -1,13 +1,14 @@
 import Database from 'better-sqlite3'
 import path from 'node:path'
 
+import { runMigrations } from '@/lib/migrations'
+
 export type TurnRole = 'user' | 'assistant'
 
 export type Turn = {
   id: number
   role: TurnRole
   content: string
-  state_json: string | null
   created_at: string
 }
 
@@ -17,38 +18,44 @@ const g = globalThis as Globals
 function open(): Database.Database {
   const db = new Database(path.join(process.cwd(), 'chronicles.sqlite'))
   db.pragma('journal_mode = WAL')
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS turns (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      role       TEXT    NOT NULL CHECK (role IN ('user','assistant')),
-      content    TEXT    NOT NULL,
-      state_json TEXT,
-      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-  `)
-  const cols = db.prepare("PRAGMA table_info('turns')").all() as Array<{ name: string }>
-  if (!cols.some((c) => c.name === 'state_json')) {
-    db.exec('ALTER TABLE turns ADD COLUMN state_json TEXT')
-  }
+  db.pragma('foreign_keys = ON')
+  runMigrations(db)
   return db
 }
 
 export const db: Database.Database = g.__chroniclesDb ?? (g.__chroniclesDb = open())
 
 const insertStmt = db.prepare<[TurnRole, string]>(
-  'INSERT INTO turns (role, content) VALUES (?, ?) RETURNING id, role, content, state_json, created_at',
+  'INSERT INTO turns (role, content) VALUES (?, ?) RETURNING id, role, content, created_at',
 )
 const allStmt = db.prepare(
-  'SELECT id, role, content, state_json, created_at FROM turns ORDER BY id ASC',
+  'SELECT id, role, content, created_at FROM turns ORDER BY id ASC',
 )
 const recentStmt = db.prepare(
   'SELECT id, role, content FROM turns ORDER BY id DESC LIMIT ?',
 )
 const latestStateStmt = db.prepare(
-  "SELECT state_json FROM turns WHERE state_json IS NOT NULL ORDER BY id DESC LIMIT 1",
+  'SELECT state_json FROM turn_states ORDER BY turn_id DESC LIMIT 1',
 )
-const updateStateStmt = db.prepare<[string, number]>(
-  'UPDATE turns SET state_json = ? WHERE id = ?',
+const upsertStateStmt = db.prepare<[number, string]>(
+  `INSERT INTO turn_states (turn_id, state_json) VALUES (?, ?)
+   ON CONFLICT(turn_id) DO UPDATE SET state_json = excluded.state_json`,
+)
+const updateMetadataStmt = db.prepare<[string, number]>(
+  'UPDATE turns SET metadata = ? WHERE id = ?',
+)
+const usageTotalsStmt = db.prepare(`
+  SELECT
+    COUNT(metadata)                                              AS turns,
+    COALESCE(SUM(json_extract(metadata, '$.narrator.usage.inputTokens')),  0) AS narratorInput,
+    COALESCE(SUM(json_extract(metadata, '$.narrator.usage.outputTokens')), 0) AS narratorOutput,
+    COALESCE(SUM(json_extract(metadata, '$.extractor.usage.inputTokens')),  0) AS extractorInput,
+    COALESCE(SUM(json_extract(metadata, '$.extractor.usage.outputTokens')), 0) AS extractorOutput
+  FROM turns
+  WHERE metadata IS NOT NULL
+`)
+const latestMetadataStmt = db.prepare(
+  'SELECT id, metadata FROM turns WHERE metadata IS NOT NULL ORDER BY id DESC LIMIT 1',
 )
 
 export function insertTurn(role: TurnRole, content: string): Turn {
@@ -70,5 +77,31 @@ export function getLatestStateJson(): string | null {
 }
 
 export function updateTurnState(id: number, stateJson: string): void {
-  updateStateStmt.run(stateJson, id)
+  upsertStateStmt.run(id, stateJson)
+}
+
+export function updateTurnMetadata(id: number, metadata: Record<string, unknown>): void {
+  updateMetadataStmt.run(JSON.stringify(metadata), id)
+}
+
+export type UsageTotals = {
+  turns: number
+  narratorInput: number
+  narratorOutput: number
+  extractorInput: number
+  extractorOutput: number
+}
+
+export function getUsageTotals(): UsageTotals {
+  return usageTotalsStmt.get() as UsageTotals
+}
+
+export function getLatestMetadata(): { id: number; metadata: Record<string, unknown> } | null {
+  const row = latestMetadataStmt.get() as { id: number; metadata: string } | undefined
+  if (!row) return null
+  try {
+    return { id: row.id, metadata: JSON.parse(row.metadata) as Record<string, unknown> }
+  } catch {
+    return null
+  }
 }

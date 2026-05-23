@@ -1,9 +1,9 @@
 import { anthropic } from '@ai-sdk/anthropic'
 import {
-  convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
   streamText,
+  type ModelMessage,
   type UIMessage,
 } from 'ai'
 
@@ -11,11 +11,15 @@ import {
   getLatestStateJson,
   insertTurn,
   recentTurns,
+  updateTurnMetadata,
   updateTurnState,
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
-import { buildNarratorSystem } from '@/lib/prompt'
-import { extractState, formatStateBlock, parseState } from '@/lib/state'
+import { NARRATOR_BASE } from '@/lib/prompt'
+import { EXTRACTOR_MODEL, extractState, formatStateBlock, parseState } from '@/lib/state'
+
+const NARRATOR_MODEL = 'claude-sonnet-4-6'
+const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: 'ephemeral' as const } } }
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -36,31 +40,61 @@ export async function POST(req: Request) {
   insertTurn('user', playerText)
 
   const state = parseState(getLatestStateJson())
-  const system = buildNarratorSystem(formatStateBlock(state))
+  const stateBlock = formatStateBlock(state)
 
-  const history = recentTurns(20).map((t) => ({ role: t.role, content: t.content }))
-  const modelMessages = convertToModelMessages(
-    history.map((t, i) => ({
-      id: String(i),
-      role: t.role,
-      parts: [{ type: 'text' as const, text: t.content }],
-    })),
-  )
+  // Cacheable prefix = system + all prior turns (excluding the new player action).
+  // The dynamic state block and the new action ride in an uncached trailing message.
+  const allRecent = recentTurns(21)
+  const priorHistory = allRecent.slice(0, -1)
+  const historyMessages: ModelMessage[] = priorHistory.map((t) => ({
+    role: t.role,
+    content: t.content,
+  }))
+
+  const lastAssistantIdx = historyMessages.findLastIndex((m) => m.role === 'assistant')
+  if (lastAssistantIdx >= 0) {
+    historyMessages[lastAssistantIdx] = {
+      ...historyMessages[lastAssistantIdx],
+      providerOptions: EPHEMERAL_CACHE,
+    }
+  }
+
+  const trailingUser: ModelMessage = {
+    role: 'user',
+    content: `${stateBlock}\n\nPLAYER ACTION:\n${playerText}`,
+  }
+
+  const modelMessages: ModelMessage[] = [
+    { role: 'system', content: NARRATOR_BASE, providerOptions: EPHEMERAL_CACHE },
+    ...historyMessages,
+    trailingUser,
+  ]
 
   const result = streamText({
-    model: anthropic('claude-sonnet-4-6'),
-    system,
+    model: anthropic(NARRATOR_MODEL),
     messages: modelMessages,
-    onFinish: ({ text }) => {
+    onFinish: ({ text, usage: narratorUsage }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
       const narratorTurn = insertTurn('assistant', trimmed)
+      const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
+
       void extractState(state, [
         { role: 'user', content: playerText },
         { role: 'assistant', content: trimmed },
       ])
-        .then((next) => updateTurnState(narratorTurn.id, JSON.stringify(next)))
+        .then(({ state: next, usage: extractorUsage }) => {
+          updateTurnState(narratorTurn.id, JSON.stringify(next))
+          updateTurnMetadata(narratorTurn.id, {
+            narrator: narratorMeta,
+            extractor: { model: EXTRACTOR_MODEL, usage: extractorUsage },
+          })
+        })
         .catch((err) => {
+          updateTurnMetadata(narratorTurn.id, {
+            narrator: narratorMeta,
+            extractor: { model: EXTRACTOR_MODEL, error: String(err) },
+          })
           console.error('[state extraction failed]', err)
         })
     },

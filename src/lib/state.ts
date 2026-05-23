@@ -1,5 +1,5 @@
 import { anthropic } from '@ai-sdk/anthropic'
-import { generateObject } from 'ai'
+import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
 import { PREMISE } from '@/lib/prompt'
@@ -63,16 +63,18 @@ PREMISE (context, do not extract from):
 ${PREMISE}
 `.trim()
 
+export const EXTRACTOR_MODEL = 'claude-haiku-4-5-20251001'
+
 export async function extractState(
   prior: WorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
-): Promise<WorldState> {
+): Promise<{ state: WorldState; usage: LanguageModelUsage }> {
   const transcript = recent
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
     .join('\n\n')
 
-  const { object } = await generateObject({
-    model: anthropic('claude-haiku-4-5-20251001'),
+  const { object, usage } = await generateObject({
+    model: anthropic(EXTRACTOR_MODEL),
     schema: StateSchema,
     system: EXTRACTOR_SYSTEM,
     prompt: [
@@ -86,5 +88,5 @@ export async function extractState(
     ].join('\n'),
   })
 
-  return object
+  return { state: object, usage }
 }
