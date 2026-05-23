@@ -364,13 +364,16 @@ function buildCostMap(messages: UIMessage[], usage: TurnCost[]): Map<string, Tur
     }
   }
 
-  // Second pass: assign remaining usage entries (from the tail) to unmatched assistant
-  // messages in order. Handles fresh-this-session messages whose ids are AI-SDK uuids.
+  // Second pass: end-align unmatched assistants with remaining usage and pair
+  // from the tail backwards. Guarantees the newest streamed turn always gets
+  // the newest cost — robust to retry transients where usage may be one entry
+  // ahead of messages (or vice versa) on the render after a stream finishes.
   const remaining = usage.filter((t) => !usedTurnIds.has(t.id));
-  const offset = Math.max(0, unmatchedAssistants.length - remaining.length);
-  for (let i = offset; i < unmatchedAssistants.length; i++) {
-    const cost = remaining[i - offset];
-    if (cost) map.set(unmatchedAssistants[i].id, cost);
+  const pairCount = Math.min(unmatchedAssistants.length, remaining.length);
+  for (let i = 0; i < pairCount; i++) {
+    const msg = unmatchedAssistants[unmatchedAssistants.length - 1 - i];
+    const cost = remaining[remaining.length - 1 - i];
+    map.set(msg.id, cost);
   }
 
   return map;
