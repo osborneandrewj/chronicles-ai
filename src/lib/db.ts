@@ -17,9 +17,16 @@ type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
 const g = globalThis as Globals
 
 function open(): Database.Database {
+  // Next.js's "collect page data" build phase imports every page, which
+  // transitively opens this DB. On a mounted volume that produces SQLITE_BUSY
+  // when build workers race for the lock. Build workers get an in-memory DB
+  // (fresh per worker, no file, no locking); only runtime touches the real file.
   // DATABASE_PATH points at the mounted volume in prod (Railway). Dev falls
   // back to cwd/chronicles.sqlite so local workflows are unchanged.
-  const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'chronicles.sqlite')
+  const isBuild = process.env.NEXT_PHASE === 'phase-production-build'
+  const dbPath = isBuild
+    ? ':memory:'
+    : (process.env.DATABASE_PATH ?? path.join(process.cwd(), 'chronicles.sqlite'))
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')

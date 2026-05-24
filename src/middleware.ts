@@ -23,6 +23,13 @@ function unauthorized(): NextResponse {
 }
 
 export function middleware(req: NextRequest): NextResponse {
+  // Next.js invokes middleware during static prerender too. Prerenders have no
+  // user auth headers, so gating them would 401 every static page and break the
+  // build. Always pass through during the build phase.
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    return NextResponse.next()
+  }
+
   const expected = process.env.APP_PASSWORD
   if (!expected) {
     // Dev convenience: an unset password means "no gate" so `npm run dev`
