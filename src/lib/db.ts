@@ -54,6 +54,15 @@ const upsertStateStmt = db.prepare<[number, number, string]>(
 const updateMetadataStmt = db.prepare<[string, number]>(
   'UPDATE turns SET metadata = ? WHERE id = ?',
 )
+const updateLatestAssistantTtsCharsStmt = db.prepare<[number, number]>(
+  `UPDATE turns
+   SET metadata = json_set(COALESCE(metadata, '{}'), '$.tts.chars', ?)
+   WHERE id = (
+     SELECT id FROM turns
+     WHERE world_id = ? AND role = 'assistant'
+     ORDER BY id DESC LIMIT 1
+   )`,
+)
 const usageTotalsStmt = db.prepare<[number]>(`
   SELECT
     COUNT(metadata)                                              AS turns,
@@ -105,6 +114,10 @@ export function updateTurnState(turnId: number, worldId: number, stateJson: stri
 
 export function updateTurnMetadata(id: number, metadata: Record<string, unknown>): void {
   updateMetadataStmt.run(JSON.stringify(metadata), id)
+}
+
+export function recordLatestAssistantTtsChars(worldId: number, chars: number): void {
+  updateLatestAssistantTtsCharsStmt.run(Math.max(0, Math.round(chars)), worldId)
 }
 
 export type UsageTotals = {
