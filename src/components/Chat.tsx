@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat, type UIMessage } from "@ai-sdk/react";
+import Link from "next/link";
 import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -9,14 +10,22 @@ import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import type { AgentCost, TurnCost } from "@/lib/turn-cost";
 
-type Props = { initialMessages: UIMessage[]; initialUsage: TurnCost[] };
+type Props = {
+  worldId: number;
+  worldName: string;
+  initialMessages: UIMessage[];
+  initialUsage: TurnCost[];
+};
 
-export function Chat({ initialMessages, initialUsage }: Props) {
+export function Chat({ worldId, worldName, initialMessages, initialUsage }: Props) {
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
+  const chatApi = `/api/chat?worldId=${worldId}`;
+  const usageApi = `/api/usage?worldId=${worldId}`;
+  const transport = useMemo(() => new DefaultChatTransport({ api: chatApi }), [chatApi]);
   const { messages, sendMessage, regenerate, status, error } = useChat({
     messages: initialMessages,
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport,
   });
 
   const busy = status === "submitted" || status === "streaming";
@@ -29,14 +38,14 @@ export function Chat({ initialMessages, initialUsage }: Props) {
 
   const refetchUsage = useCallback(async () => {
     try {
-      const res = await fetch("/api/usage");
+      const res = await fetch(usageApi);
       if (!res.ok) return;
       const data = (await res.json()) as { turns: TurnCost[]; total: number };
       setUsage(data.turns);
     } catch {
       // best-effort; ignore
     }
-  }, []);
+  }, [usageApi]);
 
   const prevStatus = useRef(status);
   useEffect(() => {
@@ -162,12 +171,16 @@ export function Chat({ initialMessages, initialUsage }: Props) {
   return (
     <div className="mx-auto flex h-screen max-w-2xl flex-col">
       <header className="flex items-center justify-between border-b border-neutral-900/80 px-5 py-4 backdrop-blur">
-        <div className="flex items-baseline gap-2">
-          <span className="text-base font-semibold tracking-tight text-neutral-100">
-            Chronicles
-          </span>
-          <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
-            MVP
+        <div className="flex items-baseline gap-3 min-w-0">
+          <Link
+            href="/"
+            aria-label="Back to worlds"
+            className="text-sm text-neutral-500 transition hover:text-neutral-300"
+          >
+            ←
+          </Link>
+          <span className="truncate text-base font-semibold tracking-tight text-neutral-100">
+            {worldName}
           </span>
         </div>
         <div className="text-xs tabular-nums text-neutral-500">

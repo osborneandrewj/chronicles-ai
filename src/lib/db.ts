@@ -7,6 +7,7 @@ export type TurnRole = 'user' | 'assistant'
 
 export type Turn = {
   id: number
+  world_id: number
   role: TurnRole
   content: string
   created_at: string
@@ -25,29 +26,35 @@ function open(): Database.Database {
 
 export const db: Database.Database = g.__chroniclesDb ?? (g.__chroniclesDb = open())
 
-const insertStmt = db.prepare<[TurnRole, string]>(
-  'INSERT INTO turns (role, content) VALUES (?, ?) RETURNING id, role, content, created_at',
+const insertStmt = db.prepare<[number, TurnRole, string]>(
+  `INSERT INTO turns (world_id, role, content)
+   VALUES (?, ?, ?)
+   RETURNING id, world_id, role, content, created_at`,
 )
-const allStmt = db.prepare(
-  'SELECT id, role, content, created_at FROM turns ORDER BY id ASC',
+const allStmt = db.prepare<[number]>(
+  `SELECT id, world_id, role, content, created_at
+   FROM turns WHERE world_id = ? ORDER BY id ASC`,
 )
-const recentStmt = db.prepare(
-  'SELECT id, role, content FROM turns ORDER BY id DESC LIMIT ?',
+const recentStmt = db.prepare<[number, number]>(
+  `SELECT id, role, content FROM turns
+   WHERE world_id = ? ORDER BY id DESC LIMIT ?`,
 )
-const latestUserContentStmt = db.prepare(
-  "SELECT content FROM turns WHERE role = 'user' ORDER BY id DESC LIMIT 1",
+const latestUserContentStmt = db.prepare<[number]>(
+  `SELECT content FROM turns
+   WHERE world_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1`,
 )
-const latestStateStmt = db.prepare(
-  'SELECT state_json FROM turn_states ORDER BY turn_id DESC LIMIT 1',
+const latestStateStmt = db.prepare<[number]>(
+  `SELECT state_json FROM turn_states
+   WHERE world_id = ? ORDER BY turn_id DESC LIMIT 1`,
 )
-const upsertStateStmt = db.prepare<[number, string]>(
-  `INSERT INTO turn_states (turn_id, state_json) VALUES (?, ?)
+const upsertStateStmt = db.prepare<[number, number, string]>(
+  `INSERT INTO turn_states (turn_id, world_id, state_json) VALUES (?, ?, ?)
    ON CONFLICT(turn_id) DO UPDATE SET state_json = excluded.state_json`,
 )
 const updateMetadataStmt = db.prepare<[string, number]>(
   'UPDATE turns SET metadata = ? WHERE id = ?',
 )
-const usageTotalsStmt = db.prepare(`
+const usageTotalsStmt = db.prepare<[number]>(`
   SELECT
     COUNT(metadata)                                              AS turns,
     COALESCE(SUM(json_extract(metadata, '$.narrator.usage.inputTokens')),  0) AS narratorInput,
@@ -55,40 +62,45 @@ const usageTotalsStmt = db.prepare(`
     COALESCE(SUM(json_extract(metadata, '$.extractor.usage.inputTokens')),  0) AS extractorInput,
     COALESCE(SUM(json_extract(metadata, '$.extractor.usage.outputTokens')), 0) AS extractorOutput
   FROM turns
-  WHERE metadata IS NOT NULL
+  WHERE world_id = ? AND metadata IS NOT NULL
 `)
-const latestMetadataStmt = db.prepare(
-  'SELECT id, metadata FROM turns WHERE metadata IS NOT NULL ORDER BY id DESC LIMIT 1',
+const latestMetadataStmt = db.prepare<[number]>(
+  `SELECT id, metadata FROM turns
+   WHERE world_id = ? AND metadata IS NOT NULL ORDER BY id DESC LIMIT 1`,
 )
-const assistantMetadataStmt = db.prepare(
-  "SELECT id, metadata FROM turns WHERE role = 'assistant' AND metadata IS NOT NULL ORDER BY id ASC",
+const assistantMetadataStmt = db.prepare<[number]>(
+  `SELECT id, metadata FROM turns
+   WHERE world_id = ? AND role = 'assistant' AND metadata IS NOT NULL ORDER BY id ASC`,
 )
 
-export function insertTurn(role: TurnRole, content: string): Turn {
-  return insertStmt.get(role, content) as Turn
+export function insertTurn(worldId: number, role: TurnRole, content: string): Turn {
+  return insertStmt.get(worldId, role, content) as Turn
 }
 
-export function allTurns(): Turn[] {
-  return allStmt.all() as Turn[]
+export function allTurns(worldId: number): Turn[] {
+  return allStmt.all(worldId) as Turn[]
 }
 
-export function recentTurns(limit: number): Array<Pick<Turn, 'id' | 'role' | 'content'>> {
-  const rows = recentStmt.all(limit) as Array<Pick<Turn, 'id' | 'role' | 'content'>>
+export function recentTurns(
+  worldId: number,
+  limit: number,
+): Array<Pick<Turn, 'id' | 'role' | 'content'>> {
+  const rows = recentStmt.all(worldId, limit) as Array<Pick<Turn, 'id' | 'role' | 'content'>>
   return rows.reverse()
 }
 
-export function latestUserContent(): string | null {
-  const row = latestUserContentStmt.get() as { content: string } | undefined
+export function latestUserContent(worldId: number): string | null {
+  const row = latestUserContentStmt.get(worldId) as { content: string } | undefined
   return row?.content ?? null
 }
 
-export function getLatestStateJson(): string | null {
-  const row = latestStateStmt.get() as { state_json: string | null } | undefined
+export function getLatestStateJson(worldId: number): string | null {
+  const row = latestStateStmt.get(worldId) as { state_json: string | null } | undefined
   return row?.state_json ?? null
 }
 
-export function updateTurnState(id: number, stateJson: string): void {
-  upsertStateStmt.run(id, stateJson)
+export function updateTurnState(turnId: number, worldId: number, stateJson: string): void {
+  upsertStateStmt.run(turnId, worldId, stateJson)
 }
 
 export function updateTurnMetadata(id: number, metadata: Record<string, unknown>): void {
@@ -103,12 +115,14 @@ export type UsageTotals = {
   extractorOutput: number
 }
 
-export function getUsageTotals(): UsageTotals {
-  return usageTotalsStmt.get() as UsageTotals
+export function getUsageTotals(worldId: number): UsageTotals {
+  return usageTotalsStmt.get(worldId) as UsageTotals
 }
 
-export function getLatestMetadata(): { id: number; metadata: Record<string, unknown> } | null {
-  const row = latestMetadataStmt.get() as { id: number; metadata: string } | undefined
+export function getLatestMetadata(
+  worldId: number,
+): { id: number; metadata: Record<string, unknown> } | null {
+  const row = latestMetadataStmt.get(worldId) as { id: number; metadata: string } | undefined
   if (!row) return null
   try {
     return { id: row.id, metadata: JSON.parse(row.metadata) as Record<string, unknown> }
@@ -119,8 +133,8 @@ export function getLatestMetadata(): { id: number; metadata: Record<string, unkn
 
 export type AssistantTurnMetadata = { id: number; metadata: Record<string, unknown> }
 
-export function allAssistantMetadata(): AssistantTurnMetadata[] {
-  const rows = assistantMetadataStmt.all() as Array<{ id: number; metadata: string }>
+export function allAssistantMetadata(worldId: number): AssistantTurnMetadata[] {
+  const rows = assistantMetadataStmt.all(worldId) as Array<{ id: number; metadata: string }>
   return rows.flatMap((row) => {
     try {
       return [{ id: row.id, metadata: JSON.parse(row.metadata) as Record<string, unknown> }]

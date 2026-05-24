@@ -17,8 +17,9 @@ import {
   updateTurnState,
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
-import { NARRATOR_BASE } from '@/lib/prompt'
+import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { EXTRACTOR_MODEL, extractState, formatStateBlock, parseState } from '@/lib/state'
+import { getWorld, getWorldInitialState } from '@/lib/worlds'
 
 const NARRATOR_MODEL = 'claude-sonnet-4-6'
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: 'ephemeral' as const } } }
@@ -27,6 +28,16 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 export async function POST(req: Request) {
+  const url = new URL(req.url)
+  const worldId = Number(url.searchParams.get('worldId'))
+  if (!Number.isInteger(worldId) || worldId <= 0) {
+    return new Response('Missing or invalid worldId', { status: 400 })
+  }
+  const world = getWorld(worldId)
+  if (!world) {
+    return new Response(`World ${worldId} not found`, { status: 404 })
+  }
+
   const { messages } = (await req.json()) as { messages: UIMessage[] }
 
   const latest = messages[messages.length - 1]
@@ -36,25 +47,29 @@ export async function POST(req: Request) {
   }
 
   if (isMetaCommand(playerText)) {
-    return streamMetaResponse(runMetaCommand(playerText))
+    return streamMetaResponse(runMetaCommand(playerText, worldId))
   }
 
   // Idempotent on retry: if the trailing player text matches the latest persisted user
-  // turn, skip re-insertion. Lets the client re-fire the same request after a stream
-  // error without duplicating turns.
-  if (latestUserContent() !== playerText) {
-    insertTurn('user', playerText)
+  // turn for this world, skip re-insertion. Lets the client re-fire the same request
+  // after a stream error without duplicating turns.
+  if (latestUserContent(worldId) !== playerText) {
+    insertTurn(worldId, 'user', playerText)
   }
 
   const classification = await classifyAction(playerText)
   const { stance, input_mode } = classification
 
-  const state = parseState(getLatestStateJson())
+  const fallbackState = getWorldInitialState(world)
+  const state = parseState(getLatestStateJson(worldId), fallbackState)
   const stateBlock = formatStateBlock(state)
+  const premiseBlock = formatPremiseBlock(world.premise)
 
   // Cacheable prefix = system + all prior turns (excluding the new player action).
-  // The dynamic state block and the new action ride in an uncached trailing message.
-  const allRecent = recentTurns(21)
+  // The dynamic premise + state block and the new action ride in an uncached
+  // trailing message. NARRATOR_BASE is world-agnostic so the system-prompt cache
+  // entry survives across worlds; per-world premise lives in the trailing slot.
+  const allRecent = recentTurns(worldId, 21)
   const priorHistory = allRecent.slice(0, -1)
   const historyMessages: ModelMessage[] = priorHistory.map((t) => ({
     role: t.role,
@@ -71,7 +86,7 @@ export async function POST(req: Request) {
 
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${premiseBlock}\n\n${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\nPLAYER ACTION:\n${playerText}`,
   }
 
   const modelMessages: ModelMessage[] = [
@@ -86,7 +101,7 @@ export async function POST(req: Request) {
     onFinish: ({ text, usage: narratorUsage }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
-      const narratorTurn = insertTurn('assistant', trimmed)
+      const narratorTurn = insertTurn(worldId, 'assistant', trimmed)
       const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
       const classifierMeta = {
         model: CLASSIFIER_MODEL,
@@ -95,12 +110,12 @@ export async function POST(req: Request) {
         error: classification.error,
       }
 
-      void extractState(state, [
+      void extractState(world.premise, state, [
         { role: 'user', content: playerText },
         { role: 'assistant', content: trimmed },
       ])
         .then(({ state: next, usage: extractorUsage }) => {
-          updateTurnState(narratorTurn.id, JSON.stringify(next))
+          updateTurnState(narratorTurn.id, worldId, JSON.stringify(next))
           updateTurnMetadata(narratorTurn.id, {
             narrator: narratorMeta,
             extractor: { model: EXTRACTOR_MODEL, usage: extractorUsage },

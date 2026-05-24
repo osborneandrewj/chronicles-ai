@@ -2,32 +2,32 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
-import { PREMISE } from '@/lib/prompt'
-
 export type WorldState = {
   time: string
   location: string
   identity: string
 }
 
-export const INITIAL_STATE: WorldState = {
-  time: 'Late afternoon, autumn 1897',
-  location: 'Mevagissey harbour, Cornwall — pubs and quay still in view',
-  identity:
-    'Young letter-writer, recently returned home after seven years in London. Travel-worn, carrying a single case. Name not yet established.',
+// Last-resort defaults if a world's stored initial_state_json is malformed.
+// Worlds always supply their own values via the create-world form; this is a
+// shape guarantee, not a content default.
+export const INITIAL_STATE_FALLBACK: WorldState = {
+  time: 'Day 1, morning',
+  location: 'Opening scene — see premise',
+  identity: 'Newcomer — name not yet established.',
 }
 
-export function parseState(json: string | null): WorldState {
-  if (!json) return INITIAL_STATE
+export function parseState(json: string | null, fallback: WorldState): WorldState {
+  if (!json) return fallback
   try {
     const parsed = JSON.parse(json) as Partial<WorldState>
     return {
-      time: parsed.time ?? INITIAL_STATE.time,
-      location: parsed.location ?? INITIAL_STATE.location,
-      identity: parsed.identity ?? INITIAL_STATE.identity,
+      time: parsed.time ?? fallback.time,
+      location: parsed.location ?? fallback.location,
+      identity: parsed.identity ?? fallback.identity,
     }
   } catch {
-    return INITIAL_STATE
+    return fallback
   }
 }
 
@@ -49,7 +49,8 @@ const StateSchema = z.object({
   identity: z.string().describe('1-2 sentences: who the protagonist is, observable presentation, anything established about name/role'),
 })
 
-const EXTRACTOR_SYSTEM = `
+function buildExtractorSystem(premise: string): string {
+  return `
 You maintain the authoritative state for an interactive novel. Given the prior state and the most recent turn(s), return the updated state.
 
 Rules:
@@ -60,12 +61,14 @@ Rules:
 - Never invent facts not present in the prior state or recent turns.
 
 PREMISE (context, do not extract from):
-${PREMISE}
+${premise}
 `.trim()
+}
 
 export const EXTRACTOR_MODEL = 'claude-haiku-4-5-20251001'
 
 export async function extractState(
+  premise: string,
   prior: WorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<{ state: WorldState; usage: LanguageModelUsage }> {
@@ -76,7 +79,7 @@ export async function extractState(
   const { object, usage } = await generateObject({
     model: anthropic(EXTRACTOR_MODEL),
     schema: StateSchema,
-    system: EXTRACTOR_SYSTEM,
+    system: buildExtractorSystem(premise),
     prompt: [
       'PRIOR STATE:',
       JSON.stringify(prior, null, 2),
