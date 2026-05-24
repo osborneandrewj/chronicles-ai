@@ -17,7 +17,10 @@ type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
 const g = globalThis as Globals
 
 function open(): Database.Database {
-  const db = new Database(path.join(process.cwd(), 'chronicles.sqlite'))
+  // DATABASE_PATH points at the mounted volume in prod (Railway). Dev falls
+  // back to cwd/chronicles.sqlite so local workflows are unchanged.
+  const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'chronicles.sqlite')
+  const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   runMigrations(db)
