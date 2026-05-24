@@ -37,6 +37,7 @@ interface JobState {
   charsSent: number;
   audio: HTMLAudioElement | null;
   blobUrl: string | null;
+  failed: boolean;
 }
 
 function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): JobState {
@@ -54,6 +55,7 @@ function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): 
     charsSent: 0,
     audio: null,
     blobUrl: null,
+    failed: false,
   };
 }
 
@@ -188,6 +190,7 @@ export function useNarratorAudio({
 
   const fetchSentence = useCallback(
     async (sentence: string, seq: number, owner: JobState) => {
+      if (owner.failed) return;
       const controller = new AbortController();
       owner.controllers.add(controller);
       try {
@@ -198,7 +201,7 @@ export function useNarratorAudio({
           signal: controller.signal,
         });
         if (!res.ok) {
-          console.error("[narrator-audio] /api/tts", res.status, await safeText(res));
+          markFailed(owner, `[narrator-audio] /api/tts ${res.status} ${await safeText(res)}`);
           return;
         }
         const blob = await res.blob();
@@ -209,7 +212,7 @@ export function useNarratorAudio({
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
-        console.error("[narrator-audio] fetch failed", err);
+        markFailed(owner, `[narrator-audio] fetch failed: ${String(err)}`);
       } finally {
         owner.controllers.delete(controller);
       }
@@ -225,7 +228,6 @@ export function useNarratorAudio({
     if (!jobRef.current || jobRef.current.jobKey !== effective.jobKey) {
       resetJob(effective.jobKey, effective.turnId, effective.source);
     }
-    if (mutedRef.current) return;
 
     const j = jobRef.current;
     if (!j) return;
@@ -235,10 +237,15 @@ export function useNarratorAudio({
     j.cursor = cursor;
     if (!effective.streaming) j.flushed = true;
 
-    for (const sentence of sentences) {
-      const seq = j.nextSeq++;
-      j.charsSent += sentence.length;
-      void fetchSentence(sentence, seq, j);
+    // Advance the cursor even while muted so unmuting mid-turn starts from
+    // "now" instead of replaying everything already on screen. Skip dispatch
+    // entirely if muted or this job has already hit a TTS error.
+    if (!mutedRef.current && !j.failed) {
+      for (const sentence of sentences) {
+        const seq = j.nextSeq++;
+        j.charsSent += sentence.length;
+        void fetchSentence(sentence, seq, j);
+      }
     }
 
     if (!effective.streaming && j.flushed && !j.reported) {
@@ -303,4 +310,16 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return res.statusText;
   }
+}
+
+// First failure in a job logs once, aborts in-flight siblings, and flips the
+// failed flag so subsequent dispatches no-op. Later failures (from already
+// in-flight requests) see the flag and stay silent.
+function markFailed(job: JobState, message: string): void {
+  if (job.failed) return;
+  job.failed = true;
+  console.error(message);
+  job.controllers.forEach((c) => c.abort());
+  job.controllers.clear();
+  job.pending.clear();
 }
