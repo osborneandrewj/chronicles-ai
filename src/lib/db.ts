@@ -17,7 +17,10 @@ type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
 const g = globalThis as Globals
 
 function open(): Database.Database {
-  const db = new Database(path.join(process.cwd(), 'chronicles.sqlite'))
+  // DATABASE_PATH points at the mounted volume in prod (Railway). Dev falls
+  // back to cwd/chronicles.sqlite so local workflows are unchanged.
+  const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'chronicles.sqlite')
+  const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   runMigrations(db)
@@ -51,8 +54,10 @@ const upsertStateStmt = db.prepare<[number, number, string]>(
   `INSERT INTO turn_states (turn_id, world_id, state_json) VALUES (?, ?, ?)
    ON CONFLICT(turn_id) DO UPDATE SET state_json = excluded.state_json`,
 )
+// json_patch merges the supplied object into existing metadata so concurrent
+// writers (extractor, tts char recorder) don't clobber each other's keys.
 const updateMetadataStmt = db.prepare<[string, number]>(
-  'UPDATE turns SET metadata = ? WHERE id = ?',
+  `UPDATE turns SET metadata = json_patch(COALESCE(metadata, '{}'), ?) WHERE id = ?`,
 )
 const updateLatestAssistantTtsCharsStmt = db.prepare<[number, number]>(
   `UPDATE turns
