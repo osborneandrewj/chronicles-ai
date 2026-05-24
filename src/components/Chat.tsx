@@ -6,6 +6,7 @@ import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SlashCommandMenu } from "@/components/SlashCommandMenu";
+import { useNarratorAudio } from "@/components/useNarratorAudio";
 import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import type { AgentCost, TurnCost } from "@/lib/turn-cost";
@@ -84,6 +85,40 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     }
     return undefined;
   }, [messages]);
+
+  const lastNarratorText = useMemo(() => {
+    if (!lastAssistantId) return "";
+    const m = messages.find((msg) => msg.id === lastAssistantId);
+    return m ? messageText(m) : "";
+  }, [messages, lastAssistantId]);
+
+  const reportTtsChars = useCallback(
+    async (chars: number) => {
+      try {
+        await fetch(`/api/tts/record?worldId=${worldId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chars }),
+        });
+        void refetchUsage();
+      } catch {
+        // best-effort cost tracking; ignore
+      }
+    },
+    [worldId, refetchUsage],
+  );
+
+  const {
+    muted,
+    setMuted,
+    activeTurnId: speakingTurnId,
+    replay,
+  } = useNarratorAudio({
+    text: lastNarratorText,
+    streaming,
+    turnId: lastAssistantId,
+    onTurnComplete: reportTtsChars,
+  });
 
   function submitInput() {
     const text = input.trim();
@@ -183,8 +218,26 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
             {worldName}
           </span>
         </div>
-        <div className="text-xs tabular-nums text-neutral-500">
-          {usage.length} turn{usage.length === 1 ? "" : "s"} · ~{formatUsd(sessionTotal)}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMuted(!muted)}
+            aria-pressed={!muted}
+            aria-label={muted ? "Turn narrator audio on" : "Turn narrator audio off"}
+            title={muted ? "Turn audio on" : "Turn audio off"}
+            className={
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 " +
+              (muted
+                ? "border-neutral-800 bg-neutral-900/40 text-neutral-500 hover:text-neutral-300"
+                : "border-amber-500/40 bg-amber-500/10 text-amber-300/90 hover:bg-amber-500/20")
+            }
+          >
+            <AudioIcon muted={muted} />
+            <span>{muted ? "Audio off" : "Audio on"}</span>
+          </button>
+          <div className="text-xs tabular-nums text-neutral-500">
+            {usage.length} turn{usage.length === 1 ? "" : "s"} · ~{formatUsd(sessionTotal)}
+          </div>
         </div>
       </header>
 
@@ -200,18 +253,28 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
             </li>
           )}
 
-          {messages.map((m) => {
+          {messages.map((m, idx) => {
             const cost = m.role === "assistant" ? costByMessageId.get(m.id) : undefined;
             const isStreamingThis = streaming && m.id === lastAssistantId;
+            const isSpeakingThis = m.role === "assistant" && m.id === speakingTurnId;
+            const text = messageText(m);
+            const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
+            const isMetaResponse = !!prevUser && messageText(prevUser).trim().startsWith("/");
+            const canReplay =
+              m.role === "assistant" && !isStreamingThis && !isMetaResponse && text.trim().length > 0;
             return (
               <li key={m.id}>
                 {m.role === "user" ? (
-                  <UserTurn text={messageText(m)} />
+                  <UserTurn text={text} />
                 ) : (
                   <NarratorTurn
-                    text={messageText(m)}
+                    text={text}
                     streaming={isStreamingThis}
+                    speaking={isSpeakingThis}
                     cost={cost}
+                    canReplay={canReplay}
+                    replayDisabled={muted}
+                    onReplay={() => replay(m.id, text)}
                   />
                 )}
               </li>
@@ -305,23 +368,116 @@ function UserTurn({ text }: { text: string }) {
 function NarratorTurn({
   text,
   streaming,
+  speaking,
   cost,
+  canReplay,
+  replayDisabled,
+  onReplay,
 }: {
   text: string;
   streaming: boolean;
+  speaking: boolean;
   cost: TurnCost | undefined;
+  canReplay: boolean;
+  replayDisabled: boolean;
+  onReplay: () => void;
 }) {
   return (
     <div className="border-l-2 border-amber-500/40 pl-4">
-      <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/70">
-        Narrator
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/70">
+          Narrator
+        </span>
+        {speaking && (
+          <span
+            aria-label="Narrator speaking"
+            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500/80"
+          />
+        )}
       </div>
       <div className="mt-1 whitespace-pre-wrap font-serif text-[16px] leading-[1.75] text-neutral-100">
         {text}
         {streaming && <span className="chronicles-cursor text-amber-500/70" />}
       </div>
-      {cost && !streaming && <CostFooter cost={cost} />}
+      {!streaming && (cost || canReplay) && (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">{cost && <CostFooter cost={cost} />}</div>
+          {canReplay && (
+            <button
+              type="button"
+              onClick={onReplay}
+              disabled={replayDisabled}
+              aria-label={
+                replayDisabled
+                  ? "Replay unavailable while audio is off"
+                  : speaking
+                    ? "Replay this narration from the start"
+                    : "Replay this narration"
+              }
+              title={
+                replayDisabled
+                  ? "Turn audio on to replay"
+                  : speaking
+                    ? "Restart playback"
+                    : "Replay"
+              }
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-neutral-800 px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.12em] text-neutral-400 transition hover:border-amber-500/40 hover:text-amber-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-400"
+            >
+              <ReplayIcon />
+              <span>Replay</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ReplayIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 8a5 5 0 1 0 1.5-3.5" />
+      <path d="M3 2v3h3" />
+    </svg>
+  );
+}
+
+function AudioIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h2l3.5-2.5v9L5 10H3z" />
+      {muted ? (
+        <>
+          <line x1="11" y1="6" x2="14" y2="9" />
+          <line x1="14" y1="6" x2="11" y2="9" />
+        </>
+      ) : (
+        <>
+          <path d="M11 5.5c.9.8 1.4 1.7 1.4 2.5s-.5 1.7-1.4 2.5" />
+          <path d="M13 4c1.4 1.1 2.1 2.5 2.1 4s-.7 2.9-2.1 4" />
+        </>
+      )}
+    </svg>
   );
 }
 
@@ -330,8 +486,9 @@ function CostFooter({ cost }: { cost: TurnCost }) {
   if (cost.narrator) segments.push(agentSegment("narrator", cost.narrator));
   if (cost.extractor) segments.push(agentSegment("state", cost.extractor));
   if (cost.classifier) segments.push(agentSegment("class", cost.classifier));
+  if (cost.tts) segments.push(`tts ${fmt(cost.tts.chars)} chars`);
   return (
-    <div className="mt-2 font-sans text-[11px] tabular-nums text-neutral-600">
+    <div className="truncate font-sans text-[11px] tabular-nums text-neutral-600">
       {segments.join(" · ")} · ~{formatUsd(cost.total)}
     </div>
   );

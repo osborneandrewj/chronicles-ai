@@ -1,6 +1,7 @@
-import { costForUsage, type UsageLike } from '@/lib/pricing'
+import { costForTts, costForUsage, type UsageLike } from '@/lib/pricing'
 
 type AgentMeta = { model?: string; usage?: UsageLike } | undefined
+type TtsMeta = { chars?: number } | undefined
 
 export type AgentCost = {
   model: string
@@ -10,11 +11,17 @@ export type AgentCost = {
   cost: number
 }
 
+export type TtsCost = {
+  chars: number
+  cost: number
+}
+
 export type TurnCost = {
   id: number
   narrator?: AgentCost
   extractor?: AgentCost
   classifier?: AgentCost
+  tts?: TtsCost
   total: number
 }
 
@@ -32,10 +39,17 @@ function agentCost(meta: AgentMeta): AgentCost | undefined {
   }
 }
 
+function ttsCost(meta: TtsMeta): TtsCost | undefined {
+  if (!meta || typeof meta.chars !== 'number' || meta.chars <= 0) return undefined
+  return { chars: meta.chars, cost: costForTts(meta.chars) }
+}
+
 export function summarizeTurn(id: number, metadata: Record<string, unknown>): TurnCost {
   const narrator = agentCost(metadata.narrator as AgentMeta)
   const extractor = agentCost(metadata.extractor as AgentMeta)
   const classifier = agentCost(metadata.classifier as AgentMeta)
-  const total = (narrator?.cost ?? 0) + (extractor?.cost ?? 0) + (classifier?.cost ?? 0)
-  return { id, narrator, extractor, classifier, total }
+  const tts = ttsCost(metadata.tts as TtsMeta)
+  const total =
+    (narrator?.cost ?? 0) + (extractor?.cost ?? 0) + (classifier?.cost ?? 0) + (tts?.cost ?? 0)
+  return { id, narrator, extractor, classifier, tts, total }
 }

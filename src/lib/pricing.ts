@@ -7,6 +7,14 @@ const RATES: Record<string, Rate> = {
   'claude-haiku-4-5-20251001': { input: 1, cachedInput: 0.1, output: 5 },
 }
 
+// USD per million characters synthesized. xAI Grok TTS is char-billed, not token-billed.
+const TTS_RATE_PER_M_CHARS = 4.2
+
+export function costForTts(chars: number): number {
+  if (!chars || chars < 0) return 0
+  return (chars * TTS_RATE_PER_M_CHARS) / 1_000_000
+}
+
 export type UsageLike = {
   inputTokens?: number | null
   outputTokens?: number | null
