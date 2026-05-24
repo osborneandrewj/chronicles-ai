@@ -86,10 +86,19 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     return undefined;
   }, [messages]);
 
-  const lastNarratorText = useMemo(() => {
-    if (!lastAssistantId) return "";
-    const m = messages.find((msg) => msg.id === lastAssistantId);
-    return m ? messageText(m) : "";
+  // Meta-command responses (preceding user message starts with "/") are
+  // pre-canned strings, not narrator prose — skip TTS for them so /pause etc.
+  // don't get spoken. Passing undefined turnId tears down any in-flight audio,
+  // matching the "new turn supersedes" semantics of real narrator turns.
+  const narratableTurn = useMemo(() => {
+    if (!lastAssistantId) return { id: undefined, text: "" };
+    const idx = messages.findIndex((msg) => msg.id === lastAssistantId);
+    if (idx < 0) return { id: undefined, text: "" };
+    const prevUser = findPrevUser(messages, idx);
+    if (prevUser && messageText(prevUser).trim().startsWith("/")) {
+      return { id: undefined, text: "" };
+    }
+    return { id: lastAssistantId, text: messageText(messages[idx]) };
   }, [messages, lastAssistantId]);
 
   const reportTtsChars = useCallback(
@@ -114,9 +123,9 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     activeTurnId: speakingTurnId,
     replay,
   } = useNarratorAudio({
-    text: lastNarratorText,
-    streaming,
-    turnId: lastAssistantId,
+    text: narratableTurn.text,
+    streaming: streaming && narratableTurn.id === lastAssistantId,
+    turnId: narratableTurn.id,
     onTurnComplete: reportTtsChars,
   });
 
