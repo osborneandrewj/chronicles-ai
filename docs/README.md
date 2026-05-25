@@ -38,6 +38,8 @@ Listed in shipping order. Tags on `main` correspond to the row's version unless 
 | 18 | v0.4.2 | [v0.4.2-patch](18-v0.4.2-patch.md) | 2026-05-23 | Railway build-phase fixes (DB skip, prerender) — backfilled doc |
 | 19 | v0.5.2 | [v0.5.2-patch](19-v0.5.2-patch.md) | 2026-05-25 | Docs canon: README + milestone template + v0.5.0/v0.4.2 backfills + memory + parked branch rescue |
 | 20 | v0.6.0 | [v0.6.0-milestone](20-v0.6.0-milestone.md) | 2026-05-25 | Typed world-state (characters/places/scenes) + archivist patch pipeline + inspector. Rebased from the parked save/v0.5-typed-state with three audit-driven mitigations |
+| 21 | v0.6.1 | [v0.6.1-milestone](21-v0.6.1-milestone.md) | TBD (planning) | Narrator prose tuning + NPC active goals + v0.6.0 audit bug fixes (cost-cap drift, TTS world-binding, chat JSON parsing, detached archivist, history pagination) |
+| 22 | v0.6.2 | [v0.6.2-milestone](22-v0.6.2-milestone.md) | TBD (planning) | Mobile + desktop UI pass and replay-cost-footer bug from the v0.6.0 smoke test |
 
 ## Conventions
 
