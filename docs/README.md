@@ -37,6 +37,7 @@ Listed in shipping order. Tags on `main` correspond to the row's version unless 
 | 17 | v0.5.1 debug | [narrator-audio-autoplay-debug](17-narrator-audio-autoplay-debug.md) | 2026-05-25 | iOS autoplay postmortem (Web Audio API fix) |
 | 18 | v0.4.2 | [v0.4.2-patch](18-v0.4.2-patch.md) | 2026-05-23 | Railway build-phase fixes (DB skip, prerender) — backfilled doc |
 | 19 | v0.5.2 | [v0.5.2-patch](19-v0.5.2-patch.md) | 2026-05-25 | Docs canon: README + milestone template + v0.5.0/v0.4.2 backfills + memory + parked branch rescue |
+| 20 | v0.6.0 | [v0.6.0-milestone](20-v0.6.0-milestone.md) | 2026-05-25 | Typed world-state (characters/places/scenes) + archivist patch pipeline + inspector. Rebased from the parked save/v0.5-typed-state with three audit-driven mitigations |
 
 ## Conventions
 
