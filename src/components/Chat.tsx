@@ -79,6 +79,9 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
 
   const costByMessageId = useMemo(() => buildCostMap(messages, usage), [messages, usage]);
   const sessionTotal = usage.reduce((s, t) => s + t.total, 0);
+  const latestMessage = messages[messages.length - 1];
+  const streamingAssistantId =
+    streaming && latestMessage?.role === "assistant" ? latestMessage.id : undefined;
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "assistant") return messages[i].id;
@@ -121,10 +124,11 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     muted,
     setMuted,
     activeTurnId: speakingTurnId,
+    primeAudio,
     replay,
   } = useNarratorAudio({
     text: narratableTurn.text,
-    streaming: streaming && narratableTurn.id === lastAssistantId,
+    streaming: narratableTurn.id === streamingAssistantId,
     turnId: narratableTurn.id,
     onTurnComplete: reportTtsChars,
   });
@@ -132,6 +136,7 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
   function submitInput() {
     const text = input.trim();
     if (!text || busy) return;
+    primeAudio();
     sendMessage({ text });
     setInput("");
     setStickToBottom(true);
@@ -264,7 +269,7 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
 
           {messages.map((m, idx) => {
             const cost = m.role === "assistant" ? costByMessageId.get(m.id) : undefined;
-            const isStreamingThis = streaming && m.id === lastAssistantId;
+            const isStreamingThis = m.id === streamingAssistantId;
             const isSpeakingThis = m.role === "assistant" && m.id === speakingTurnId;
             const text = messageText(m);
             const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
