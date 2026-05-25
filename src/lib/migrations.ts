@@ -152,8 +152,12 @@ export const migrations: Migration[] = [
     version: 5,
     name: 'typed_world_state',
     up: (db) => {
+      // IF NOT EXISTS is belt-and-braces: runMigrations() already wraps
+      // each m.up() in a transaction (see line ~315), so a kill mid-DDL
+      // rolls back via WAL and a retry starts fresh. Guarding anyway in
+      // case a future driver change reorders that.
       db.exec(`
-        CREATE TABLE characters (
+        CREATE TABLE IF NOT EXISTS characters (
           id                INTEGER PRIMARY KEY AUTOINCREMENT,
           world_id          INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
           name              TEXT    NOT NULL,
@@ -167,10 +171,10 @@ export const migrations: Migration[] = [
           created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
           updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
         );
-        CREATE INDEX characters_world_id ON characters(world_id);
-        CREATE UNIQUE INDEX characters_world_name ON characters(world_id, lower(name));
+        CREATE INDEX IF NOT EXISTS characters_world_id ON characters(world_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS characters_world_name ON characters(world_id, lower(name));
 
-        CREATE TABLE places (
+        CREATE TABLE IF NOT EXISTS places (
           id          INTEGER PRIMARY KEY AUTOINCREMENT,
           world_id    INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
           name        TEXT    NOT NULL,
@@ -179,10 +183,10 @@ export const migrations: Migration[] = [
           created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
           updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
         );
-        CREATE INDEX places_world_id ON places(world_id);
-        CREATE UNIQUE INDEX places_world_name ON places(world_id, lower(name));
+        CREATE INDEX IF NOT EXISTS places_world_id ON places(world_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS places_world_name ON places(world_id, lower(name));
 
-        CREATE TABLE scenes (
+        CREATE TABLE IF NOT EXISTS scenes (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,
           world_id        INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
           place_id        INTEGER REFERENCES places(id) ON DELETE SET NULL,
@@ -194,8 +198,8 @@ export const migrations: Migration[] = [
           closed_at_turn  INTEGER REFERENCES turns(id) ON DELETE SET NULL,
           created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
         );
-        CREATE INDEX scenes_world_id ON scenes(world_id);
-        CREATE UNIQUE INDEX scenes_world_number ON scenes(world_id, scene_number);
+        CREATE INDEX IF NOT EXISTS scenes_world_id ON scenes(world_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS scenes_world_number ON scenes(world_id, scene_number);
       `)
 
       // SQLite permits ALTER TABLE ADD COLUMN with a REFERENCES clause only
