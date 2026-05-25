@@ -11,6 +11,12 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 - `docs/04-memory-architecture.md` — memory chunks, retrieval, embeddings
 - `docs/07-implementation-roadmap.md` — phased plan, current phase
 
+## Working autonomy
+
+- **Default to the recommended option** when you offer me a choice. Only stop to ask when the options have materially different blast radius (e.g. destructive vs. reversible) or when the right answer genuinely depends on something only I know. Don't ask me to choose between "snapshot type A vs B" if A is clearly better — just do A and tell me what you did.
+- **Proceed without confirmation for reversible local actions**: writing files in this repo, creating local backups under `backups/`, running read-only railway commands, sshing into the prod container via `railway ssh` for inspection or snapshots. Still confirm before: `git push`, `railway redeploy`/`down`/`delete`, dropping DB tables, `rm -rf`, anything that touches the production DB destructively, or anything that posts to GitHub/external systems.
+- **When a command fails, diagnose before retrying with flags.** Don't keep poking. If two attempts fail for related reasons, stop and explain the hypothesis before the third try.
+
 ## Working in this repo
 
 - **State assumptions before coding.** If the request has multiple reasonable readings, surface them rather than picking silently. If you don't know which agent/table/phase a change belongs in, ask.
