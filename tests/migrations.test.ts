@@ -169,6 +169,54 @@ describe('v5 migration', () => {
     // Falls back to the legacy fallback constant.
     expect(place.name).toBe('Opening scene')
   })
+
+  it('handles malformed turn_states.state_json by using LEGACY fallback (not initial_state_json)', () => {
+    // The production-likely failure mode: a world has 20+ turn_states, one of
+    // them was written during an LLM error and is malformed, and that one
+    // happens to be the latest. The valid initial_state_json is NOT used —
+    // the migration uses LEGACY_STATE_FALLBACK constants instead. Surprising
+    // but stable; recorded here so future changes that "improve" the
+    // fall-through must do so consciously.
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Corrupt Latest',
+      'Premise.',
+      JSON.stringify({
+        time: 'Dawn, day 3',
+        location: 'The crow road above Mevagissey',
+        identity: 'Returned letter-writer.',
+      }),
+    )
+    db.prepare(`INSERT INTO turns (world_id, role, content) VALUES (?, ?, ?)`).run(
+      1, 'user', 'I keep walking.',
+    )
+    db.prepare(`INSERT INTO turns (world_id, role, content) VALUES (?, ?, ?)`).run(
+      1, 'assistant', 'The road bends...',
+    )
+    // The latest turn_state is garbage — simulates a half-flushed write or
+    // an upstream archiver bug.
+    db.prepare(
+      `INSERT INTO turn_states (turn_id, world_id, state_json) VALUES (?, ?, ?)`,
+    ).run(2, 1, '{"time": "broken')
+
+    expect(() => runMigrations(db)).not.toThrow()
+    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    // initial_state_json was valid but is NOT consulted — current code uses
+    // `latest?.state_json ?? initial_state_json`, so a defined-but-malformed
+    // latest short-circuits the fallback.
+    const world = db.prepare('SELECT world_time FROM worlds WHERE id = 1').get() as {
+      world_time: string
+    }
+    expect(world.world_time).toBe('Day 1, morning')
+
+    const place = db.prepare('SELECT name FROM places WHERE world_id = 1').get() as { name: string }
+    expect(place.name).toBe('Opening scene')
+  })
 })
 
 function scene_id(world: { current_scene_id: number }): number {
