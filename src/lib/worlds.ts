@@ -30,7 +30,7 @@ const getWorldStmt = db.prepare<[number]>(
 const listWorldsStmt = db.prepare(`
   SELECT
     w.id, w.name, w.premise, w.created_at,
-    COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id), 0) AS turn_count
+    COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
   FROM worlds w
   ORDER BY w.created_at DESC, w.id DESC
 `)

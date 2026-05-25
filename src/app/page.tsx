@@ -1,5 +1,6 @@
 import Link from 'next/link'
 
+import pkg from '../../package.json'
 import { listWorlds, type WorldSummary } from '@/lib/worlds'
 
 export const dynamic = 'force-dynamic'
@@ -13,7 +14,7 @@ export default function Home() {
         <div className="flex items-baseline gap-2">
           <span className="text-lg font-semibold tracking-tight text-neutral-100">Chronicles</span>
           <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
-            v0.3
+            v{pkg.version}
           </span>
         </div>
         <Link
