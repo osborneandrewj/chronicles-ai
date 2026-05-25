@@ -7,6 +7,7 @@ import {
   getScenesForWorld,
   getWorldCursor,
 } from '@/lib/db'
+import { stripFactProvenance } from '@/lib/memorable-facts'
 
 export type Character = {
   id: number
@@ -110,8 +111,9 @@ export function formatStateBlock(state: NarratorWorldState): string {
     for (const c of state.presentCharacters) {
       const role = c.is_player === 1 ? 'player' : c.status
       lines.push(`- **${c.name}** (${role})${c.description ? ` — ${c.description}` : ''}`)
-      if (c.memorable_facts) {
-        for (const fact of c.memorable_facts.split('\n').filter((f) => f.trim().length > 0)) {
+      const facts = stripFactProvenance(c.memorable_facts)
+      if (facts) {
+        for (const fact of facts.split('\n').filter((f) => f.trim().length > 0)) {
           lines.push(`  - ${fact}`)
         }
       }
