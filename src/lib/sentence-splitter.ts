@@ -1,12 +1,15 @@
-// Incremental sentence splitter for streaming narrator text. Pure, no deps.
-// Boundary rule: [.!?]+ (optionally followed by closing quotes/brackets) + whitespace.
-// Fallback: when no boundary appears within MAX_BUFFER_CHARS, break at the last
-// whitespace in the buffered window so audio doesn't stall on a long quoted speech.
+// Incremental chunker for streaming narrator text. Pure, no deps.
+// Boundary rule: paragraph break (\n{2,}). When a paragraph exceeds the soft
+// cap, fall back to sentence boundaries inside it. On stream end, flush the
+// remaining tail. The cap also kicks in pre-flush so audio doesn't stall on a
+// run-on paragraph before its closing blank line arrives.
 
-const MAX_BUFFER_CHARS = 200
+const SOFT_CAP_CHARS = 600
+const PARAGRAPH_BOUNDARY = /\n{2,}/
+const SENTENCE_BOUNDARY = /[.!?]+(["')\]”’]*)\s+/g
 
 export interface SplitResult {
-  sentences: string[]
+  chunks: string[]
   cursor: number
 }
 
@@ -14,40 +17,40 @@ export interface SplitOptions {
   flush?: boolean
 }
 
-export function splitNewSentences(
+export function splitNewChunks(
   text: string,
   cursor: number,
   options: SplitOptions = {},
 ): SplitResult {
   const flush = options.flush ?? false
-  const sentences: string[] = []
+  const chunks: string[] = []
   let pos = cursor
 
   while (pos < text.length) {
     const tail = text.slice(pos)
-    const match = tail.match(/[.!?]+(["')\]”’]*)\s+/)
+    const boundary = tail.match(PARAGRAPH_BOUNDARY)
 
-    if (match && match.index !== undefined) {
-      const endIdx = match.index + match[0].length
-      const piece = tail.slice(0, endIdx).trim()
-      if (piece) sentences.push(piece)
-      pos += endIdx
+    if (boundary && boundary.index !== undefined) {
+      const piece = tail.slice(0, boundary.index).trim()
+      if (piece) emitWithSoftCap(piece, chunks)
+      pos += boundary.index + boundary[0].length
       continue
     }
 
     if (flush) {
       const piece = tail.trim()
-      if (piece) sentences.push(piece)
+      if (piece) emitWithSoftCap(piece, chunks)
       pos = text.length
       break
     }
 
-    if (tail.length >= MAX_BUFFER_CHARS) {
-      const window = tail.slice(0, MAX_BUFFER_CHARS)
-      const lastSpace = window.lastIndexOf(' ')
-      const cut = lastSpace > 0 ? lastSpace + 1 : MAX_BUFFER_CHARS
-      const piece = window.slice(0, cut).trim()
-      if (piece) sentences.push(piece)
+    // No paragraph boundary yet. If buffered text already exceeds the soft cap,
+    // ship a sub-chunk at the last sentence boundary inside the window so we
+    // don't sit on a run-on paragraph waiting for its closing blank line.
+    if (tail.length >= SOFT_CAP_CHARS) {
+      const cut = sentenceBoundaryBefore(tail, SOFT_CAP_CHARS)
+      const piece = tail.slice(0, cut).trim()
+      if (piece) chunks.push(piece)
       pos += cut
       continue
     }
@@ -55,5 +58,47 @@ export function splitNewSentences(
     break
   }
 
-  return { sentences, cursor: pos }
+  return { chunks, cursor: pos }
+}
+
+// Subdivide a paragraph that exceeds the soft cap into sentence-bounded
+// sub-chunks. The final tail (whatever is left under the cap) is emitted as-is.
+function emitWithSoftCap(piece: string, out: string[]): void {
+  let remaining = piece
+  while (remaining.length > SOFT_CAP_CHARS) {
+    const cut = sentenceBoundaryBefore(remaining, SOFT_CAP_CHARS)
+    const sub = remaining.slice(0, cut).trim()
+    if (sub) out.push(sub)
+    remaining = remaining.slice(cut)
+  }
+  const tail = remaining.trim()
+  if (tail) out.push(tail)
+}
+
+// Find the latest sentence boundary within text[0..limit]. Falls back to the
+// last whitespace, then to a hard cut at limit, so we always make progress.
+function sentenceBoundaryBefore(text: string, limit: number): number {
+  const window = text.slice(0, limit)
+  let lastEnd = -1
+  SENTENCE_BOUNDARY.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = SENTENCE_BOUNDARY.exec(window)) !== null) {
+    lastEnd = m.index + m[0].length
+  }
+  if (lastEnd > 0) return lastEnd
+  const lastSpace = window.lastIndexOf(' ')
+  if (lastSpace > 0) return lastSpace + 1
+  return limit
+}
+
+/**
+ * @deprecated Use splitNewChunks. Kept for back-compat; remove in v0.6.
+ */
+export function splitNewSentences(
+  text: string,
+  cursor: number,
+  options: SplitOptions = {},
+): { sentences: string[]; cursor: number } {
+  const { chunks, cursor: next } = splitNewChunks(text, cursor, options)
+  return { sentences: chunks, cursor: next }
 }

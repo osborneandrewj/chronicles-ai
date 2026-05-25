@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { splitNewSentences } from "@/lib/sentence-splitter";
+import { splitNewChunks } from "@/lib/sentence-splitter";
 
 const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
 
@@ -188,8 +188,8 @@ export function useNarratorAudio({
     });
   }, []);
 
-  const fetchSentence = useCallback(
-    async (sentence: string, seq: number, owner: JobState) => {
+  const fetchChunk = useCallback(
+    async (chunk: string, seq: number, owner: JobState) => {
       if (owner.failed) return;
       const controller = new AbortController();
       owner.controllers.add(controller);
@@ -197,7 +197,7 @@ export function useNarratorAudio({
         const res = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: sentence }),
+          body: JSON.stringify({ text: chunk }),
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -231,7 +231,7 @@ export function useNarratorAudio({
 
     const j = jobRef.current;
     if (!j) return;
-    const { sentences, cursor } = splitNewSentences(effective.text, j.cursor, {
+    const { chunks, cursor } = splitNewChunks(effective.text, j.cursor, {
       flush: !effective.streaming,
     });
     j.cursor = cursor;
@@ -241,10 +241,10 @@ export function useNarratorAudio({
     // "now" instead of replaying everything already on screen. Skip dispatch
     // entirely if muted or this job has already hit a TTS error.
     if (!mutedRef.current && !j.failed) {
-      for (const sentence of sentences) {
+      for (const chunk of chunks) {
         const seq = j.nextSeq++;
-        j.charsSent += sentence.length;
-        void fetchSentence(sentence, seq, j);
+        j.charsSent += chunk.length;
+        void fetchChunk(chunk, seq, j);
       }
     }
 
@@ -259,7 +259,7 @@ export function useNarratorAudio({
       setStatus("idle");
       if (j.source === "replay") setOverride(null);
     }
-  }, [effective, fetchSentence, resetJob]);
+  }, [effective, fetchChunk, resetJob]);
 
   const setMuted = useCallback(
     (next: boolean) => {
