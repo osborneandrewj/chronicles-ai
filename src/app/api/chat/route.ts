@@ -7,20 +7,20 @@ import {
   type UIMessage,
 } from 'ai'
 
+import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { CLASSIFIER_MODEL, classifyAction } from '@/lib/classifier'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
 import {
-  getLatestStateJson,
+  getActiveSceneForWorld,
   insertTurn,
   latestUserContent,
   recentTurns,
   updateTurnMetadata,
-  updateTurnState,
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
-import { EXTRACTOR_MODEL, extractState, formatStateBlock, parseState } from '@/lib/state'
-import { getWorld, getWorldInitialState } from '@/lib/worlds'
+import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+import { getWorld } from '@/lib/worlds'
 
 const NARRATOR_MODEL = 'claude-sonnet-4-6'
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: 'ephemeral' as const } } }
@@ -65,19 +65,21 @@ export async function POST(req: Request) {
     )
   }
 
+  const activeScene = getActiveSceneForWorld(worldId)
+  const activeSceneId = activeScene?.id ?? null
+
   // Idempotent on retry: if the trailing player text matches the latest persisted user
   // turn for this world, skip re-insertion. Lets the client re-fire the same request
   // after a stream error without duplicating turns.
   if (latestUserContent(worldId) !== playerText) {
-    insertTurn(worldId, 'user', playerText)
+    insertTurn(worldId, 'user', playerText, activeSceneId)
   }
 
   const classification = await classifyAction(playerText)
   const { stance, input_mode } = classification
 
-  const fallbackState = getWorldInitialState(world)
-  const state = parseState(getLatestStateJson(worldId), fallbackState)
-  const stateBlock = formatStateBlock(state)
+  const priorState = getNarratorWorldState(worldId)
+  const stateBlock = formatStateBlock(priorState)
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // Cacheable prefix = system + all prior turns (excluding the new player action).
@@ -116,7 +118,7 @@ export async function POST(req: Request) {
     onFinish: ({ text, usage: narratorUsage }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
-      const narratorTurn = insertTurn(worldId, 'assistant', trimmed)
+      const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
       const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
       const classifierMeta = {
         model: CLASSIFIER_MODEL,
@@ -125,25 +127,25 @@ export async function POST(req: Request) {
         error: classification.error,
       }
 
-      void extractState(world.premise, state, [
+      void extractPatch(world.premise, priorState, [
         { role: 'user', content: playerText },
         { role: 'assistant', content: trimmed },
       ])
-        .then(({ state: next, usage: extractorUsage }) => {
-          updateTurnState(narratorTurn.id, worldId, JSON.stringify(next))
+        .then(({ patch, usage: archivistUsage }) => {
+          applyArchivistPatch(worldId, narratorTurn.id, patch)
           updateTurnMetadata(narratorTurn.id, {
             narrator: narratorMeta,
-            extractor: { model: EXTRACTOR_MODEL, usage: extractorUsage },
+            archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
             classifier: classifierMeta,
           })
         })
         .catch((err) => {
           updateTurnMetadata(narratorTurn.id, {
             narrator: narratorMeta,
-            extractor: { model: EXTRACTOR_MODEL, error: String(err) },
+            archivist: { model: ARCHIVIST_MODEL, error: String(err) },
             classifier: classifierMeta,
           })
-          console.error('[state extraction failed]', err)
+          console.error('[archivist patch failed]', err)
         })
     },
   })

@@ -48,13 +48,21 @@ export function CreateWorldForm() {
       />
 
       <Field
-        label="Opening identity"
+        label="Your character — name"
+        name="playerName"
+        defaultValue=""
+        placeholder="Leave blank for an unnamed protagonist"
+        hint="Optional. Defaults to “Player” if blank; you can name your character in play later."
+      />
+
+      <Field
+        label="Your character — description"
         name="identity"
         as="textarea"
         rows={3}
         defaultValue=""
         placeholder="Travel-worn newcomer — name not yet established."
-        hint="1–2 sentences on who the protagonist is. Leave the name open if you want to earn it in play."
+        hint="1–2 sentences on who the protagonist is, what they look like, what they're carrying."
       />
 
       {state.error && (

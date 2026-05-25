@@ -7,9 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { SlashCommandMenu } from "@/components/SlashCommandMenu";
 import { useNarratorAudio } from "@/components/useNarratorAudio";
+import { WorldInspector } from "@/components/WorldInspector";
 import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import type { AgentCost, TurnCost } from "@/lib/turn-cost";
+
+const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
 
 type Props = {
   worldId: number;
@@ -48,11 +51,33 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     }
   }, [usageApi]);
 
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorRefreshKey, setInspectorRefreshKey] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setInspectorOpen(window.localStorage.getItem(INSPECTOR_STORAGE_KEY) === "1");
+  }, []);
+  const toggleInspector = useCallback(() => {
+    setInspectorOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(INSPECTOR_STORAGE_KEY, next ? "1" : "0");
+      }
+      return next;
+    });
+  }, []);
+
   const prevStatus = useRef(status);
   useEffect(() => {
     if (prevStatus.current === "streaming" && status === "ready") {
       void refetchUsage();
-      const t = setTimeout(refetchUsage, 2000);
+      // Archivist patch commits ~1-3s after stream finish — refresh twice so
+      // the inspector picks up the new rows without polling.
+      setInspectorRefreshKey((k) => k + 1);
+      const t = setTimeout(() => {
+        void refetchUsage();
+        setInspectorRefreshKey((k) => k + 1);
+      }, 2000);
       prevStatus.current = status;
       return () => clearTimeout(t);
     }
@@ -102,12 +127,14 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
   }, [messages, lastAssistantId]);
 
   const reportTtsChars = useCallback(
-    async (chars: number) => {
+    async (turnIdStr: string, chars: number) => {
+      const turnId = Number(turnIdStr);
+      if (!Number.isInteger(turnId) || turnId <= 0) return;
       try {
         await fetch(`/api/tts/record?worldId=${worldId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chars }),
+          body: JSON.stringify({ turnId, chars }),
         });
         void refetchUsage();
       } catch {
@@ -214,6 +241,12 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
 
   return (
     <div className="mx-auto flex h-screen max-w-2xl flex-col">
+      <WorldInspector
+        worldId={worldId}
+        open={inspectorOpen}
+        onClose={toggleInspector}
+        refreshKey={inspectorRefreshKey}
+      />
       <header className="flex items-center justify-between border-b border-neutral-900/80 px-5 py-4 backdrop-blur">
         <div className="flex items-baseline gap-3 min-w-0">
           <Link
@@ -228,6 +261,22 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleInspector}
+            aria-pressed={inspectorOpen}
+            aria-label={inspectorOpen ? "Close world inspector" : "Open world inspector"}
+            title={inspectorOpen ? "Close inspector" : "Open inspector"}
+            className={
+              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 " +
+              (inspectorOpen
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300/90 hover:bg-amber-500/20"
+                : "border-neutral-800 bg-neutral-900/40 text-neutral-500 hover:text-neutral-300")
+            }
+          >
+            <InspectorIcon />
+            <span>State</span>
+          </button>
           <button
             type="button"
             onClick={() => setMuted(!muted)}
@@ -461,6 +510,26 @@ function ReplayIcon() {
   );
 }
 
+function InspectorIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <line x1="5" y1="6" x2="11" y2="6" />
+      <line x1="5" y1="9" x2="9" y2="9" />
+    </svg>
+  );
+}
+
 function AudioIcon({ muted }: { muted: boolean }) {
   return (
     <svg
@@ -493,7 +562,7 @@ function AudioIcon({ muted }: { muted: boolean }) {
 function CostFooter({ cost }: { cost: TurnCost }) {
   const segments: string[] = [];
   if (cost.narrator) segments.push(agentSegment("narrator", cost.narrator));
-  if (cost.extractor) segments.push(agentSegment("state", cost.extractor));
+  if (cost.archivist) segments.push(agentSegment("archivist", cost.archivist));
   if (cost.classifier) segments.push(agentSegment("class", cost.classifier));
   if (cost.tts) segments.push(`tts ${fmt(cost.tts.chars)} chars`);
   return (

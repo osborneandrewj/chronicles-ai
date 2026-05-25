@@ -1,8 +1,9 @@
-import { recordLatestAssistantTtsChars } from '@/lib/db'
+import { addTtsChars } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
 interface RecordBody {
+  turnId?: unknown
   chars?: unknown
 }
 
@@ -20,11 +21,18 @@ export async function POST(req: Request) {
     return new Response('Invalid JSON', { status: 400 })
   }
 
+  const turnId =
+    typeof body.turnId === 'number' && Number.isInteger(body.turnId) && body.turnId > 0
+      ? body.turnId
+      : null
+  if (turnId === null) {
+    return new Response('Missing or invalid turnId', { status: 400 })
+  }
   const chars = typeof body.chars === 'number' && Number.isFinite(body.chars) ? body.chars : null
   if (chars === null || chars < 0) {
     return new Response('Missing or invalid chars', { status: 400 })
   }
 
-  recordLatestAssistantTtsChars(worldId, chars)
+  addTtsChars(turnId, chars)
   return new Response(null, { status: 204 })
 }

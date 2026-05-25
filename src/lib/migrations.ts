@@ -140,7 +140,165 @@ export const migrations: Migration[] = [
       db.exec('CREATE INDEX turn_states_world_id_turn_id ON turn_states(world_id, turn_id);')
     },
   },
+  {
+    // v0.5 — replace the turn_states JSON blob with typed entity rows.
+    // Creates characters / places / scenes; adds turns.scene_id and
+    // worlds.current_time / current_scene_id. Backfill seeds one player
+    // character, one place, and scene 1 per existing world by parsing
+    // the latest turn_states.state_json (or initial_state_json as fallback).
+    // Existing turns are reassigned to scene 1. Then drops turn_states.
+    // runMigrations() disables foreign_keys around the run, so we can DROP
+    // turn_states without violating its references to turns / worlds.
+    version: 5,
+    name: 'typed_world_state',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE characters (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id          INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          name              TEXT    NOT NULL,
+          description       TEXT,
+          is_player         INTEGER NOT NULL DEFAULT 0,
+          current_place_id  INTEGER REFERENCES places(id) ON DELETE SET NULL,
+          memorable_facts   TEXT,
+          voice_id          TEXT,
+          status            TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','dead')),
+          traits_json       TEXT,
+          created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX characters_world_id ON characters(world_id);
+        CREATE UNIQUE INDEX characters_world_name ON characters(world_id, lower(name));
+
+        CREATE TABLE places (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id    INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          name        TEXT    NOT NULL,
+          description TEXT,
+          kind        TEXT,
+          created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX places_world_id ON places(world_id);
+        CREATE UNIQUE INDEX places_world_name ON places(world_id, lower(name));
+
+        CREATE TABLE scenes (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id        INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          place_id        INTEGER REFERENCES places(id) ON DELETE SET NULL,
+          title           TEXT    NOT NULL,
+          summary         TEXT,
+          scene_number    INTEGER NOT NULL,
+          status          TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+          opened_at_turn  INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          closed_at_turn  INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX scenes_world_id ON scenes(world_id);
+        CREATE UNIQUE INDEX scenes_world_number ON scenes(world_id, scene_number);
+      `)
+
+      // SQLite permits ALTER TABLE ADD COLUMN with a REFERENCES clause only
+      // when the column's default is NULL. All three of these qualify.
+      db.exec('ALTER TABLE turns ADD COLUMN scene_id INTEGER REFERENCES scenes(id) ON DELETE SET NULL')
+      db.exec('CREATE INDEX turns_scene_id ON turns(scene_id)')
+      // Note: not `current_time` — that bare identifier is interpreted as the
+      // SQLite reserved keyword `CURRENT_TIME` in queries, returning the system
+      // clock instead of the column value. `world_time` sidesteps the trap.
+      db.exec('ALTER TABLE worlds ADD COLUMN world_time TEXT')
+      db.exec(
+        'ALTER TABLE worlds ADD COLUMN current_scene_id INTEGER REFERENCES scenes(id) ON DELETE SET NULL',
+      )
+
+      // Backfill: one player + one place + scene 1 per world, seeded from
+      // the world's most recent turn_states.state_json (or initial_state_json
+      // when the world has no turn_states yet).
+      const worlds = db
+        .prepare('SELECT id, initial_state_json FROM worlds')
+        .all() as Array<{ id: number; initial_state_json: string }>
+
+      const latestStateStmt = db.prepare<[number]>(
+        `SELECT state_json FROM turn_states
+         WHERE world_id = ?
+         ORDER BY turn_id DESC
+         LIMIT 1`,
+      )
+      const firstTurnStmt = db.prepare<[number]>(
+        'SELECT MIN(id) as id FROM turns WHERE world_id = ?',
+      )
+      const insertPlace = db.prepare<[number, string, string]>(
+        `INSERT INTO places (world_id, name, description) VALUES (?, ?, ?) RETURNING id`,
+      )
+      const insertCharacter = db.prepare<[number, string, string, number]>(
+        `INSERT INTO characters (world_id, name, description, is_player, current_place_id)
+         VALUES (?, ?, ?, 1, ?) RETURNING id`,
+      )
+      const insertScene = db.prepare<[number, number, number | null]>(
+        `INSERT INTO scenes (world_id, place_id, title, scene_number, status, opened_at_turn)
+         VALUES (?, ?, 'Scene 1', 1, 'active', ?) RETURNING id`,
+      )
+      const assignTurns = db.prepare<[number, number]>(
+        'UPDATE turns SET scene_id = ? WHERE world_id = ?',
+      )
+      const setWorldCursor = db.prepare<[string, number, number]>(
+        'UPDATE worlds SET world_time = ?, current_scene_id = ? WHERE id = ?',
+      )
+
+      for (const w of worlds) {
+        const latest = latestStateStmt.get(w.id) as { state_json: string } | undefined
+        const sourceJson = latest?.state_json ?? w.initial_state_json
+        const parsed = parseLegacyState(sourceJson)
+
+        const placeName = derivePlaceName(parsed.location)
+        const place = insertPlace.get(w.id, placeName, parsed.location) as { id: number }
+        insertCharacter.run(w.id, 'Player', parsed.identity, place.id)
+
+        const firstTurn = firstTurnStmt.get(w.id) as { id: number | null }
+        const scene = insertScene.get(w.id, place.id, firstTurn.id ?? null) as { id: number }
+
+        assignTurns.run(scene.id, w.id)
+        setWorldCursor.run(parsed.time, scene.id, w.id)
+      }
+
+      db.exec('DROP TABLE turn_states')
+    },
+  },
 ]
+
+// Backfill helpers (v5). Kept local to migrations.ts because they only run
+// inside the v5 up() and have no callers elsewhere.
+
+type LegacyState = { time: string; location: string; identity: string }
+
+const LEGACY_STATE_FALLBACK: LegacyState = {
+  time: 'Day 1, morning',
+  location: 'Opening scene',
+  identity: 'Newcomer — name not yet established.',
+}
+
+function parseLegacyState(json: string | null): LegacyState {
+  if (!json) return LEGACY_STATE_FALLBACK
+  try {
+    const obj = JSON.parse(json) as Partial<LegacyState>
+    return {
+      time: obj.time ?? LEGACY_STATE_FALLBACK.time,
+      location: obj.location ?? LEGACY_STATE_FALLBACK.location,
+      identity: obj.identity ?? LEGACY_STATE_FALLBACK.identity,
+    }
+  } catch {
+    return LEGACY_STATE_FALLBACK
+  }
+}
+
+// The legacy `location` field is paragraph-long prose. As a place *name* we
+// want a short anchor (the leading clause), keeping the full prose in the
+// place's description column. Split on the first em-dash, en-dash, period,
+// or comma and cap at 80 chars.
+function derivePlaceName(location: string): string {
+  const head = location.split(/[—–.,]/)[0]?.trim() ?? location
+  const cleaned = head.length > 0 ? head : location.trim()
+  return cleaned.length > 80 ? `${cleaned.slice(0, 77)}...` : cleaned
+}
 
 export function runMigrations(db: Database.Database): void {
   const current = (db.pragma('user_version', { simple: true }) as number) ?? 0

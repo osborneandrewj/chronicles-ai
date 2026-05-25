@@ -19,7 +19,7 @@ export type TtsCost = {
 export type TurnCost = {
   id: number
   narrator?: AgentCost
-  extractor?: AgentCost
+  archivist?: AgentCost
   classifier?: AgentCost
   tts?: TtsCost
   total: number
@@ -46,10 +46,14 @@ function ttsCost(meta: TtsMeta): TtsCost | undefined {
 
 export function summarizeTurn(id: number, metadata: Record<string, unknown>): TurnCost {
   const narrator = agentCost(metadata.narrator as AgentMeta)
-  const extractor = agentCost(metadata.extractor as AgentMeta)
+  // Read both keys so old turns (pre-v0.5 used `extractor`) keep their cost
+  // attribution in the session totals during the cutover. New turns only ever
+  // write to `archivist`.
+  const archivist =
+    agentCost(metadata.archivist as AgentMeta) ?? agentCost(metadata.extractor as AgentMeta)
   const classifier = agentCost(metadata.classifier as AgentMeta)
   const tts = ttsCost(metadata.tts as TtsMeta)
   const total =
-    (narrator?.cost ?? 0) + (extractor?.cost ?? 0) + (classifier?.cost ?? 0) + (tts?.cost ?? 0)
-  return { id, narrator, extractor, classifier, tts, total }
+    (narrator?.cost ?? 0) + (archivist?.cost ?? 0) + (classifier?.cost ?? 0) + (tts?.cost ?? 0)
+  return { id, narrator, archivist, classifier, tts, total }
 }

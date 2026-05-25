@@ -54,6 +54,7 @@ secrets/
 *.sqlite-wal
 *.sqlite3
 *.db
+chronicles.sqlite.*
 
 # Misc
 tmp/
