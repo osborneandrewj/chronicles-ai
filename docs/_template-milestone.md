@@ -79,8 +79,9 @@ A numbered list of testable conditions. When all of them are true, the milestone
 
 1. `npm run lint` and `npm run type-check` pass.
 2. `npm test` passes (including any new tests this version adds).
-3. Specific behavioural check in `npm run dev` — describe the exact action and the expected observation.
-4. Deploy → production smoke test — Andrew + Joe each verify something concrete.
-5. Tag `vX.Y[.Z]` on `main`.
+3. `package.json` version reads `X.Y.Z` on the release branch — bump on the release branch itself, not as a post-merge commit. The Chat header reads `pkg.version` so any gap between merge and bump means the header lies in prod.
+4. Specific behavioural check in `npm run dev` — describe the exact action and the expected observation.
+5. Deploy → production smoke test — Andrew + Joe each verify something concrete.
+6. Tag `vX.Y[.Z]` on `main`.
 
 When all N hold, vX.Y[.Z] ships. The next milestone is sketched in [a one-liner pointing at the next doc].
