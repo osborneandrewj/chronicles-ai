@@ -116,7 +116,7 @@ describe('applyArchivistPatch', () => {
     expect(tom.status).toBe('inactive') // updated
   })
 
-  it('appends memorable_facts with newline; multiple appends accumulate', () => {
+  it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
     applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'gave the player a silver locket' }],
     })
@@ -126,7 +126,22 @@ describe('applyArchivistPatch', () => {
 
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.memorable_facts).toBe(
-      'gave the player a silver locket\nowes the harbourmaster two pounds',
+      `gave the player a silver locket [t:${turnId}]\nowes the harbourmaster two pounds [t:${turnId}]`,
+    )
+  })
+
+  it('different turn ids produce different [t:N] suffixes on memorable_facts', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', memorable_facts_append: 'first fact' }],
+    })
+    const secondTurn = insertTurn(worldId, 'assistant', 'Another turn.', null)
+    applyArchivistPatch(worldId, secondTurn.id, {
+      characters: [{ name: 'Tom', memorable_facts_append: 'second fact' }],
+    })
+
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.memorable_facts).toBe(
+      `first fact [t:${turnId}]\nsecond fact [t:${secondTurn.id}]`,
     )
   })
 

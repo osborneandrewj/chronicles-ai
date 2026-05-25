@@ -3,6 +3,7 @@ import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
 import { db } from '@/lib/db'
+import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import { loadPrompt } from '@/lib/prompt-files'
 import type { NarratorWorldState } from '@/lib/world-state'
 
@@ -85,7 +86,7 @@ export async function extractPatch(
         name: c.name,
         is_player: c.is_player === 1,
         description: c.description,
-        memorable_facts: c.memorable_facts,
+        memorable_facts: stripFactProvenance(c.memorable_facts),
         status: c.status,
       })),
     },
@@ -187,11 +188,6 @@ function upsertPlace(
   return row.id
 }
 
-function appendFact(existing: string | null, fact: string): string {
-  const trimmed = fact.trim()
-  if (!trimmed) return existing ?? ''
-  return existing && existing.length > 0 ? `${existing}\n${trimmed}` : trimmed
-}
 
 // Apply a validated patch to the world. Wrapped in a single transaction so a
 // partial failure leaves no half-applied state (e.g. a new place row with no
@@ -223,9 +219,11 @@ export function applyArchivistPatch(
           | { id: number; memorable_facts: string | null }
           | undefined
         if (existing) {
-          const nextFacts = c.memorable_facts_append
-            ? appendFact(existing.memorable_facts, c.memorable_facts_append)
-            : null
+          const nextFacts = appendFactWithProvenance(
+            existing.memorable_facts,
+            c.memorable_facts_append,
+            narratorTurnId,
+          )
           updateCharacterStmt.run(
             c.description ?? null,
             placeId,
@@ -241,7 +239,7 @@ export function applyArchivistPatch(
             c.description ?? null,
             c.is_player ? 1 : 0,
             placeId,
-            c.memorable_facts_append?.trim() || null,
+            appendFactWithProvenance(null, c.memorable_facts_append, narratorTurnId),
             c.status ?? 'active',
           )
         }
