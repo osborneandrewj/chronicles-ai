@@ -170,6 +170,13 @@ const setCurrentSceneStmt = db.prepare<[number, number]>(
 const setWorldTimeStmt = db.prepare<[string, number]>(
   'UPDATE worlds SET world_time = ? WHERE id = ?',
 )
+const currentSceneIdStmt = db.prepare<[number]>(
+  'SELECT current_scene_id FROM worlds WHERE id = ?',
+)
+const autoCloseSceneStmt = db.prepare<[number, number]>(
+  `UPDATE scenes SET status = 'completed', closed_at_turn = ?
+   WHERE id = ? AND status = 'active'`,
+)
 
 function upsertPlace(
   worldId: number,
@@ -250,9 +257,9 @@ export function applyArchivistPatch(
     //    works without juggling.
     if (patch.scene && patch.scene.action !== 'keep_open') {
       if (patch.scene.action === 'close') {
-        const cursor = db
-          .prepare('SELECT current_scene_id FROM worlds WHERE id = ?')
-          .get(worldId) as { current_scene_id: number | null } | undefined
+        const cursor = currentSceneIdStmt.get(worldId) as
+          | { current_scene_id: number | null }
+          | undefined
         if (cursor?.current_scene_id) {
           closeSceneStmt.run(patch.scene.summary, narratorTurnId, cursor.current_scene_id)
         }
@@ -260,14 +267,11 @@ export function applyArchivistPatch(
         // action === 'open' — auto-close the prior active scene if one exists,
         // then create the new scene. Auto-close has no summary; v0.6's CRUD UI
         // can backfill if it matters.
-        const cursor = db
-          .prepare('SELECT current_scene_id FROM worlds WHERE id = ?')
-          .get(worldId) as { current_scene_id: number | null } | undefined
+        const cursor = currentSceneIdStmt.get(worldId) as
+          | { current_scene_id: number | null }
+          | undefined
         if (cursor?.current_scene_id) {
-          db.prepare(
-            `UPDATE scenes SET status = 'completed', closed_at_turn = ?
-             WHERE id = ? AND status = 'active'`,
-          ).run(narratorTurnId, cursor.current_scene_id)
+          autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
         }
         const placeId = upsertPlace(worldId, patch.scene.place_name, undefined, undefined)
         const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
