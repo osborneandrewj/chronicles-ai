@@ -12,7 +12,7 @@ interface UseNarratorAudioArgs {
   text: string;
   streaming: boolean;
   turnId: string | undefined;
-  onTurnComplete?: (chars: number) => void;
+  onTurnComplete?: (turnId: string, chars: number) => void;
 }
 
 interface UseNarratorAudioReturn {
@@ -306,10 +306,14 @@ export function useNarratorAudio({
       }
     }
 
+    // Fire on completion for BOTH stream-finish and replay-finish so the
+    // replayed-turn footer gets the additive char-count update via
+    // /api/tts/record. The route uses turnId to target the right row instead
+    // of "latest assistant turn".
     if (!effective.streaming && j.flushed && !j.reported) {
       j.reported = true;
-      if (j.charsSent > 0 && j.source === "stream") {
-        onTurnCompleteRef.current?.(j.charsSent);
+      if (j.charsSent > 0 && j.turnId) {
+        onTurnCompleteRef.current?.(j.turnId, j.charsSent);
       }
     }
 

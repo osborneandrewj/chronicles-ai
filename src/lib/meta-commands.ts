@@ -1,7 +1,7 @@
-import { getLatestMetadata, getLatestStateJson, getUsageTotals } from '@/lib/db'
+import { getLatestMetadata, getUsageTotals } from '@/lib/db'
 import { SLASH_COMMANDS } from '@/lib/slash-commands'
-import { parseState } from '@/lib/state'
-import { getWorld, getWorldInitialState } from '@/lib/worlds'
+import { getFullWorldState } from '@/lib/world-state'
+import { getWorld } from '@/lib/worlds'
 
 type Handler = (worldId: number) => string
 
@@ -18,12 +18,9 @@ const handlers: Record<string, Handler> = {
   '/inspect': (worldId) => {
     const world = getWorld(worldId)
     if (!world) return `World ${worldId} not found.`
-    const fallback = getWorldInitialState(world)
-    const json = getLatestStateJson(worldId)
-    const state = parseState(json, fallback)
-    const source = json ? 'latest extracted snapshot' : 'initial state (no turns extracted yet)'
+    const state = getFullWorldState(worldId)
     return [
-      `**Authoritative state** _(${world.name} · ${source})_`,
+      `**Authoritative state** _(${world.name})_`,
       '',
       '```json',
       JSON.stringify(state, null, 2),
@@ -36,16 +33,16 @@ const handlers: Record<string, Handler> = {
       return 'No turns with recorded token usage yet.'
     }
     const narratorTotal = totals.narratorInput + totals.narratorOutput
-    const extractorTotal = totals.extractorInput + totals.extractorOutput
-    const grand = narratorTotal + extractorTotal
+    const archivistTotal = totals.archivistInput + totals.archivistOutput
+    const grand = narratorTotal + archivistTotal
     const latest = getLatestMetadata(worldId)
     const lines = [
       `**Token usage** _(${totals.turns} turn${totals.turns === 1 ? '' : 's'} with metadata)_`,
       '',
       `- Narrator: ${narratorTotal.toLocaleString()} tokens ` +
         `(in ${totals.narratorInput.toLocaleString()} / out ${totals.narratorOutput.toLocaleString()})`,
-      `- Extractor: ${extractorTotal.toLocaleString()} tokens ` +
-        `(in ${totals.extractorInput.toLocaleString()} / out ${totals.extractorOutput.toLocaleString()})`,
+      `- Archivist: ${archivistTotal.toLocaleString()} tokens ` +
+        `(in ${totals.archivistInput.toLocaleString()} / out ${totals.archivistOutput.toLocaleString()})`,
       `- **Total: ${grand.toLocaleString()} tokens**`,
     ]
     if (latest) {

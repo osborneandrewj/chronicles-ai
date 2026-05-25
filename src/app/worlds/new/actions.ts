@@ -10,6 +10,7 @@ const CreateWorldSchema = z.object({
   premise: z.string().trim().min(20, 'Premise is required (at least a sentence)').max(4000),
   location: z.string().trim().min(1, 'Location is required').max(400),
   time: z.string().trim().min(1).max(200).default('Day 1, morning'),
+  playerName: z.string().trim().max(120).optional(),
   identity: z
     .string()
     .trim()
@@ -30,16 +31,17 @@ export async function createWorldAction(
     premise: formData.get('premise'),
     location: formData.get('location'),
     time: formData.get('time') || undefined,
+    playerName: formData.get('playerName') || undefined,
     identity: formData.get('identity') || undefined,
   })
   if (!parsed.success) {
     return { error: parsed.error.issues.map((i) => i.message).join('; ') }
   }
-  const { name, premise, location, time, identity } = parsed.data
+  const { name, premise, location, time, playerName, identity } = parsed.data
   const world = createWorld({
     name,
     premise,
-    initialState: { time, location, identity },
+    initialState: { time, location, identity, playerName },
   })
   redirect(`/worlds/${world.id}/play`)
 }
