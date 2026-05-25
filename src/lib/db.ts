@@ -62,15 +62,17 @@ const updateMetadataStmt = db.prepare<[string, number]>(
 )
 // Additive: sums into the existing $.tts.chars rather than overwriting it, so
 // replaying an old turn N times grows that turn's recorded char count by the
-// total replayed instead of clobbering the original stream's value.
-const addTtsCharsStmt = db.prepare<[number, number]>(
+// total replayed instead of clobbering the original stream's value. The
+// world_id + role guard prevents a request for world A from crediting a turn
+// that actually belongs to world B (or to a 'user' turn within world A).
+const addTtsCharsStmt = db.prepare<[number, number, number]>(
   `UPDATE turns
    SET metadata = json_set(
      COALESCE(metadata, '{}'),
      '$.tts.chars',
      COALESCE(json_extract(metadata, '$.tts.chars'), 0) + ?
    )
-   WHERE id = ?`,
+   WHERE id = ? AND world_id = ? AND role = 'assistant'`,
 )
 // Includes both the old `extractor` key (pre-v0.5) and the new `archivist` key
 // in the sum so cost totals stay continuous across the v5 cutover.
@@ -189,8 +191,8 @@ export function updateTurnMetadata(id: number, metadata: Record<string, unknown>
   updateMetadataStmt.run(JSON.stringify(metadata), id)
 }
 
-export function addTtsChars(turnId: number, chars: number): void {
-  addTtsCharsStmt.run(Math.max(0, Math.round(chars)), turnId)
+export function addTtsChars(worldId: number, turnId: number, chars: number): void {
+  addTtsCharsStmt.run(Math.max(0, Math.round(chars)), turnId, worldId)
 }
 
 export type UsageTotals = {

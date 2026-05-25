@@ -33,6 +33,6 @@ export async function POST(req: Request) {
     return new Response('Missing or invalid chars', { status: 400 })
   }
 
-  addTtsChars(turnId, chars)
+  addTtsChars(worldId, turnId, chars)
   return new Response(null, { status: 204 })
 }
