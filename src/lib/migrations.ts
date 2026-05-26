@@ -267,6 +267,21 @@ export const migrations: Migration[] = [
       db.exec('DROP TABLE turn_states')
     },
   },
+  {
+    // v0.6.1 — give NPCs lightweight dynamic state. `active_goal` is what an
+    // NPC wants right now (e.g. "sell the player a room"); `current_attitude`
+    // shapes *how* they pursue it (e.g. "polite but increasingly afraid").
+    // Both are nullable — existing rows get NULL meaning "unknown / not yet
+    // tracked", and the narrator/archivist treat NULL as no constraint.
+    // Two ALTER TABLE ADDs are reversible in principle (SQLite 3.35+ supports
+    // DROP COLUMN); no backfill needed.
+    version: 6,
+    name: 'npc_goal_attitude',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN active_goal TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN current_attitude TEXT')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

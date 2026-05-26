@@ -89,15 +89,15 @@ const usageTotalsStmt = db.prepare<[number]>(`
   WHERE world_id = ? AND metadata IS NOT NULL
 `)
 
-// World-state readers (v0.5). Typed entity rows replace the legacy turn_states blob.
+// World-state readers (v0.5; v0.6.1 adds active_goal + current_attitude).
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, name, description, is_player, current_place_id,
-          memorable_facts, status
+          memorable_facts, status, active_goal, current_attitude
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
 )
 const charactersInPlaceStmt = db.prepare<[number, number]>(
   `SELECT id, world_id, name, description, is_player, current_place_id,
-          memorable_facts, status
+          memorable_facts, status, active_goal, current_attitude
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(

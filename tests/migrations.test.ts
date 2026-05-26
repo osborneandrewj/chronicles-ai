@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('user_version', { simple: true })).toBe(6)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -203,7 +203,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(5)
+    expect(db.pragma('user_version', { simple: true })).toBe(6)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -222,3 +222,113 @@ describe('v5 migration', () => {
 function scene_id(world: { current_scene_id: number }): number {
   return world.current_scene_id
 }
+
+describe('v6 migration (npc_goal_attitude)', () => {
+  // The v0.5 backfill seeds one player character per world. After v6 those
+  // characters must have active_goal and current_attitude columns, both NULL.
+  it('adds nullable active_goal + current_attitude to characters; defaults to NULL', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Test World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Mevagissey harbour',
+        identity: 'Travel-worn letter-writer.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(6)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(cols.map((c) => [c.name, c]))
+
+    const goal = byName.get('active_goal')
+    expect(goal).toBeDefined()
+    expect(goal?.type.toUpperCase()).toBe('TEXT')
+    expect(goal?.notnull).toBe(0)
+    expect(goal?.dflt_value).toBeNull()
+
+    const attitude = byName.get('current_attitude')
+    expect(attitude).toBeDefined()
+    expect(attitude?.type.toUpperCase()).toBe('TEXT')
+    expect(attitude?.notnull).toBe(0)
+    expect(attitude?.dflt_value).toBeNull()
+
+    // The v5-seeded player character carries NULL for both new fields.
+    const player = db
+      .prepare(
+        'SELECT name, is_player, active_goal, current_attitude FROM characters WHERE world_id = 1',
+      )
+      .get() as {
+      name: string
+      is_player: number
+      active_goal: string | null
+      current_attitude: string | null
+    }
+    expect(player.is_player).toBe(1)
+    expect(player.active_goal).toBeNull()
+    expect(player.current_attitude).toBeNull()
+  })
+
+  it('lets new INSERTs set goal/attitude and lets UPDATEs clear them', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      2,
+      'Inn World',
+      'p',
+      JSON.stringify({ time: 't', location: 'l', identity: 'i' }),
+    )
+    runMigrations(db)
+
+    const placeId = (
+      db.prepare('SELECT id FROM places WHERE world_id = 2').get() as { id: number }
+    ).id
+    db.prepare(
+      `INSERT INTO characters (world_id, name, description, is_player, current_place_id,
+                               active_goal, current_attitude)
+       VALUES (?, ?, ?, 0, ?, ?, ?)`,
+    ).run(
+      2,
+      'Innkeeper',
+      'Round-faced, wary.',
+      placeId,
+      'sell the player a room',
+      'polite but probing',
+    )
+
+    const innkeeper = db
+      .prepare(
+        `SELECT name, active_goal, current_attitude FROM characters
+         WHERE world_id = 2 AND name = 'Innkeeper'`,
+      )
+      .get() as { name: string; active_goal: string | null; current_attitude: string | null }
+    expect(innkeeper.active_goal).toBe('sell the player a room')
+    expect(innkeeper.current_attitude).toBe('polite but probing')
+
+    db.prepare(
+      `UPDATE characters SET active_goal = NULL, current_attitude = NULL WHERE name = 'Innkeeper'`,
+    ).run()
+    const cleared = db
+      .prepare(
+        `SELECT active_goal, current_attitude FROM characters
+         WHERE world_id = 2 AND name = 'Innkeeper'`,
+      )
+      .get() as { active_goal: string | null; current_attitude: string | null }
+    expect(cleared.active_goal).toBeNull()
+    expect(cleared.current_attitude).toBeNull()
+  })
+})

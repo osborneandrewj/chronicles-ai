@@ -18,6 +18,8 @@ export type Character = {
   current_place_id: number | null
   memorable_facts: string | null
   status: 'active' | 'inactive' | 'dead'
+  active_goal: string | null
+  current_attitude: string | null
 }
 
 export type Place = {
