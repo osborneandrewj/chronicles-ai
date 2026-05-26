@@ -212,4 +212,98 @@ describe('applyArchivistPatch', () => {
     const cliff = getPlacesForWorld(worldId).find((p) => p.name === 'Lighthouse Cliff')!
     expect(bran.current_place_id).toBe(cliff.id)
   })
+
+  it('inserts a new NPC with active_goal and current_attitude', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Innkeeper',
+          description: 'Round-faced, wary.',
+          active_goal: 'sell the player a room before dusk',
+          current_attitude: 'polite but probing',
+        },
+      ],
+    })
+    const ink = getCharactersForWorld(worldId).find((c) => c.name === 'Innkeeper')!
+    expect(ink.active_goal).toBe('sell the player a room before dusk')
+    expect(ink.current_attitude).toBe('polite but probing')
+  })
+
+  it('insert defaults: omitted goal/attitude → NULL on a new row', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Silent Watcher', description: 'A figure on the cliff path.' }],
+    })
+    const watcher = getCharactersForWorld(worldId).find((c) => c.name === 'Silent Watcher')!
+    expect(watcher.active_goal).toBeNull()
+    expect(watcher.current_attitude).toBeNull()
+  })
+
+  it('updates active_goal on an existing NPC; omitted means unchanged', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Tom', description: 'Harbourmaster.', active_goal: 'avoid the constable' },
+      ],
+    })
+    // Second patch omits active_goal entirely — must NOT clobber.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', current_attitude: 'gruff' }],
+    })
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.active_goal).toBe('avoid the constable')
+    expect(tom.current_attitude).toBe('gruff')
+  })
+
+  it('explicit null clears active_goal (satisfied/abandoned)', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', active_goal: 'find the missing skipper' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', active_goal: null }],
+    })
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.active_goal).toBeNull()
+  })
+
+  it('changing active_goal replaces the prior value (not appended)', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', active_goal: 'sell the catch' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', active_goal: 'warn the player about the storm' }],
+    })
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.active_goal).toBe('warn the player about the storm')
+  })
+
+  it('updates current_attitude; omitted means unchanged; null clears', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', current_attitude: 'cautious, weighing his words' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', description: 'A harbourmaster, late 50s.' }], // attitude omitted
+    })
+    let tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.current_attitude).toBe('cautious, weighing his words')
+    expect(tom.description).toBe('A harbourmaster, late 50s.')
+
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', current_attitude: null }],
+    })
+    tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.current_attitude).toBeNull()
+  })
+
+  it('goal/attitude updates do not disturb memorable_facts', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Tom', memorable_facts_append: 'gave the player a silver locket' },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', active_goal: 'recover the locket' }],
+    })
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.memorable_facts).toBe(`gave the player a silver locket [t:${turnId}]`)
+    expect(tom.active_goal).toBe('recover the locket')
+  })
 })

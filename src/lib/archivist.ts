@@ -45,6 +45,25 @@ const CharacterPatchSchema = z.object({
     .optional()
     .describe('A single short sentence to append. Append-only — do not retract earlier facts.'),
   status: z.enum(['active', 'inactive', 'dead']).optional(),
+  active_goal: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "What this NPC wants right now (short, scene-immediate, e.g. 'sell the player a room'). " +
+        'Omit to leave unchanged. Set explicitly to null only when the goal was clearly ' +
+        'satisfied or abandoned in the latest turn. Never invent grand long-term arcs.',
+    ),
+  current_attitude: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "How this NPC is currently behaving (short, e.g. 'polite but increasingly afraid', " +
+        "'sarcastic, testing'). Omit to leave unchanged. Set explicitly to null only when the " +
+        'prior attitude has clearly dropped. Keep it immediate and observable, not a full ' +
+        'psychological profile.',
+    ),
 })
 
 export const ArchivistPatchSchema = z.object({
@@ -135,10 +154,11 @@ const findCharacterByNameStmt = db.prepare<[number, string]>(
    WHERE world_id = ? AND lower(name) = lower(?)`,
 )
 const insertCharacterStmt = db.prepare<
-  [number, string, string | null, number, number | null, string | null, string]
+  [number, string, string | null, number, number | null, string | null, string, string | null, string | null]
 >(
-  `INSERT INTO characters (world_id, name, description, is_player, current_place_id, memorable_facts, status)
-   VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+  `INSERT INTO characters (world_id, name, description, is_player, current_place_id,
+                           memorable_facts, status, active_goal, current_attitude)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 )
 const updateCharacterStmt = db.prepare<
   [string | null, number | null, number | null, string | null, string | null, number]
@@ -151,6 +171,16 @@ const updateCharacterStmt = db.prepare<
      status            = COALESCE(?, status),
      updated_at        = datetime('now')
    WHERE id = ?`,
+)
+// active_goal / current_attitude need three-state semantics (omitted =
+// unchanged, null = clear, string = set). COALESCE collapses null and
+// undefined, so these run as separate conditional updates instead of
+// piggybacking on updateCharacterStmt.
+const setActiveGoalStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET active_goal = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setCurrentAttitudeStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET current_attitude = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 
 const closeSceneStmt = db.prepare<[string, number, number]>(
@@ -239,6 +269,14 @@ export function applyArchivistPatch(
             c.status ?? null,
             existing.id,
           )
+          // Goal / attitude are three-state: omitted (undefined) = unchanged;
+          // explicit null = clear; string = set.
+          if (c.active_goal !== undefined) {
+            setActiveGoalStmt.run(c.active_goal, existing.id)
+          }
+          if (c.current_attitude !== undefined) {
+            setCurrentAttitudeStmt.run(c.current_attitude, existing.id)
+          }
         } else {
           insertCharacterStmt.run(
             worldId,
@@ -248,6 +286,8 @@ export function applyArchivistPatch(
             placeId,
             appendFactWithProvenance(null, c.memorable_facts_append, narratorTurnId),
             c.status ?? 'active',
+            c.active_goal ?? null,
+            c.current_attitude ?? null,
           )
         }
       }
