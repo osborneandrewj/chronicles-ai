@@ -68,10 +68,24 @@ Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (
 - Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`
 - Phase 2+: `VOYAGE_API_KEY`
 
+## Release version bump
+
+The header at `src/app/page.tsx:17` reads `pkg.version` from `package.json` — that one number is the user's only at-a-glance trust signal for "what's running". Treat it as load-bearing.
+
+Whenever you bump the project version:
+
+1. **Bump on the release branch, not post-merge.** Same branch as the release PR, ideally as the first or last commit. Never on `main` after the merge — that creates a window where prod runs new code under the old version string.
+2. **Bump both files.** `package.json` *and* `package-lock.json` (both the top-level `"version"` and the one under `"packages": { "": { ... } }`). Single commit. Don't rely on `npm install` to fix the lockfile after the fact.
+3. **Restart the dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev` and start it again, then visually confirm the header on `/` shows the new version. Same goes for Railway: a redeploy is required.
+4. **Update the milestone exit criteria.** Each milestone doc lists "`package.json` reads `vX.Y.Z` on the release branch" as an exit criterion — keep that pattern (see `docs/_template-milestone.md`).
+
+If you ever see the header showing a different version than `package.json` on disk, the dev server is stale — restart it.
+
 ## Common Gotchas
 
 - Database must be running (`docker compose up -d`) before dev server or tests
 - Drizzle schema changes require `npm run db:generate` then `npm run db:migrate`
 - Hot-reload breaks on ORM model changes — restart dev server
+- Hot-reload also breaks on `package.json` changes (e.g. version bumps) — restart dev server
 - pgvector extension must exist before vector column migrations run
 - The `postgres` package (postgres-js) is used, NOT `pg` — different API
