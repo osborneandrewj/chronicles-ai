@@ -115,6 +115,22 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                 {c.description && (
                   <p className="mt-0.5 text-neutral-400">{c.description}</p>
                 )}
+                {c.is_player !== 1 && (c.active_goal || c.current_attitude) && (
+                  <dl className="mt-1 space-y-0.5 text-[12px]">
+                    {c.active_goal && (
+                      <div className="flex gap-1.5">
+                        <dt className="shrink-0 text-amber-500/70">goal:</dt>
+                        <dd className="text-neutral-300">{c.active_goal}</dd>
+                      </div>
+                    )}
+                    {c.current_attitude && (
+                      <div className="flex gap-1.5">
+                        <dt className="shrink-0 text-amber-500/70">attitude:</dt>
+                        <dd className="text-neutral-300">{c.current_attitude}</dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
                 {c.memorable_facts && (
                   <ul className="mt-1 list-disc pl-4 text-neutral-500">
                     {c.memorable_facts
