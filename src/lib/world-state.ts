@@ -134,6 +134,7 @@ export function formatStateBlock(
   const lines: string[] = [
     '## STATE',
     'Listed facts are fixed. Unlisted small, genre-consistent details are open canvas.',
+    'The Place line is the protagonist\'s physical location; hold it unless the player or world physically moves them.',
     `- Time: ${state.worldTime ?? '(unset)'}`,
   ]
 

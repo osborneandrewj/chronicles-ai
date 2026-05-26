@@ -89,6 +89,7 @@ export const ArchivistPatchSchema = z.object({
 })
 
 export type ArchivistPatch = z.infer<typeof ArchivistPatchSchema>
+type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 
 export const ARCHIVIST_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -173,7 +174,60 @@ export async function extractPatch(
     ].join('\n'),
   })
 
-  return { patch: object, usage }
+  return { patch: sanitizeArchivistPatch(prior, recent, object), usage }
+}
+
+export function sanitizeArchivistPatch(
+  prior: NarratorWorldState,
+  recent: Array<{ role: 'user' | 'assistant'; content: string }>,
+  patch: ArchivistPatch,
+): ArchivistPatch {
+  const latestNarrator = [...recent].reverse().find((t) => t.role === 'assistant')?.content ?? ''
+  const latestPlayer = [...recent].reverse().find((t) => t.role === 'user')?.content ?? ''
+  const blockedPlayerPlaces = new Set<string>()
+  const currentPlaceName = prior.currentPlace?.name ?? null
+
+  const sanitized: ArchivistPatch = { ...patch }
+
+  if (
+    patch.scene?.action === 'open' &&
+    isDifferentPlace(patch.scene.place_name, currentPlaceName) &&
+    !supportsPhysicalTransition(prior, patch.scene.place_name, latestPlayer, latestNarrator)
+  ) {
+    blockedPlayerPlaces.add(canonicalPlaceKey(patch.scene.place_name))
+    delete sanitized.scene
+  }
+
+  if (patch.characters) {
+    const playerNames = new Set(
+      prior.knownCharacters.filter((c) => c.is_player === 1).map((c) => canonicalCharacterKey(c.name)),
+    )
+    const characters = patch.characters
+      .map((c) => {
+        if (!isPlayerPatch(c, playerNames) || c.current_place_name === undefined) return c
+
+        const requestedPlace = c.current_place_name
+        const blocked = blockedPlayerPlaces.has(canonicalPlaceKey(requestedPlace))
+        const unsupported =
+          isDifferentPlace(requestedPlace, currentPlaceName) &&
+          !supportsPhysicalTransition(prior, requestedPlace, latestPlayer, latestNarrator)
+
+        if (!blocked && !unsupported) return c
+
+        const rest = { ...c }
+        delete rest.current_place_name
+        return rest
+      })
+      .filter(hasMeaningfulCharacterPatch)
+
+    if (characters.length > 0) {
+      sanitized.characters = characters
+    } else {
+      delete sanitized.characters
+    }
+  }
+
+  return sanitized
 }
 
 function extractDestination(text: string): string | null {
@@ -200,6 +254,94 @@ function cleanDestination(raw: string): string | null {
   if (value.length < 3 || value.length > 80) return null
   if (/^(sleep|bed|work|home)$/i.test(value)) return null
   return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function isPlayerPatch(c: CharacterPatch, playerNames: Set<string>): boolean {
+  return c.is_player === true || playerNames.has(canonicalCharacterKey(c.name))
+}
+
+function hasMeaningfulCharacterPatch(c: CharacterPatch): boolean {
+  return (
+    c.description !== undefined ||
+    c.current_place_name !== undefined ||
+    c.memorable_facts_append !== undefined ||
+    c.status !== undefined ||
+    c.active_goal !== undefined ||
+    c.current_attitude !== undefined ||
+    c.observations_append !== undefined
+  )
+}
+
+function isDifferentPlace(requestedName: string, currentName: string | null): boolean {
+  if (!currentName) return true
+  return canonicalPlaceKey(requestedName) !== canonicalPlaceKey(currentName)
+}
+
+function supportsPhysicalTransition(
+  prior: NarratorWorldState,
+  requestedName: string,
+  latestPlayer: string,
+  latestNarrator: string,
+): boolean {
+  const aliases = placeAliasKeys(prior, requestedName)
+  if (aliases.length === 0) return false
+
+  const narrator = normalize(latestNarrator)
+  const player = normalize(latestPlayer)
+  const hasNarratedDestination = aliases.some((alias) => containsAsPhrase(narrator, alias))
+  if (!hasNarratedDestination) return false
+
+  return aliases.some((alias) => {
+    const narratorWindow = windowAroundPhrase(narrator, alias, 28)
+    if (hasActualMotion(narratorWindow)) return true
+
+    const playerWindow = windowAroundPhrase(player, alias, 18)
+    return hasActualMotion(playerWindow) && hasActualMotion(narrator)
+  })
+}
+
+function placeAliasKeys(prior: NarratorWorldState, requestedName: string): string[] {
+  const requested = canonicalPlaceKey(requestedName)
+  const known = prior.knownPlaces.find((p) => canonicalPlaceKey(p.name) === requested)
+  const source = `${requestedName} ${known?.description ?? ''} ${known?.kind ?? ''}`
+  const aliases = [requested]
+
+  if (/\b(?:apartment|bedroom|home|house|kitchen|residence)\b/i.test(source)) {
+    aliases.push('home', 'house')
+  }
+
+  return [...new Set(aliases.filter((alias) => alias.length > 0))]
+}
+
+function windowAroundPhrase(value: string, phrase: string, radiusWords: number): string {
+  const words = value.split(' ').filter((word) => word.length > 0)
+  const phraseWords = phrase.split(' ').filter((word) => word.length > 0)
+  if (words.length === 0 || phraseWords.length === 0) return ''
+
+  const idx = words.findIndex((_, i) =>
+    phraseWords.every((word, offset) => words[i + offset] === word),
+  )
+  if (idx === -1) return ''
+
+  const start = Math.max(0, idx - radiusWords)
+  const end = Math.min(words.length, idx + phraseWords.length + radiusWords)
+  return words.slice(start, end).join(' ')
+}
+
+function hasActualMotion(value: string): boolean {
+  if (!value) return false
+  if (/\b(?:think|thinking|thought|remember|remembering|memory|imagine|imagining|wish|wishing|wonder|wondering)\b/.test(value)) {
+    return false
+  }
+
+  return (
+    /\byou (?:go|goes|walk|walks|run|runs|drive|drives|head|heads|travel|travels|return|returns|enter|enters|arrive|arrives|follow|follows|leave|leaves|step|steps|cross|crosses|climb|climbs|move|moves|land|lands|wake|wakes)\b/.test(value) ||
+    /\byou make your way\b/.test(value) ||
+    /\byou (?:are|re) (?:led|taken|carried|brought|ushered|escorted|shown)\b/.test(value) ||
+    /\b(?:leads|takes|carries|brings|ushers|escorts|shows) you\b/.test(value) ||
+    /\b(?:when|by the time) you arrive\b/.test(value) ||
+    /\bscene (?:cuts|shifts)\b/.test(value)
+  )
 }
 
 function normalize(value: string): string {
@@ -381,6 +523,10 @@ const mergeCharacterStmt = db.prepare<
    WHERE id = ?`,
 )
 const deleteCharacterStmt = db.prepare<[number]>('DELETE FROM characters WHERE id = ?')
+const setPlayersPlaceStmt = db.prepare<[number, number]>(
+  `UPDATE characters SET current_place_id = ?, updated_at = datetime('now')
+   WHERE world_id = ? AND is_player = 1`,
+)
 
 const closeSceneStmt = db.prepare<[string, number, number]>(
   `UPDATE scenes SET status = 'completed', summary = ?, closed_at_turn = ?
@@ -815,6 +961,7 @@ export function applyArchivistPatch(
           id: number
         }
         setCurrentSceneStmt.run(row.id, worldId)
+        setPlayersPlaceStmt.run(placeId, worldId)
       }
     }
 

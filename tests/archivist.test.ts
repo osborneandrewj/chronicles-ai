@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   applyArchivistPatch,
   extractDeterministicPatch,
+  sanitizeArchivistPatch,
   type ArchivistPatch,
 } from '@/lib/archivist'
 import {
@@ -369,6 +370,16 @@ describe('applyArchivistPatch', () => {
     expect(places.some((p) => p.name === 'The Ship Inn')).toBe(true)
   })
 
+  it('opening a scene also moves the player character to that place', () => {
+    applyArchivistPatch(worldId, turnId, {
+      scene: { action: 'open', title: 'Inside the Ship Inn', place_name: 'The Ship Inn' },
+    })
+
+    const shipInn = getPlacesForWorld(worldId).find((p) => p.name === 'The Ship Inn')!
+    const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    expect(player.current_place_id).toBe(shipInn.id)
+  })
+
   it("'keep_open' is a no-op for scenes", () => {
     const before = getScenesForWorld(worldId).map((s) => ({ id: s.id, status: s.status }))
     applyArchivistPatch(worldId, turnId, { scene: { action: 'keep_open' } })
@@ -509,5 +520,100 @@ describe('extractDeterministicPatch', () => {
         'You start toward it, but the floodwater blocks the road.',
       ),
     ).toBeNull()
+  })
+})
+
+describe('sanitizeArchivistPatch', () => {
+  it('drops unsupported player location moves from ordinary in-place bar turns', () => {
+    const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
+    const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
+    applyArchivistPatch(worldId, setupTurn.id, {
+      places: [{ name: '33rd Street house', description: "Edith's home." }],
+      scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
+    })
+    const prior = getNarratorWorldState(worldId)
+
+    const patch: ArchivistPatch = {
+      scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: '33rd Street house' }],
+      places: [{ name: '33rd Street house' }],
+    }
+
+    expect(
+      sanitizeArchivistPatch(
+        prior,
+        [
+          { role: 'user', content: 'I down my glass and ask Jenna for another' },
+          {
+            role: 'assistant',
+            content:
+              'You drain the glass and set it down in front of Jenna. "Another," you say. She nods and reaches for the Tito\'s again.',
+          },
+        ],
+        patch,
+      ),
+    ).toEqual({ places: [{ name: '33rd Street house' }] })
+  })
+
+  it('keeps narrator-supported scene moves', () => {
+    const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
+    const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
+    applyArchivistPatch(worldId, setupTurn.id, {
+      scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
+    })
+    const prior = getNarratorWorldState(worldId)
+
+    const patch: ArchivistPatch = {
+      scene: { action: 'open', title: 'Behind the Bar', place_name: 'Back room' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Back room' }],
+    }
+
+    expect(
+      sanitizeArchivistPatch(
+        prior,
+        [
+          { role: 'user', content: 'I follow Jenna.' },
+          {
+            role: 'assistant',
+            content:
+              'Jenna lifts the counter flap and leads you through the staff door into the back room.',
+          },
+        ],
+        patch,
+      ),
+    ).toEqual(patch)
+  })
+
+  it('does not treat thinking about going home as physical travel', () => {
+    const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
+    const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
+    applyArchivistPatch(worldId, setupTurn.id, {
+      places: [{ name: '33rd Street house', description: "Edith's home." }],
+      scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
+    })
+    const prior = getNarratorWorldState(worldId)
+
+    const patch: ArchivistPatch = {
+      scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: '33rd Street house' }],
+    }
+
+    expect(
+      sanitizeArchivistPatch(
+        prior,
+        [
+          { role: 'user', content: 'I think about going home.' },
+          {
+            role: 'assistant',
+            content:
+              'You think about going home, but the thought stays in your head while the bar noise rolls around you.',
+          },
+        ],
+        patch,
+      ),
+    ).toEqual({})
   })
 })
