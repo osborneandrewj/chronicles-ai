@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation'
-import type { UIMessage } from 'ai'
 
-import { Chat } from '@/components/Chat'
+import { Chat, type ChroniclesMessage } from '@/components/Chat'
 import { assistantMetadataSince, hasTurnBefore, latestTurns } from '@/lib/db'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
 import { getWorld } from '@/lib/worlds'
@@ -25,9 +24,10 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   if (!world) notFound()
 
   const turns = latestTurns(worldId, INITIAL_TURN_LIMIT)
-  const initialMessages: UIMessage[] = turns.map((t) => ({
+  const initialMessages: ChroniclesMessage[] = turns.map((t) => ({
     id: String(t.id),
     role: t.role,
+    metadata: { createdAt: t.created_at },
     parts: [{ type: 'text', text: t.content }],
   }))
 

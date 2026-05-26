@@ -15,6 +15,8 @@ export type Turn = {
   created_at: string
 }
 
+export type TurnTimestamp = { id: number; created_at: string }
+
 type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
 const g = globalThis as Globals
 
@@ -112,7 +114,7 @@ const usageTotalsStmt = db.prepare<[number]>(`
 const CHARACTER_COLS = `id, world_id, name, description, is_player, current_place_id,
         memorable_facts, status, active_goal, current_attitude, observations,
         agency_level, personal_goals, current_focus, recent_activity, appearance_count,
-        last_seen_turn_id, last_agent_tick_turn_id`
+        last_seen_turn_id, last_agent_tick_turn_id, created_at, updated_at`
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
@@ -122,20 +124,20 @@ const charactersInPlaceStmt = db.prepare<[number, number]>(
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, kind FROM places
+  `SELECT id, world_id, name, description, kind, created_at, updated_at FROM places
    WHERE world_id = ? ORDER BY id ASC`,
 )
 const placeByIdStmt = db.prepare<[number]>(
-  'SELECT id, world_id, name, description, kind FROM places WHERE id = ?',
+  'SELECT id, world_id, name, description, kind, created_at, updated_at FROM places WHERE id = ?',
 )
 const scenesForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,
-          opened_at_turn, closed_at_turn
+          opened_at_turn, closed_at_turn, created_at, updated_at
    FROM scenes WHERE world_id = ? ORDER BY scene_number ASC`,
 )
 const activeSceneStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,
-          opened_at_turn, closed_at_turn
+          opened_at_turn, closed_at_turn, created_at, updated_at
    FROM scenes WHERE world_id = ? AND status = 'active'
    ORDER BY scene_number DESC LIMIT 1`,
 )
@@ -174,6 +176,9 @@ const assistantMetadataInRangeStmt = db.prepare<[number, number, number]>(
 // Cheapest way to find out if a "Load older" click would surface anything.
 const hasTurnBeforeStmt = db.prepare<[number, number]>(
   `SELECT 1 FROM turns WHERE world_id = ? AND id < ? LIMIT 1`,
+)
+const turnTimestampsForWorldStmt = db.prepare<[number]>(
+  `SELECT id, created_at FROM turns WHERE world_id = ? ORDER BY id ASC`,
 )
 
 export function insertTurn(
@@ -353,4 +358,8 @@ export function assistantMetadataInRange(
 
 export function hasTurnBefore(worldId: number, id: number): boolean {
   return hasTurnBeforeStmt.get(worldId, id) !== undefined
+}
+
+export function getTurnTimestampsForWorld(worldId: number): TurnTimestamp[] {
+  return turnTimestampsForWorldStmt.all(worldId) as TurnTimestamp[]
 }

@@ -330,6 +330,17 @@ export const migrations: Migration[] = [
       db.exec("UPDATE characters SET agency_level = 'nearby' WHERE agency_level = 'agent'")
     },
   },
+  {
+    // v0.6.5 — expose scene update times to the UI. Characters and places
+    // already had updated_at from v5; scenes only had created_at, which made
+    // completed-scene state look timeless in the inspector.
+    version: 10,
+    name: 'scene_updated_at',
+    up: (db) => {
+      db.exec('ALTER TABLE scenes ADD COLUMN updated_at TEXT')
+      db.exec('UPDATE scenes SET updated_at = created_at WHERE updated_at IS NULL')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

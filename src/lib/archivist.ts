@@ -423,7 +423,7 @@ const moveCharactersToPlaceStmt = db.prepare<[number, number]>(
   'UPDATE characters SET current_place_id = ? WHERE current_place_id = ?',
 )
 const moveScenesToPlaceStmt = db.prepare<[number, number]>(
-  'UPDATE scenes SET place_id = ? WHERE place_id = ?',
+  `UPDATE scenes SET place_id = ?, updated_at = datetime('now') WHERE place_id = ?`,
 )
 const deletePlaceStmt = db.prepare<[number]>('DELETE FROM places WHERE id = ?')
 
@@ -529,15 +529,15 @@ const setPlayersPlaceStmt = db.prepare<[number, number]>(
 )
 
 const closeSceneStmt = db.prepare<[string, number, number]>(
-  `UPDATE scenes SET status = 'completed', summary = ?, closed_at_turn = ?
+  `UPDATE scenes SET status = 'completed', summary = ?, closed_at_turn = ?, updated_at = datetime('now')
    WHERE id = ?`,
 )
 const maxSceneNumberStmt = db.prepare<[number]>(
   'SELECT COALESCE(MAX(scene_number), 0) as n FROM scenes WHERE world_id = ?',
 )
 const insertSceneStmt = db.prepare<[number, number, string, number, number]>(
-  `INSERT INTO scenes (world_id, place_id, title, scene_number, opened_at_turn)
-   VALUES (?, ?, ?, ?, ?) RETURNING id`,
+  `INSERT INTO scenes (world_id, place_id, title, scene_number, opened_at_turn, updated_at)
+   VALUES (?, ?, ?, ?, ?, datetime('now')) RETURNING id`,
 )
 const setCurrentSceneStmt = db.prepare<[number, number]>(
   'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
@@ -549,7 +549,7 @@ const currentSceneIdStmt = db.prepare<[number]>(
   'SELECT current_scene_id FROM worlds WHERE id = ?',
 )
 const autoCloseSceneStmt = db.prepare<[number, number]>(
-  `UPDATE scenes SET status = 'completed', closed_at_turn = ?
+  `UPDATE scenes SET status = 'completed', closed_at_turn = ?, updated_at = datetime('now')
    WHERE id = ? AND status = 'active'`,
 )
 

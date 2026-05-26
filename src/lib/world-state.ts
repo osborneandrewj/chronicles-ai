@@ -5,6 +5,7 @@ import {
   getPlace,
   getPlacesForWorld,
   getScenesForWorld,
+  getTurnTimestampsForWorld,
   getWorldCursor,
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
@@ -30,6 +31,8 @@ export type Character = {
   appearance_count: number
   last_seen_turn_id: number | null
   last_agent_tick_turn_id: number | null
+  created_at: string
+  updated_at: string
 }
 
 export type Place = {
@@ -38,6 +41,8 @@ export type Place = {
   name: string
   description: string | null
   kind: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type Scene = {
@@ -50,6 +55,8 @@ export type Scene = {
   status: 'active' | 'completed'
   opened_at_turn: number | null
   closed_at_turn: number | null
+  created_at: string
+  updated_at: string
 }
 
 // What the narrator's prompt actually needs each turn. The inspector reads
@@ -70,6 +77,7 @@ export type FullWorldState = {
   characters: Character[]
   places: Place[]
   scenes: Scene[]
+  turnTimestamps: Record<number, string>
 }
 
 export function getNarratorWorldState(worldId: number): NarratorWorldState {
@@ -96,12 +104,16 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
 
 export function getFullWorldState(worldId: number): FullWorldState {
   const cursor = getWorldCursor(worldId)
+  const turnTimestamps = Object.fromEntries(
+    getTurnTimestampsForWorld(worldId).map((turn) => [turn.id, turn.created_at]),
+  )
   return {
     worldTime: cursor.world_time,
     currentSceneId: cursor.current_scene_id,
     characters: getCharactersForWorld(worldId),
     places: getPlacesForWorld(worldId),
     scenes: getScenesForWorld(worldId),
+    turnTimestamps,
   }
 }
 

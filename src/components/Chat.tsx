@@ -14,10 +14,16 @@ import type { AgentCost, TurnCost } from "@/lib/turn-cost";
 
 const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
 
+type MessageMetadata = {
+  createdAt?: string;
+};
+
+export type ChroniclesMessage = UIMessage<MessageMetadata>;
+
 type Props = {
   worldId: number;
   worldName: string;
-  initialMessages: UIMessage[];
+  initialMessages: ChroniclesMessage[];
   initialUsage: TurnCost[];
   // Pagination cursor for "Load older". null when the world has no turns yet;
   // initialHasOlder is true when more turns exist before this slice.
@@ -50,8 +56,12 @@ export function Chat({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const chatApi = `/api/chat?worldId=${worldId}`;
   const usageApi = `/api/usage?worldId=${worldId}`;
-  const transport = useMemo(() => new DefaultChatTransport({ api: chatApi }), [chatApi]);
-  const { messages, setMessages, sendMessage, regenerate, status, error } = useChat({
+  const transport = useMemo(
+    () => new DefaultChatTransport<ChroniclesMessage>({ api: chatApi }),
+    [chatApi],
+  );
+  const { messages, setMessages, sendMessage, regenerate, status, error } =
+    useChat<ChroniclesMessage>({
     messages: initialMessages,
     transport,
   });
@@ -138,9 +148,10 @@ export function Chat({
         setHasOlder(false);
         return;
       }
-      const olderMessages: UIMessage[] = data.turns.map((t) => ({
+      const olderMessages: ChroniclesMessage[] = data.turns.map((t) => ({
         id: String(t.id),
         role: t.role,
+        metadata: { createdAt: t.created_at },
         parts: [{ type: "text", text: t.content }],
       }));
       // Stop sticking to the bottom while the prepend lands; otherwise the
@@ -233,7 +244,7 @@ export function Chat({
     const text = input.trim();
     if (!text || busy) return;
     primeAudio();
-    sendMessage({ text });
+    sendMessage({ text, metadata: { createdAt: new Date().toISOString() } });
     setInput("");
     setStickToBottom(true);
   }
@@ -265,7 +276,7 @@ export function Chat({
     (cmd: SlashCommand, submit: boolean) => {
       if (submit) {
         if (busy) return;
-        sendMessage({ text: cmd.name });
+        sendMessage({ text: cmd.name, metadata: { createdAt: new Date().toISOString() } });
         setInput("");
         setStickToBottom(true);
         setSlashDismissedFor(null);
@@ -403,6 +414,7 @@ export function Chat({
             const isStreamingThis = m.id === streamingAssistantId;
             const isSpeakingThis = m.role === "assistant" && m.id === speakingTurnId;
             const text = messageText(m);
+            const createdAt = m.metadata?.createdAt;
             const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
             const isMetaResponse = !!prevUser && messageText(prevUser).trim().startsWith("/");
             const canReplay =
@@ -410,7 +422,7 @@ export function Chat({
             return (
               <li key={m.id}>
                 {m.role === "user" ? (
-                  <UserTurn text={text} />
+                  <UserTurn text={text} createdAt={createdAt} />
                 ) : (
                   <NarratorTurn
                     text={text}
@@ -497,11 +509,20 @@ export function Chat({
   );
 }
 
-function UserTurn({ text }: { text: string }) {
+function UserTurn({ text, createdAt }: { text: string; createdAt: string | undefined }) {
   return (
     <div className="flex flex-col items-end">
-      <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-600">
-        You
+      <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-600">
+        <span>You</span>
+        {createdAt && (
+          <time
+            dateTime={dateTimeAttr(createdAt)}
+            title={formatFullTimestamp(createdAt)}
+            className="font-normal normal-case tracking-normal text-neutral-700"
+          >
+            {formatTimestamp(createdAt)}
+          </time>
+        )}
       </div>
       <div className="mt-1 max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-neutral-800/70 px-4 py-2.5 text-[15px] leading-relaxed text-neutral-100">
         {text}
@@ -666,6 +687,40 @@ function agentSegment(label: string, a: AgentCost): string {
 
 function fmt(n: number): string {
   return n.toLocaleString();
+}
+
+function formatTimestamp(value: string): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatFullTimestamp(value: string): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function dateTimeAttr(value: string): string {
+  return parseTimestamp(value)?.toISOString() ?? value;
+}
+
+function parseTimestamp(value: string): Date | null {
+  const normalized = /^\d{4}-\d{2}-\d{2} /.test(value) ? `${value.replace(" ", "T")}Z` : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function messageText(m: UIMessage): string {

@@ -52,8 +52,8 @@ const insertCharacterStmt = db.prepare<[number, string, string, number]>(
    VALUES (?, ?, ?, 1, ?) RETURNING id`,
 )
 const insertSceneStmt = db.prepare<[number, number]>(
-  `INSERT INTO scenes (world_id, place_id, title, scene_number, status)
-   VALUES (?, ?, 'Scene 1', 1, 'active') RETURNING id`,
+  `INSERT INTO scenes (world_id, place_id, title, scene_number, status, updated_at)
+   VALUES (?, ?, 'Scene 1', 1, 'active', datetime('now')) RETURNING id`,
 )
 const setWorldCursorStmt = db.prepare<[string, number, number]>(
   'UPDATE worlds SET world_time = ?, current_scene_id = ? WHERE id = ?',

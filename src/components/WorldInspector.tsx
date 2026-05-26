@@ -117,6 +117,7 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                     </span>
                   )}
                 </div>
+                <TimestampText label="Updated" value={c.updated_at} />
                 {c.description && (
                   <p className="mt-0.5 text-neutral-400">{c.description}</p>
                 )}
@@ -131,7 +132,7 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                   <dl className="mt-1 space-y-0.5 text-[12px]">
                     {c.personal_goals && (
                       <CharField label="personal goals" tone="emerald">
-                        <MultiLine value={c.personal_goals} />
+                        <MultiLine value={c.personal_goals} turnTimestamps={state.turnTimestamps} />
                       </CharField>
                     )}
                     {c.active_goal && (
@@ -145,12 +146,12 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                     )}
                     {c.recent_activity && (
                       <CharField label="activity" tone="sky">
-                        <MultiLine value={c.recent_activity} />
+                        <MultiLine value={c.recent_activity} turnTimestamps={state.turnTimestamps} />
                       </CharField>
                     )}
                     {c.observations && (
                       <CharField label="observed" tone="amber">
-                        <MultiLine value={c.observations} />
+                        <MultiLine value={c.observations} turnTimestamps={state.turnTimestamps} />
                       </CharField>
                     )}
                   </dl>
@@ -161,7 +162,9 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                       .split("\n")
                       .filter((f) => f.trim().length > 0)
                       .map((f, i) => (
-                        <li key={i}>{f}</li>
+                        <li key={i}>
+                          <StateEntryLine value={f} turnTimestamps={state.turnTimestamps} />
+                        </li>
                       ))}
                   </ul>
                 )}
@@ -180,6 +183,7 @@ function InspectorBody({ state }: { state: FullWorldState }) {
             {state.places.map((p) => (
               <li key={p.id} className="border-l-2 border-neutral-800 pl-2.5">
                 <div className="font-medium text-neutral-100">{p.name}</div>
+                <TimestampText label="Updated" value={p.updated_at} />
                 {p.description && <p className="mt-0.5 text-neutral-400">{p.description}</p>}
               </li>
             ))}
@@ -208,6 +212,12 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                   <span className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">
                     {s.status}
                   </span>
+                </div>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                  <TimestampText label="Opened" value={s.created_at} />
+                  {s.updated_at !== s.created_at && (
+                    <TimestampText label="Updated" value={s.updated_at} />
+                  )}
                 </div>
                 {s.summary && <p className="mt-0.5 text-neutral-400">{s.summary}</p>}
               </li>
@@ -251,14 +261,105 @@ function CharField({
   );
 }
 
-function MultiLine({ value }: { value: string }) {
+function MultiLine({
+  value,
+  turnTimestamps,
+}: {
+  value: string;
+  turnTimestamps: Record<number, string>;
+}) {
   const lines = value.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 1) return <span>{lines[0]}</span>;
+  if (lines.length === 1) {
+    return <StateEntryLine value={lines[0]} turnTimestamps={turnTimestamps} />;
+  }
   return (
     <ul className="space-y-0.5">
       {lines.map((l, i) => (
-        <li key={i}>{l}</li>
+        <li key={i}>
+          <StateEntryLine value={l} turnTimestamps={turnTimestamps} />
+        </li>
       ))}
     </ul>
   );
+}
+
+function StateEntryLine({
+  value,
+  turnTimestamps,
+}: {
+  value: string;
+  turnTimestamps: Record<number, string>;
+}) {
+  const entry = parseStateEntry(value);
+  const timestamp = entry.turnId === null ? undefined : turnTimestamps[entry.turnId];
+  return (
+    <span>
+      {entry.text}
+      {timestamp && (
+        <time
+          dateTime={dateTimeAttr(timestamp)}
+          title={formatFullTimestamp(timestamp)}
+          className="ml-1.5 whitespace-nowrap text-[10px] text-neutral-600"
+        >
+          {formatTimestamp(timestamp)}
+        </time>
+      )}
+    </span>
+  );
+}
+
+function TimestampText({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return (
+    <time
+      dateTime={dateTimeAttr(value)}
+      title={formatFullTimestamp(value)}
+      className="mt-0.5 block text-[10px] uppercase tracking-[0.12em] text-neutral-600"
+    >
+      {label} {formatTimestamp(value)}
+    </time>
+  );
+}
+
+function parseStateEntry(value: string): { text: string; turnId: number | null } {
+  const match = value.match(/\s*\[t:(\d+)\]\s*$/);
+  if (!match) return { text: value, turnId: null };
+  return {
+    text: value.slice(0, match.index).trimEnd(),
+    turnId: Number(match[1]),
+  };
+}
+
+function formatTimestamp(value: string): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatFullTimestamp(value: string): string {
+  const date = parseTimestamp(value);
+  if (!date) return value;
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function dateTimeAttr(value: string): string {
+  return parseTimestamp(value)?.toISOString() ?? value;
+}
+
+function parseTimestamp(value: string): Date | null {
+  const normalized = /^\d{4}-\d{2}-\d{2} /.test(value) ? `${value.replace(" ", "T")}Z` : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
