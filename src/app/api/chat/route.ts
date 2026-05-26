@@ -19,7 +19,11 @@ import {
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
-import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+import {
+  formatSceneDigestForClassifier,
+  formatStateBlock,
+  getNarratorWorldState,
+} from '@/lib/world-state'
 import { getWorld } from '@/lib/worlds'
 
 const NARRATOR_MODEL = 'claude-sonnet-4-6'
@@ -127,10 +131,17 @@ export async function POST(req: Request) {
     insertTurn(worldId, 'user', playerText, activeSceneId)
   }
 
-  const classification = await classifyAction(playerText)
+  // State is read before the classifier so the classifier can see who's
+  // present and where. A bare "Where is X?" with an NPC in the room is
+  // overwhelmingly likely to be the protagonist asking aloud (say + in-
+  // character); without scene context the classifier had no way to know.
+  const priorState = getNarratorWorldState(worldId)
+  const classification = await classifyAction(
+    playerText,
+    formatSceneDigestForClassifier(priorState),
+  )
   const { stance, input_mode } = classification
 
-  const priorState = getNarratorWorldState(worldId)
   const stateBlock = formatStateBlock(priorState)
   const premiseBlock = formatPremiseBlock(world.premise)
 

@@ -34,11 +34,13 @@ const ClassificationSchema = z.object({
 const CLASSIFIER_SYSTEM = `
 You classify a player's input in an interactive novel. Output two enums only.
 
-The protagonist is always in a scene with people, places, and a clock. A
-bare question like "Where is the farmstead?" or "What time is it?" is
-almost always the protagonist asking aloud — classify as say + in-character.
-Reserve meta + ooc for inputs that clearly address the game itself, not
-the world.
+You will receive a SCENE block (place + present NPCs) alongside the player
+input. Use it. If the protagonist is in a scene with NPCs they could
+plausibly address, a bare in-world question is almost always the
+protagonist speaking aloud (say + in-character). If the protagonist is
+alone and the input is a bare question, lean toward observe + in-character
+(the protagonist asking themselves / scanning the scene) rather than ooc —
+the OOC branch is reserved for inputs that clearly address the game/UI.
 
 stance — what kind of move the player is making:
 - do: a physical action that should advance the scene
@@ -67,13 +69,21 @@ Default toward in-character + say for bare information questions. If
 unsure between do and observe, prefer observe.
 `.trim()
 
-export async function classifyAction(text: string): Promise<ClassificationResult> {
+export async function classifyAction(
+  text: string,
+  sceneDigest?: string,
+): Promise<ClassificationResult> {
+  const promptParts: string[] = []
+  if (sceneDigest && sceneDigest.trim().length > 0) {
+    promptParts.push('SCENE:', sceneDigest, '')
+  }
+  promptParts.push('PLAYER INPUT:', text)
   try {
     const { object, usage } = await generateObject({
       model: anthropic(CLASSIFIER_MODEL),
       schema: ClassificationSchema,
       system: CLASSIFIER_SYSTEM,
-      prompt: `PLAYER INPUT:\n${text}`,
+      prompt: promptParts.join('\n'),
       maxOutputTokens: 200,
     })
     return { ...object, usage }

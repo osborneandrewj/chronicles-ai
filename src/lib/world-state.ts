@@ -89,6 +89,26 @@ export function getFullWorldState(worldId: number): FullWorldState {
   }
 }
 
+// Minimal scene context for the classifier. The classifier doesn't need the
+// full FIXED/OPEN framing or memorable_facts; it just needs to know whether
+// the protagonist is in a scene with someone they could plausibly be
+// addressing. "Where is the farmstead?" should classify as `say` +
+// `in-character` when Armitage is present, and lean OOC when the protagonist
+// is alone.
+export function formatSceneDigestForClassifier(state: NarratorWorldState): string {
+  const lines: string[] = []
+  if (state.currentPlace) {
+    lines.push(`PLACE: ${state.currentPlace.name}`)
+  }
+  const npcs = state.presentCharacters.filter((c) => c.is_player !== 1)
+  if (npcs.length > 0) {
+    lines.push(`PRESENT NPCS: ${npcs.map((c) => c.name).join(', ')}`)
+  } else {
+    lines.push('PRESENT NPCS: (none — the protagonist is alone)')
+  }
+  return lines.join('\n')
+}
+
 export function formatStateBlock(state: NarratorWorldState): string {
   const lines: string[] = [
     '## AUTHORITATIVE STATE',
