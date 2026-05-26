@@ -111,9 +111,9 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                   <span className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">
                     {c.is_player === 1 ? "player" : c.status}
                   </span>
-                  {c.is_player !== 1 && c.agency_level === "agent" && (
+                  {c.is_player !== 1 && c.agency_level !== "npc" && (
                     <span className="rounded bg-sky-900/40 px-1 text-[10px] uppercase tracking-[0.12em] text-sky-300">
-                      agent
+                      {c.agency_level}
                     </span>
                   )}
                 </div>

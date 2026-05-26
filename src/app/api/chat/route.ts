@@ -7,14 +7,21 @@ import {
 } from 'ai'
 import { z } from 'zod'
 
-import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
-import { CLASSIFIER_MODEL, classifyAction } from '@/lib/classifier'
+import {
+  ARCHIVIST_MODEL,
+  applyArchivistPatch,
+  extractDeterministicPatch,
+  extractPatch,
+} from '@/lib/archivist'
+import { classifyAction } from '@/lib/classifier'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
 import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
 import {
   getActiveSceneForWorld,
   insertTurn,
+  latestAssistantAfterLatestUser,
+  latestTurn,
   latestUserContent,
   latestUserTurnId,
   recentTurns,
@@ -31,6 +38,8 @@ import { getWorld } from '@/lib/worlds'
 
 const NARRATOR_MODEL = 'claude-sonnet-4-6'
 const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: 'ephemeral' as const } } }
+const NARRATOR_HISTORY_TURNS = 13
+const FULL_HISTORY_TURNS = 6
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -43,6 +52,7 @@ const ChatMessagePartSchema = z
   .object({ type: z.string(), text: z.string().optional() })
   .passthrough()
 const ChatMessageSchema = z.object({
+  id: z.string().optional(),
   role: z.string(),
   parts: z.array(ChatMessagePartSchema),
 })
@@ -110,6 +120,23 @@ export async function POST(req: Request) {
     return streamMetaResponse(runMetaCommand(playerText, worldId))
   }
 
+  const persistedLatestUserContent = latestUserContent(worldId)
+  const latestPersistedTurn = latestTurn(worldId)
+  const persistedAssistant = latestAssistantAfterLatestUser(worldId)
+  const latestUserAlreadyCompleted =
+    persistedLatestUserContent === playerText &&
+    latestPersistedTurn?.role === 'assistant' &&
+    persistedAssistant?.id === latestPersistedTurn.id
+  const incomingHasPersistedAssistant =
+    persistedAssistant !== null && includesAssistantTurn(messages, persistedAssistant)
+
+  // A completed retry should replay the existing assistant turn, not spend
+  // another classifier/narrator/archivist cycle. If the incoming history
+  // already includes that assistant, the same text is an intentional repeat.
+  if (latestUserAlreadyCompleted && persistedAssistant && !incomingHasPersistedAssistant) {
+    return streamPersistedAssistantResponse(persistedAssistant)
+  }
+
   // Daily shared cost cap. Gated before any LLM call (classifier or narrator)
   // so an exhausted budget never starts a stream we'd have to error mid-flight.
   if (isOverDailyLimit()) {
@@ -127,10 +154,13 @@ export async function POST(req: Request) {
   const activeScene = getActiveSceneForWorld(worldId)
   const activeSceneId = activeScene?.id ?? null
 
-  // Idempotent on retry: if the trailing player text matches the latest persisted user
-  // turn for this world, skip re-insertion. Lets the client re-fire the same request
-  // after a stream error without duplicating turns.
-  if (latestUserContent(worldId) !== playerText) {
+  // If the same user text is already the latest persisted user turn and no
+  // assistant exists yet, this is an in-flight retry: don't duplicate the user
+  // row. Once an assistant exists in the incoming history, allow an intentional
+  // repeated action with identical text.
+  const intentionalRepeat =
+    latestUserAlreadyCompleted && persistedAssistant !== null && incomingHasPersistedAssistant
+  if (persistedLatestUserContent !== playerText || intentionalRepeat) {
     insertTurn(worldId, 'user', playerText, activeSceneId)
   }
 
@@ -140,35 +170,36 @@ export async function POST(req: Request) {
   // character); without scene context the classifier had no way to know.
   const priorState = getNarratorWorldState(worldId)
 
-  // Auto-promote any NPC that has now appeared in scene 3+ times. Runs
-  // before the NPC agent call so newly-promoted NPCs get their first
-  // agentic plan on the same turn they crossed the threshold.
-  const promotion = recordAppearancesAndAutoPromote(priorState.presentCharacters)
-
   // Capture the just-inserted player turn id for [t:N] provenance on the
   // NPC agent's activity_append lines. The narrator turn doesn't exist
   // yet — agent runs pre-narrator.
   const playerTurnId = latestUserTurnId(worldId) ?? 0
 
-  // Classifier and NPC agent are independent (neither depends on the other's
-  // output) so they run in parallel to minimise first-token latency. NPC
-  // agent updates state in-DB and returns plans for the narrator to stage.
-  //
-  // NPC agent failure must NEVER block the narrator — if Haiku errors,
-  // schema validation fails, or the network blips, we degrade to plan-less
-  // narration rather than killing the whole turn. The user gets prose; the
-  // audio pipeline still runs; only the agent's plans are missing this turn.
+  // Update NPC attention tiers before the NPC agent call. Present recurring
+  // NPCs become local (high tick rate), while offscreen agents cool down
+  // through nearby/distant/dormant and eventually back to passive npc.
+  const promotion = recordAppearancesAndAutoPromote(
+    worldId,
+    priorState.presentCharacters,
+    playerTurnId,
+  )
+
+  const classification = await classifyAction(playerText, formatSceneDigestForClassifier(priorState))
+
+  // NPC agent failure must NEVER block the narrator — if Haiku errors, schema
+  // validation fails, or the network blips, we degrade to plan-less narration.
+  const postPromotionState = getNarratorWorldState(worldId)
   const recentForAgents = recentTurns(worldId, 4)
-  const [classification, npcAgentSettled] = await Promise.all([
-    classifyAction(playerText, formatSceneDigestForClassifier(priorState)),
-    runNpcAgentTick(worldId, playerTurnId, world.premise, playerText, recentForAgents).catch(
-      (err) => {
-        console.error('[npc agent failed pre-narrator]', err)
-        return { error: String(err) } as const
-      },
-    ),
-  ])
   const { stance, input_mode } = classification
+  const shouldRunNpcAgent = shouldTickNpcAgent(stance, input_mode, postPromotionState)
+  const npcAgentSettled = shouldRunNpcAgent
+    ? await runNpcAgentTick(worldId, playerTurnId, world.premise, playerText, recentForAgents).catch(
+        (err) => {
+          console.error('[npc agent failed pre-narrator]', err)
+          return { error: String(err) } as const
+        },
+      )
+    : null
   const npcAgentResult =
     npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
   const npcAgentError =
@@ -176,7 +207,7 @@ export async function POST(req: Request) {
   const plans = npcAgentResult?.plans ?? []
 
   // Re-read state so the narrator sees any place changes the agent applied.
-  const narratorState = npcAgentResult ? getNarratorWorldState(worldId) : priorState
+  const narratorState = npcAgentResult ? getNarratorWorldState(worldId) : postPromotionState
   const stateBlock = formatStateBlock(narratorState, plans)
   const premiseBlock = formatPremiseBlock(world.premise)
 
@@ -184,12 +215,9 @@ export async function POST(req: Request) {
   // The dynamic premise + state block and the new action ride in an uncached
   // trailing message. NARRATOR_BASE is world-agnostic so the system-prompt cache
   // entry survives across worlds; per-world premise lives in the trailing slot.
-  const allRecent = recentTurns(worldId, 21)
+  const allRecent = recentTurns(worldId, NARRATOR_HISTORY_TURNS)
   const priorHistory = allRecent.slice(0, -1)
-  const historyMessages: ModelMessage[] = priorHistory.map((t) => ({
-    role: t.role,
-    content: t.content,
-  }))
+  const historyMessages = compactHistory(priorHistory)
 
   const lastAssistantIdx = historyMessages.findLastIndex((m) => m.role === 'assistant')
   if (lastAssistantIdx >= 0) {
@@ -219,7 +247,8 @@ export async function POST(req: Request) {
       const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
       const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
       const classifierMeta = {
-        model: CLASSIFIER_MODEL,
+        model: classification.model,
+        method: classification.method,
         classification: { stance, input_mode },
         usage: classification.usage,
         error: classification.error,
@@ -243,22 +272,45 @@ export async function POST(req: Request) {
         upfrontMeta.npc_agent = { model: NPC_AGENT_MODEL, error: npcAgentError }
       }
       if (promotion.promoted.length > 0) {
-        upfrontMeta.npc_promotion = { promoted: promotion.promoted }
+        upfrontMeta.npc_promotion = { promoted: promotion.promoted, tiers: promotion.tiers }
         console.log(
           `[npc promotion] world=${worldId} promoted=${promotion.promoted.join(', ')}`,
         )
+      } else if (Object.values(promotion.tiers).some((names) => names.length > 0)) {
+        upfrontMeta.npc_promotion = { promoted: [], tiers: promotion.tiers }
       }
       updateTurnMetadata(narratorTurn.id, upfrontMeta)
 
-      // Archivist runs async after the stream completes — it extracts
-      // structural state (characters, places, scene transitions, time)
-      // from the narration. NPC agent and promotion have already run
-      // pre-stream, so the only remaining post-stream work is the
-      // archivist patch.
-      const archivistPromise = extractPatch(world.premise, priorState, [
-        { role: 'user', content: playerText },
-        { role: 'assistant', content: trimmed },
-      ])
+      const deterministicPatch = extractDeterministicPatch(priorState, playerText, trimmed)
+      const runArchivistLlm = shouldRunArchivistLlm(playerText, trimmed, !!deterministicPatch)
+
+      if (!runArchivistLlm && deterministicPatch) {
+        applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
+        updateTurnMetadata(narratorTurn.id, {
+          archivist: {
+            model: 'deterministic-archivist',
+            patch: deterministicPatch,
+          },
+        })
+        return
+      }
+
+      if (!runArchivistLlm) {
+        updateTurnMetadata(narratorTurn.id, {
+          archivist: {
+            model: ARCHIVIST_MODEL,
+            skipped: true,
+            reason: 'no_state_change_signal',
+          },
+        })
+        return
+      }
+
+      const archivistRecent = recentTurns(worldId, 4).map((t) => ({
+        role: t.role,
+        content: t.content,
+      }))
+      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent)
         .then(({ patch, usage: archivistUsage }) => {
           applyArchivistPatch(worldId, narratorTurn.id, patch)
           updateTurnMetadata(narratorTurn.id, {
@@ -279,6 +331,57 @@ export async function POST(req: Request) {
   return result.toUIMessageStreamResponse()
 }
 
+function compactHistory(history: Array<{ role: 'user' | 'assistant'; content: string }>): ModelMessage[] {
+  const fullStart = Math.max(0, history.length - FULL_HISTORY_TURNS)
+  return history.map((turn, idx) => {
+    if (idx >= fullStart) {
+      return { role: turn.role, content: turn.content }
+    }
+    return {
+      role: turn.role,
+      content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${limitText(
+        turn.content,
+        320,
+      )}]`,
+    }
+  })
+}
+
+function shouldTickNpcAgent(
+  stance: string,
+  inputMode: string,
+  state: { presentCharacters: Array<{ is_player: number; agency_level: string }> },
+): boolean {
+  if (inputMode !== 'in-character' || stance === 'meta' || stance === 'think') return false
+  if (stance === 'do' || stance === 'say') return true
+  return state.presentCharacters.some(
+    (c) => c.is_player !== 1 && (c.agency_level === 'local' || c.agency_level === 'nearby'),
+  )
+}
+
+function shouldRunArchivistLlm(
+  playerText: string,
+  narratorText: string,
+  hasDeterministicPatch: boolean,
+): boolean {
+  const text = `${playerText}\n${narratorText}`.toLowerCase()
+  const richSignal =
+    /\b(named|called|introduced|introduces|appears|arrives|enters|walks in|bartender|clerk|manager|wife|husband|mother|father|daughter|son)\b/.test(
+      text,
+    ) ||
+    /\b(minutes?|hours?|morning|afternoon|evening|night|later|next day|noon|midnight)\b/.test(
+      text,
+    ) ||
+    /\b(dies|dead|wounded|injured|takes|picks up|hands|gives|receives|promises|learns|discovers)\b/.test(
+      text,
+    ) ||
+    /\b(call|calls|called|text|texts|email|emails|post|posts|message|messages)\b/.test(text) ||
+    /["“][^"”]{2,}["”]/.test(`${playerText}\n${narratorText}`)
+
+  if (richSignal) return true
+  return !hasDeterministicPatch && /\b(leave|left|arrive|arrives|enter|entered|go to|drive to|walk to)\b/.test(text)
+}
+
 function streamMetaResponse(text: string): Response {
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
@@ -289,6 +392,35 @@ function streamMetaResponse(text: string): Response {
     },
   })
   return createUIMessageStreamResponse({ stream })
+}
+
+function streamPersistedAssistantResponse(turn: { id: number; content: string }): Response {
+  const stream = createUIMessageStream({
+    execute: ({ writer }) => {
+      const id = String(turn.id)
+      writer.write({ type: 'text-start', id })
+      writer.write({ type: 'text-delta', id, delta: turn.content })
+      writer.write({ type: 'text-end', id })
+    },
+  })
+  return createUIMessageStreamResponse({ stream })
+}
+
+function includesAssistantTurn(
+  messages: ChatMessage[],
+  turn: { id: number; content: string },
+): boolean {
+  return messages.some(
+    (msg) =>
+      msg.role === 'assistant' &&
+      (msg.id === String(turn.id) || extractText(msg).trim() === turn.content.trim()),
+  )
+}
+
+function limitText(value: string, max: number): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= max) return compact
+  return `${compact.slice(0, max - 1).trimEnd()}...`
 }
 
 function extractText(msg: ChatMessage): string {

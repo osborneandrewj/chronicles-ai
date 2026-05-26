@@ -20,9 +20,9 @@ function seedWorld(name: string): { worldId: number; turnId: number } {
   return { worldId: world.id, turnId: turn.id }
 }
 
-function promoteToAgent(worldId: number, name: string): void {
+function promoteToLocal(worldId: number, name: string): void {
   db.prepare(
-    `UPDATE characters SET agency_level = 'agent'
+    `UPDATE characters SET agency_level = 'local'
        WHERE world_id = ? AND lower(name) = lower(?)`,
   ).run(worldId, name)
 }
@@ -33,14 +33,14 @@ describe('applyNpcAgentPatch', () => {
 
   beforeEach(() => {
     ;({ worldId, turnId } = seedWorld(`NpcAgent-${Math.random()}`))
-    // Seed two NPCs: Marcus (agent-tier) and Donna (npc-tier).
+    // Seed two NPCs: Marcus (local agent-tier) and Donna (npc-tier).
     applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Marcus', description: 'Senior engineer.', current_place_name: 'Covenant Security' },
         { name: 'Donna', description: 'Office manager.', current_place_name: 'Covenant Security' },
       ],
     })
-    promoteToAgent(worldId, 'Marcus')
+    promoteToLocal(worldId, 'Marcus')
   })
 
   it('overwrites current_focus on agent-tier NPC', () => {

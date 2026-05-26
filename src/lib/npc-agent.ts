@@ -89,17 +89,27 @@ type AgentNpcRow = {
   current_attitude: string | null
   current_place_id: number | null
   current_place_name: string | null
+  agency_level: string
+  last_agent_tick_turn_id: number | null
 }
 
-const agentNpcsStmt = db.prepare<[number]>(`
+const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
-         c.active_goal, c.current_attitude, c.current_place_id,
+         c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
+         c.last_agent_tick_turn_id,
          (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name
     FROM characters c
    WHERE c.world_id = ?
-     AND c.agency_level = 'agent'
+     AND c.agency_level IN ('local', 'nearby', 'distant', 'agent')
      AND c.is_player = 0
      AND c.status != 'dead'
+     AND (
+       c.agency_level IN ('local', 'agent')
+       OR c.last_agent_tick_turn_id IS NULL
+       OR (c.agency_level = 'nearby' AND ? - c.last_agent_tick_turn_id >= 2)
+       OR (c.agency_level = 'distant' AND ? - c.last_agent_tick_turn_id >= 5)
+       OR (? - c.last_agent_tick_turn_id >= 5)
+     )
 `)
 
 const playerLocationStmt = db.prepare<[number]>(`
@@ -113,6 +123,9 @@ const playerLocationStmt = db.prepare<[number]>(`
 const worldTimeStmt = db.prepare<[number]>('SELECT world_time FROM worlds WHERE id = ?')
 const placesForWorldStmt = db.prepare<[number]>(
   'SELECT id, name FROM places WHERE world_id = ? ORDER BY id ASC',
+)
+const setLastAgentTickStmt = db.prepare<[number, number]>(
+  `UPDATE characters SET last_agent_tick_turn_id = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 
 // Runs BEFORE the narrator each turn. Reflects on what just happened (the
@@ -131,7 +144,7 @@ export async function runNpcAgentTick(
   plans: PlannedAction[]
   usage: LanguageModelUsage
 } | null> {
-  const agents = agentNpcsStmt.all(worldId) as AgentNpcRow[]
+  const agents = agentNpcsStmt.all(worldId, tickTurnId, tickTurnId, tickTurnId) as AgentNpcRow[]
   if (agents.length === 0) return null
 
   const player = playerLocationStmt.get(worldId) as
@@ -148,6 +161,13 @@ export async function runNpcAgentTick(
     name: a.name,
     description: a.description,
     personal_goals: a.personal_goals,
+    agency_level: a.agency_level,
+    tick_rate:
+      a.agency_level === 'local' || a.agency_level === 'agent'
+        ? 'every turn'
+        : a.agency_level === 'nearby'
+          ? 'every 2 turns'
+          : 'every 5 turns',
     current_focus: a.current_focus,
     active_goal: a.active_goal,
     current_attitude: a.current_attitude,
@@ -186,6 +206,9 @@ export async function runNpcAgentTick(
   })
 
   applyNpcAgentPatch(worldId, tickTurnId, object)
+  for (const agent of agents) {
+    setLastAgentTickStmt.run(tickTurnId, agent.id)
+  }
   return { patch: object, plans: object.planned_actions ?? [], usage }
 }
 
@@ -195,7 +218,7 @@ const findAgentNpcByNameStmt = db.prepare<[number, string]>(
   `SELECT id, recent_activity FROM characters
     WHERE world_id = ?
       AND lower(name) = lower(?)
-      AND agency_level = 'agent'
+      AND agency_level IN ('local', 'nearby', 'distant', 'agent')
       AND is_player = 0`,
 )
 const findPlaceByNameStmt = db.prepare<[number, string]>(

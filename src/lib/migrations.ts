@@ -314,6 +314,22 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE characters ADD COLUMN appearance_count INTEGER NOT NULL DEFAULT 0')
     },
   },
+  {
+    // v0.6.4 — tiered NPC attention. Replace the binary npc/agent idea with
+    // proximity-based tiers stored in agency_level:
+    // local (same scene, every turn), nearby (recently present, slower),
+    // distant (offscreen but still relevant), dormant (remembered, no ticks),
+    // npc (passive). Existing agent rows become nearby and will be promoted to
+    // local the next time they are present. The turn-id fields let scheduling
+    // happen deterministically without extra model calls.
+    version: 9,
+    name: 'tiered_npc_attention',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN last_seen_turn_id INTEGER')
+      db.exec('ALTER TABLE characters ADD COLUMN last_agent_tick_turn_id INTEGER')
+      db.exec("UPDATE characters SET agency_level = 'nearby' WHERE agency_level = 'agent'")
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

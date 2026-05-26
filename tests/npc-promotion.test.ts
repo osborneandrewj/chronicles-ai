@@ -30,9 +30,11 @@ function character(worldId: number, name: string): Character {
 
 describe('recordAppearancesAndAutoPromote', () => {
   let worldId: number
+  let tickTurnId: number
 
   beforeEach(() => {
     worldId = seedWorld(`Promo-${Math.random()}`)
+    tickTurnId = 0
     const turn = insertTurn(worldId, 'assistant', 'seed', null)
     applyArchivistPatch(worldId, turn.id, {
       characters: [
@@ -42,44 +44,48 @@ describe('recordAppearancesAndAutoPromote', () => {
     })
   })
 
+  function tick(present: Character[], turnId = ++tickTurnId) {
+    return recordAppearancesAndAutoPromote(worldId, present, turnId)
+  }
+
   it('bumps appearance_count by one per call for each present NPC', () => {
     const marcus = character(worldId, 'Marcus')
     expect(marcus.appearance_count).toBe(0)
 
-    recordAppearancesAndAutoPromote([marcus])
+    tick([marcus])
     expect(character(worldId, 'Marcus').appearance_count).toBe(1)
 
-    recordAppearancesAndAutoPromote([character(worldId, 'Marcus')])
+    tick([character(worldId, 'Marcus')])
     expect(character(worldId, 'Marcus').appearance_count).toBe(2)
   })
 
-  it('auto-promotes from npc to agent at the threshold', () => {
+  it('auto-promotes from npc to local attention at the threshold', () => {
     const marcus = character(worldId, 'Marcus')
     expect(marcus.agency_level).toBe('npc')
 
     // First two calls: below threshold, no promotion.
-    let result = recordAppearancesAndAutoPromote([marcus])
+    let result = tick([marcus])
     expect(result.promoted).toEqual([])
-    result = recordAppearancesAndAutoPromote([character(worldId, 'Marcus')])
+    result = tick([character(worldId, 'Marcus')])
     expect(result.promoted).toEqual([])
     expect(character(worldId, 'Marcus').agency_level).toBe('npc')
 
     // Third call: hits threshold, promotes.
-    result = recordAppearancesAndAutoPromote([character(worldId, 'Marcus')])
+    result = tick([character(worldId, 'Marcus')])
     expect(result.promoted).toEqual(['Marcus'])
-    expect(character(worldId, 'Marcus').agency_level).toBe('agent')
+    expect(character(worldId, 'Marcus').agency_level).toBe('local')
     expect(character(worldId, 'Marcus').appearance_count).toBe(NPC_AUTO_PROMOTE_THRESHOLD)
   })
 
-  it('does not re-promote an already-agent NPC', () => {
+  it('does not re-promote an already-local NPC', () => {
     // Cross the threshold to promote.
     for (let i = 0; i < NPC_AUTO_PROMOTE_THRESHOLD; i++) {
-      recordAppearancesAndAutoPromote([character(worldId, 'Marcus')])
+      tick([character(worldId, 'Marcus')])
     }
-    expect(character(worldId, 'Marcus').agency_level).toBe('agent')
+    expect(character(worldId, 'Marcus').agency_level).toBe('local')
 
     // Further calls keep counting but never re-emit "promoted".
-    const result = recordAppearancesAndAutoPromote([character(worldId, 'Marcus')])
+    const result = tick([character(worldId, 'Marcus')])
     expect(result.promoted).toEqual([])
     expect(character(worldId, 'Marcus').appearance_count).toBe(NPC_AUTO_PROMOTE_THRESHOLD + 1)
   })
@@ -88,7 +94,7 @@ describe('recordAppearancesAndAutoPromote', () => {
     const all = getCharactersForWorld(worldId)
     const before = all.map((c) => ({ id: c.id, count: c.appearance_count }))
 
-    recordAppearancesAndAutoPromote(all)
+    tick(all)
 
     for (const row of getCharactersForWorld(worldId)) {
       const prev = before.find((b) => b.id === row.id)!
@@ -102,19 +108,20 @@ describe('recordAppearancesAndAutoPromote', () => {
 
   it('counted reflects the number of eligible NPCs (excludes player)', () => {
     const all = getCharactersForWorld(worldId)
-    const result = recordAppearancesAndAutoPromote(all)
+    const result = tick(all)
     expect(result.counted).toBe(all.filter((c) => c.is_player === 0).length)
   })
 
-  it('empty present set is a no-op', () => {
-    const result = recordAppearancesAndAutoPromote([])
-    expect(result).toEqual({ promoted: [], counted: 0 })
+  it('empty present set does not promote or count anyone', () => {
+    const result = tick([])
+    expect(result.promoted).toEqual([])
+    expect(result.counted).toBe(0)
   })
 
   it('promotes multiple NPCs in the same call', () => {
     // Drive both Marcus and Kyle to threshold-1.
     for (let i = 0; i < NPC_AUTO_PROMOTE_THRESHOLD - 1; i++) {
-      recordAppearancesAndAutoPromote([
+      tick([
         character(worldId, 'Marcus'),
         character(worldId, 'Kyle'),
       ])
@@ -122,12 +129,31 @@ describe('recordAppearancesAndAutoPromote', () => {
     expect(character(worldId, 'Marcus').agency_level).toBe('npc')
     expect(character(worldId, 'Kyle').agency_level).toBe('npc')
 
-    const result = recordAppearancesAndAutoPromote([
+    const result = tick([
       character(worldId, 'Marcus'),
       character(worldId, 'Kyle'),
     ])
     expect(result.promoted.sort()).toEqual(['Kyle', 'Marcus'])
-    expect(character(worldId, 'Marcus').agency_level).toBe('agent')
-    expect(character(worldId, 'Kyle').agency_level).toBe('agent')
+    expect(character(worldId, 'Marcus').agency_level).toBe('local')
+    expect(character(worldId, 'Kyle').agency_level).toBe('local')
+  })
+
+  it('cools off local NPCs as they spend turns away from the protagonist', () => {
+    for (let i = 0; i < NPC_AUTO_PROMOTE_THRESHOLD; i++) {
+      tick([character(worldId, 'Marcus')])
+    }
+    expect(character(worldId, 'Marcus').agency_level).toBe('local')
+
+    tick([], 4)
+    expect(character(worldId, 'Marcus').agency_level).toBe('nearby')
+
+    tick([], 8)
+    expect(character(worldId, 'Marcus').agency_level).toBe('distant')
+
+    tick([], 15)
+    expect(character(worldId, 'Marcus').agency_level).toBe('dormant')
+
+    tick([], 25)
+    expect(character(worldId, 'Marcus').agency_level).toBe('npc')
   })
 })

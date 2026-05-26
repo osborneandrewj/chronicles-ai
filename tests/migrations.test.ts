@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -203,7 +203,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -243,7 +243,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -351,7 +351,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -391,7 +391,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('user_version', { simple: true })).toBe(9)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{

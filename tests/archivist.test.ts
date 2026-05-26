@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { applyArchivistPatch, type ArchivistPatch } from '@/lib/archivist'
+import {
+  applyArchivistPatch,
+  extractDeterministicPatch,
+  type ArchivistPatch,
+} from '@/lib/archivist'
 import {
   db,
   getActiveSceneForWorld,
@@ -11,6 +15,7 @@ import {
   insertTurn,
 } from '@/lib/db'
 import { createWorld } from '@/lib/worlds'
+import { getNarratorWorldState } from '@/lib/world-state'
 
 // Each test gets its own world on the shared in-memory singleton. We never
 // reset the singleton — better-sqlite3 has no concept of nested transactions
@@ -343,5 +348,37 @@ describe('applyArchivistPatch', () => {
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.memorable_facts).toBe(`gave the player a silver locket [t:${turnId}]`)
     expect(tom.active_goal).toBe('recover the locket')
+  })
+})
+
+describe('extractDeterministicPatch', () => {
+  it('extracts an obvious accepted destination move without an LLM', () => {
+    const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
+    const prior = getNarratorWorldState(worldId)
+
+    const patch = extractDeterministicPatch(
+      prior,
+      'I walk to the old chapel.',
+      'You walk to the old chapel. The harbour drops away behind you.',
+    )
+
+    expect(patch).toEqual({
+      places: [{ name: 'Old chapel' }],
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Old chapel' }],
+      scene: { action: 'open', title: 'At Old chapel', place_name: 'Old chapel' },
+    })
+  })
+
+  it('does not extract a destination the narrator did not confirm', () => {
+    const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
+    const prior = getNarratorWorldState(worldId)
+
+    expect(
+      extractDeterministicPatch(
+        prior,
+        'I walk to the old chapel.',
+        'You start toward it, but the floodwater blocks the road.',
+      ),
+    ).toBeNull()
   })
 })

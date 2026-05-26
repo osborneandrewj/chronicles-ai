@@ -55,6 +55,22 @@ const latestUserContentStmt = db.prepare<[number]>(
   `SELECT content FROM turns
    WHERE world_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1`,
 )
+const latestTurnStmt = db.prepare<[number]>(
+  `SELECT id, world_id, role, content, scene_id, created_at
+   FROM turns WHERE world_id = ? ORDER BY id DESC LIMIT 1`,
+)
+const latestAssistantAfterLatestUserStmt = db.prepare<[number, number]>(
+  `WITH latest_user AS (
+     SELECT id FROM turns WHERE world_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1
+   )
+   SELECT a.id, a.world_id, a.role, a.content, a.scene_id, a.created_at
+   FROM turns a, latest_user u
+   WHERE a.world_id = ? AND a.role = 'assistant' AND a.id > u.id
+   ORDER BY a.id DESC LIMIT 1`,
+)
+const userTurnCountStmt = db.prepare<[number]>(
+  `SELECT COUNT(*) AS n FROM turns WHERE world_id = ? AND role = 'user'`,
+)
 // json_patch merges the supplied object into existing metadata so concurrent
 // writers (archivist, tts char recorder) don't clobber each other's keys.
 const updateMetadataStmt = db.prepare<[string, number]>(
@@ -95,7 +111,8 @@ const usageTotalsStmt = db.prepare<[number]>(`
 // v0.6.2 adds observations + agentic-NPC fields).
 const CHARACTER_COLS = `id, world_id, name, description, is_player, current_place_id,
         memorable_facts, status, active_goal, current_attitude, observations,
-        agency_level, personal_goals, current_focus, recent_activity, appearance_count`
+        agency_level, personal_goals, current_focus, recent_activity, appearance_count,
+        last_seen_turn_id, last_agent_tick_turn_id`
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
@@ -196,6 +213,21 @@ export function turnsBefore(worldId: number, beforeId: number, limit: number): T
 export function latestUserContent(worldId: number): string | null {
   const row = latestUserContentStmt.get(worldId) as { content: string } | undefined
   return row?.content ?? null
+}
+
+export function latestTurn(worldId: number): Turn | null {
+  return (latestTurnStmt.get(worldId) as Turn | undefined) ?? null
+}
+
+export function latestAssistantAfterLatestUser(worldId: number): Turn | null {
+  return (
+    (latestAssistantAfterLatestUserStmt.get(worldId, worldId) as Turn | undefined) ?? null
+  )
+}
+
+export function userTurnCount(worldId: number): number {
+  const row = userTurnCountStmt.get(worldId) as { n: number }
+  return row.n
 }
 
 const latestUserTurnIdStmt = db.prepare<[number]>(

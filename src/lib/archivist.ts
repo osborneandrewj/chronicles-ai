@@ -92,6 +92,32 @@ export type ArchivistPatch = z.infer<typeof ArchivistPatchSchema>
 
 export const ARCHIVIST_MODEL = 'claude-haiku-4-5-20251001'
 
+export function extractDeterministicPatch(
+  prior: NarratorWorldState,
+  playerText: string,
+  narratorText: string,
+): ArchivistPatch | null {
+  const destination = extractDestination(playerText)
+  if (!destination) return null
+
+  const destinationKey = normalize(destination)
+  if (!destinationKey || destinationKey === normalize(prior.currentPlace?.name ?? '')) return null
+  if (!normalize(narratorText).includes(destinationKey)) return null
+
+  const player = prior.presentCharacters.find((c) => c.is_player === 1)
+  if (!player) return null
+
+  return {
+    places: [{ name: destination }],
+    characters: [{ name: player.name, is_player: true, current_place_name: destination }],
+    scene: {
+      action: 'open',
+      title: `At ${destination}`,
+      place_name: destination,
+    },
+  }
+}
+
 export async function extractPatch(
   premise: string,
   prior: NarratorWorldState,
@@ -114,10 +140,8 @@ export async function extractPatch(
       present_characters: prior.presentCharacters.map((c) => ({
         name: c.name,
         is_player: c.is_player === 1,
-        description: c.description,
-        memorable_facts: stripFactProvenance(c.memorable_facts),
         status: c.status,
-        observations: c.is_player === 1 ? undefined : stripFactProvenance(c.observations),
+        observations: c.is_player === 1 ? undefined : lastNLines(stripFactProvenance(c.observations), 2),
       })),
     },
     null,
@@ -140,6 +164,42 @@ export async function extractPatch(
   })
 
   return { patch: object, usage }
+}
+
+function extractDestination(text: string): string | null {
+  const patterns = [
+    /\b(?:i\s+)?(?:go|walk|run|drive|head|travel)\s+(?:back\s+)?to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
+    /\b(?:i\s+)?(?:return)\s+to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
+    /\b(?:i\s+)?(?:enter|walk into|go into)\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (!match?.[1]) continue
+    const destination = cleanDestination(match[1])
+    if (destination) return destination
+  }
+  return null
+}
+
+function cleanDestination(raw: string): string | null {
+  const value = raw
+    .replace(/[“”"']/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\b(?:and|then|so)\b.*$/i, '')
+    .trim()
+  if (value.length < 3 || value.length > 80) return null
+  if (/^(sleep|bed|work|home)$/i.test(value)) return null
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function lastNLines(value: string | null, n: number): string | null {
+  if (!value) return null
+  const lines = value.split('\n').filter((line) => line.trim().length > 0)
+  return lines.slice(-n).join('\n') || null
 }
 
 // Prepared statements for patch application. All writes happen inside the

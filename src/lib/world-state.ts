@@ -9,7 +9,7 @@ import {
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 
-export type CharacterAgencyLevel = 'npc' | 'agent'
+export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
 
 export type Character = {
   id: number
@@ -28,6 +28,8 @@ export type Character = {
   current_focus: string | null
   recent_activity: string | null
   appearance_count: number
+  last_seen_turn_id: number | null
+  last_agent_tick_turn_id: number | null
 }
 
 export type Place = {
@@ -124,14 +126,8 @@ export function formatStateBlock(
   plannedActions: NpcPlannedAction[] = [],
 ): string {
   const lines: string[] = [
-    '## AUTHORITATIVE STATE',
-    'Two layers: FIXED FACTS are ground truth — never silently rewrite them. OPEN CANVAS is',
-    'everything the state does not pin down (unspecified equipment, untold history, off-scene',
-    'detail) — the player may paint into it with small, fiction-consistent additions, and you',
-    'may weave those in. Reserve in-fiction deflection for additions that would shift the power',
-    'balance, retcon an established fact, or contradict the premise.',
-    '',
-    '### FIXED FACTS',
+    '## STATE',
+    'Listed facts are fixed. Unlisted small, genre-consistent details are open canvas.',
     `- Time: ${state.worldTime ?? '(unset)'}`,
   ]
 
@@ -149,10 +145,11 @@ export function formatStateBlock(
     lines.push('', '### Present')
     for (const c of state.presentCharacters) {
       const role = c.is_player === 1 ? 'player' : c.status
-      lines.push(`- **${c.name}** (${role})${c.description ? ` — ${c.description}` : ''}`)
+      lines.push(`- ${c.name} (${role})${c.description ? ` — ${limit(c.description, 180)}` : ''}`)
       const facts = stripFactProvenance(c.memorable_facts)
       if (facts) {
-        for (const fact of facts.split('\n').filter((f) => f.trim().length > 0)) {
+        const factLines = facts.split('\n').filter((f) => f.trim().length > 0).slice(-3)
+        for (const fact of factLines) {
           lines.push(`  - ${fact}`)
         }
       }
@@ -165,38 +162,30 @@ export function formatStateBlock(
         if (c.personal_goals) {
           const goals = c.personal_goals.split('\n').filter((s) => s.trim().length > 0)
           if (goals.length === 1) {
-            lines.push(`  - personal goal: ${goals[0]}`)
+            lines.push(`  - personal goal: ${limit(goals[0], 160)}`)
           } else {
             lines.push('  - personal goals:')
-            for (const g of goals) lines.push(`    - ${g}`)
+            for (const g of goals.slice(0, 3)) lines.push(`    - ${limit(g, 160)}`)
           }
         }
-        if (c.current_focus) lines.push(`  - focus: ${c.current_focus}`)
-        if (c.active_goal) lines.push(`  - goal: ${c.active_goal}`)
-        if (c.current_attitude) lines.push(`  - attitude: ${c.current_attitude}`)
+        if (c.current_focus) lines.push(`  - focus: ${limit(c.current_focus, 160)}`)
+        if (c.active_goal) lines.push(`  - goal: ${limit(c.active_goal, 160)}`)
+        if (c.current_attitude) lines.push(`  - attitude: ${limit(c.current_attitude, 160)}`)
         const activity = stripFactProvenance(c.recent_activity)
         if (activity) {
-          for (const line of activity.split('\n').filter((s) => s.trim().length > 0)) {
-            lines.push(`  - activity: ${line}`)
+          for (const line of activity.split('\n').filter((s) => s.trim().length > 0).slice(-2)) {
+            lines.push(`  - activity: ${limit(line, 160)}`)
           }
         }
         const obs = stripFactProvenance(c.observations)
         if (obs) {
-          for (const line of obs.split('\n').filter((s) => s.trim().length > 0)) {
-            lines.push(`  - observed: ${line}`)
+          for (const line of obs.split('\n').filter((s) => s.trim().length > 0).slice(-2)) {
+            lines.push(`  - observed: ${limit(line, 160)}`)
           }
         }
       }
     }
   }
-
-  lines.push(
-    '',
-    '### OPEN CANVAS',
-    "Anything not listed above is open. If the player names a small, genre-consistent detail",
-    'about themselves or their equipment, weave it into the fiction. Deflect grand additions',
-    'inside the story — never out-of-character.',
-  )
 
   // Agent NPCs' planned moves for THIS turn. Decided by the NPC agent before
   // the narrator runs; the narrator stages them as the actual scene rather
@@ -210,4 +199,10 @@ export function formatStateBlock(
   }
 
   return lines.join('\n')
+}
+
+function limit(value: string, max: number): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= max) return compact
+  return `${compact.slice(0, max - 1).trimEnd()}...`
 }
