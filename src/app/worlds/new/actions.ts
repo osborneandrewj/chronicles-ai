@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
+import { generateOpeningTurn } from '@/lib/opening-turn'
 import { createWorld } from '@/lib/worlds'
 
 const CreateWorldSchema = z.object({
@@ -43,5 +44,13 @@ export async function createWorldAction(
     premise,
     initialState: { time, location, identity, playerName },
   })
+  // Synthesize the narrator's opening move before redirecting so the player
+  // lands on a live fictional moment instead of an empty page. Awaited
+  // intentionally: the action stays blocked until both the narrator and the
+  // archivist have run, so /play hydrates with the opening already in place
+  // and the inspector reflects any newly-introduced state. Failures inside
+  // generateOpeningTurn are swallowed (logged) — a flaky LLM call shouldn't
+  // strand the user without a world.
+  await generateOpeningTurn(world.id, premise)
   redirect(`/worlds/${world.id}/play`)
 }
