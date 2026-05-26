@@ -92,9 +92,13 @@ export function getFullWorldState(worldId: number): FullWorldState {
 export function formatStateBlock(state: NarratorWorldState): string {
   const lines: string[] = [
     '## AUTHORITATIVE STATE',
-    'These facts are ground truth. Do not contradict them. If the player implies a change,',
-    'narrate the attempt — do not silently rewrite who is here, where they are, or the time.',
+    'Two layers: FIXED FACTS are ground truth — never silently rewrite them. OPEN CANVAS is',
+    'everything the state does not pin down (unspecified equipment, untold history, off-scene',
+    'detail) — the player may paint into it with small, fiction-consistent additions, and you',
+    'may weave those in. Reserve in-fiction deflection for additions that would shift the power',
+    'balance, retcon an established fact, or contradict the premise.',
     '',
+    '### FIXED FACTS',
     `- Time: ${state.worldTime ?? '(unset)'}`,
   ]
 
@@ -119,8 +123,23 @@ export function formatStateBlock(state: NarratorWorldState): string {
           lines.push(`  - ${fact}`)
         }
       }
+      // Goal / attitude shown only for present NPCs, only when non-null. The
+      // narrator may act on these to put pressure on the scene; they are not
+      // visible to the player.
+      if (c.is_player !== 1) {
+        if (c.active_goal) lines.push(`  - goal: ${c.active_goal}`)
+        if (c.current_attitude) lines.push(`  - attitude: ${c.current_attitude}`)
+      }
     }
   }
+
+  lines.push(
+    '',
+    '### OPEN CANVAS',
+    "Anything not listed above is open. If the player names a small, genre-consistent detail",
+    'about themselves or their equipment, weave it into the fiction. Deflect grand additions',
+    'inside the story — never out-of-character.',
+  )
 
   return lines.join('\n')
 }
