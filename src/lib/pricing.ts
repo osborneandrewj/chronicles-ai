@@ -1,10 +1,11 @@
-// USD per million tokens. Update if Anthropic prices change.
+// USD per million tokens. Update when provider prices change.
 // Cache-write surcharge is intentionally omitted — cost here is a signal, not an invoice.
 type Rate = { input: number; cachedInput: number; output: number }
 
 const RATES: Record<string, Rate> = {
   'claude-sonnet-4-6': { input: 3, cachedInput: 0.3, output: 15 },
   'claude-haiku-4-5-20251001': { input: 1, cachedInput: 0.1, output: 5 },
+  'grok-4.3': { input: 1.25, cachedInput: 0.2, output: 2.5 },
 }
 
 // USD per million characters synthesized. xAI Grok TTS is char-billed, not token-billed.

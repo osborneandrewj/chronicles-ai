@@ -1,4 +1,4 @@
-import { anthropic } from '@ai-sdk/anthropic'
+import { xai } from '@ai-sdk/xai'
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -36,8 +36,7 @@ import {
 } from '@/lib/world-state'
 import { getWorld } from '@/lib/worlds'
 
-const NARRATOR_MODEL = 'claude-sonnet-4-6'
-const EPHEMERAL_CACHE = { anthropic: { cacheControl: { type: 'ephemeral' as const } } }
+const NARRATOR_MODEL = 'grok-4.3'
 const NARRATOR_HISTORY_TURNS = 13
 const FULL_HISTORY_TURNS = 6
 
@@ -211,21 +210,12 @@ export async function POST(req: Request) {
   const stateBlock = formatStateBlock(narratorState, plans)
   const premiseBlock = formatPremiseBlock(world.premise)
 
-  // Cacheable prefix = system + all prior turns (excluding the new player action).
-  // The dynamic premise + state block and the new action ride in an uncached
-  // trailing message. NARRATOR_BASE is world-agnostic so the system-prompt cache
-  // entry survives across worlds; per-world premise lives in the trailing slot.
+  // Keep the stable narrator instructions and prior turns separate from the
+  // dynamic premise/state/action block. This preserves the original prompt
+  // shape while letting provider-side automatic caching do what it can.
   const allRecent = recentTurns(worldId, NARRATOR_HISTORY_TURNS)
   const priorHistory = allRecent.slice(0, -1)
   const historyMessages = compactHistory(priorHistory)
-
-  const lastAssistantIdx = historyMessages.findLastIndex((m) => m.role === 'assistant')
-  if (lastAssistantIdx >= 0) {
-    historyMessages[lastAssistantIdx] = {
-      ...historyMessages[lastAssistantIdx],
-      providerOptions: EPHEMERAL_CACHE,
-    }
-  }
 
   const trailingUser: ModelMessage = {
     role: 'user',
@@ -233,13 +223,13 @@ export async function POST(req: Request) {
   }
 
   const modelMessages: ModelMessage[] = [
-    { role: 'system', content: NARRATOR_BASE, providerOptions: EPHEMERAL_CACHE },
+    { role: 'system', content: NARRATOR_BASE },
     ...historyMessages,
     trailingUser,
   ]
 
   const result = streamText({
-    model: anthropic(NARRATOR_MODEL),
+    model: xai(NARRATOR_MODEL),
     messages: modelMessages,
     onFinish: ({ text, usage: narratorUsage }) => {
       const trimmed = text.trim()

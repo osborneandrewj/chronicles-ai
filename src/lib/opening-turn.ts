@@ -1,4 +1,4 @@
-import { anthropic } from '@ai-sdk/anthropic'
+import { xai } from '@ai-sdk/xai'
 import { generateText } from 'ai'
 
 import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
@@ -7,7 +7,7 @@ import { getActiveSceneForWorld, insertTurn, updateTurnMetadata } from '@/lib/db
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
 
-const NARRATOR_MODEL = 'claude-sonnet-4-6'
+const NARRATOR_MODEL = 'grok-4.3'
 
 // Trailing directive that nudges the narrator into the "Opening a new world"
 // branch of NARRATOR_BASE. The system prompt already carries the length /
@@ -39,7 +39,7 @@ export async function generateOpeningTurn(worldId: number, premise: string): Pro
   let narratorUsage: Awaited<ReturnType<typeof generateText>>['usage']
   try {
     const result = await generateText({
-      model: anthropic(NARRATOR_MODEL),
+      model: xai(NARRATOR_MODEL),
       system: NARRATOR_BASE,
       messages: [
         {
