@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(6)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -203,7 +203,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(6)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -243,7 +243,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(6)
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -330,5 +330,100 @@ describe('v6 migration (npc_goal_attitude)', () => {
       .get() as { active_goal: string | null; current_attitude: string | null }
     expect(cleared.active_goal).toBeNull()
     expect(cleared.current_attitude).toBeNull()
+  })
+})
+
+describe('v7 migration (character_observations)', () => {
+  it('adds a nullable observations column to characters; defaults to NULL', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Test World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Mevagissey harbour',
+        identity: 'Travel-worn letter-writer.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const observations = cols.find((c) => c.name === 'observations')
+    expect(observations).toBeDefined()
+    expect(observations?.type.toUpperCase()).toBe('TEXT')
+    expect(observations?.notnull).toBe(0)
+    expect(observations?.dflt_value).toBeNull()
+
+    const player = db
+      .prepare('SELECT observations FROM characters WHERE world_id = 1')
+      .get() as { observations: string | null }
+    expect(player.observations).toBeNull()
+  })
+})
+
+describe('v8 migration (agentic_npcs)', () => {
+  it('adds agency_level + 3 nullable text fields + appearance_count; defaults are safe', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Test World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Mevagissey harbour',
+        identity: 'Travel-worn letter-writer.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(8)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(cols.map((c) => [c.name, c]))
+
+    const agency = byName.get('agency_level')
+    expect(agency?.type.toUpperCase()).toBe('TEXT')
+    expect(agency?.notnull).toBe(1)
+    expect(agency?.dflt_value).toBe("'npc'")
+
+    const appearance = byName.get('appearance_count')
+    expect(appearance?.type.toUpperCase()).toBe('INTEGER')
+    expect(appearance?.notnull).toBe(1)
+    expect(appearance?.dflt_value).toBe('0')
+
+    for (const name of ['personal_goals', 'current_focus', 'recent_activity']) {
+      const c = byName.get(name)
+      expect(c?.type.toUpperCase()).toBe('TEXT')
+      expect(c?.notnull).toBe(0)
+      expect(c?.dflt_value).toBeNull()
+    }
+
+    // Backfilled player carries defaults: agency_level='npc', count=0.
+    const player = db
+      .prepare('SELECT agency_level, appearance_count FROM characters WHERE world_id = 1')
+      .get() as { agency_level: string; appearance_count: number }
+    expect(player.agency_level).toBe('npc')
+    expect(player.appearance_count).toBe(0)
   })
 })

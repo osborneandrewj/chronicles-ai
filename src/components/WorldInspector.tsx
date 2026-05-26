@@ -111,23 +111,47 @@ function InspectorBody({ state }: { state: FullWorldState }) {
                   <span className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">
                     {c.is_player === 1 ? "player" : c.status}
                   </span>
+                  {c.is_player !== 1 && c.agency_level === "agent" && (
+                    <span className="rounded bg-sky-900/40 px-1 text-[10px] uppercase tracking-[0.12em] text-sky-300">
+                      agent
+                    </span>
+                  )}
                 </div>
                 {c.description && (
                   <p className="mt-0.5 text-neutral-400">{c.description}</p>
                 )}
-                {c.is_player !== 1 && (c.active_goal || c.current_attitude) && (
+                {c.is_player !== 1 && (
+                  c.personal_goals ||
+                  c.active_goal ||
+                  c.current_focus ||
+                  c.current_attitude ||
+                  c.recent_activity ||
+                  c.observations
+                ) && (
                   <dl className="mt-1 space-y-0.5 text-[12px]">
+                    {c.personal_goals && (
+                      <CharField label="personal goals" tone="emerald">
+                        <MultiLine value={c.personal_goals} />
+                      </CharField>
+                    )}
                     {c.active_goal && (
-                      <div className="flex gap-1.5">
-                        <dt className="shrink-0 text-amber-500/70">goal:</dt>
-                        <dd className="text-neutral-300">{c.active_goal}</dd>
-                      </div>
+                      <CharField label="goal" tone="amber">{c.active_goal}</CharField>
+                    )}
+                    {c.current_focus && (
+                      <CharField label="focus" tone="sky">{c.current_focus}</CharField>
                     )}
                     {c.current_attitude && (
-                      <div className="flex gap-1.5">
-                        <dt className="shrink-0 text-amber-500/70">attitude:</dt>
-                        <dd className="text-neutral-300">{c.current_attitude}</dd>
-                      </div>
+                      <CharField label="attitude" tone="amber">{c.current_attitude}</CharField>
+                    )}
+                    {c.recent_activity && (
+                      <CharField label="activity" tone="sky">
+                        <MultiLine value={c.recent_activity} />
+                      </CharField>
+                    )}
+                    {c.observations && (
+                      <CharField label="observed" tone="amber">
+                        <MultiLine value={c.observations} />
+                      </CharField>
                     )}
                   </dl>
                 )}
@@ -200,5 +224,41 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
     <h3 className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500">
       {children}
     </h3>
+  );
+}
+
+type FieldTone = "amber" | "sky" | "emerald";
+const TONE_CLASS: Record<FieldTone, string> = {
+  amber: "text-amber-500/70",
+  sky: "text-sky-400/80",
+  emerald: "text-emerald-400/80",
+};
+
+function CharField({
+  label,
+  tone,
+  children,
+}: {
+  label: string;
+  tone: FieldTone;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      <dt className={`shrink-0 ${TONE_CLASS[tone]}`}>{label}:</dt>
+      <dd className="text-neutral-300">{children}</dd>
+    </div>
+  );
+}
+
+function MultiLine({ value }: { value: string }) {
+  const lines = value.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 1) return <span>{lines[0]}</span>;
+  return (
+    <ul className="space-y-0.5">
+      {lines.map((l, i) => (
+        <li key={i}>{l}</li>
+      ))}
+    </ul>
   );
 }

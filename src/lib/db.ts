@@ -84,20 +84,24 @@ const usageTotalsStmt = db.prepare<[number]>(`
     COALESCE(SUM(json_extract(metadata, '$.archivist.usage.inputTokens')),  0)
       + COALESCE(SUM(json_extract(metadata, '$.extractor.usage.inputTokens')),  0) AS archivistInput,
     COALESCE(SUM(json_extract(metadata, '$.archivist.usage.outputTokens')), 0)
-      + COALESCE(SUM(json_extract(metadata, '$.extractor.usage.outputTokens')), 0) AS archivistOutput
+      + COALESCE(SUM(json_extract(metadata, '$.extractor.usage.outputTokens')), 0) AS archivistOutput,
+    COALESCE(SUM(json_extract(metadata, '$.npc_agent.usage.inputTokens')),  0) AS npcAgentInput,
+    COALESCE(SUM(json_extract(metadata, '$.npc_agent.usage.outputTokens')), 0) AS npcAgentOutput
   FROM turns
   WHERE world_id = ? AND metadata IS NOT NULL
 `)
 
-// World-state readers (v0.5; v0.6.1 adds active_goal + current_attitude).
+// World-state readers (v0.5; v0.6.1 adds active_goal + current_attitude;
+// v0.6.2 adds observations + agentic-NPC fields).
+const CHARACTER_COLS = `id, world_id, name, description, is_player, current_place_id,
+        memorable_facts, status, active_goal, current_attitude, observations,
+        agency_level, personal_goals, current_focus, recent_activity, appearance_count`
 const charactersForWorldStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, is_player, current_place_id,
-          memorable_facts, status, active_goal, current_attitude
+  `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
 )
 const charactersInPlaceStmt = db.prepare<[number, number]>(
-  `SELECT id, world_id, name, description, is_player, current_place_id,
-          memorable_facts, status, active_goal, current_attitude
+  `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(
@@ -194,6 +198,17 @@ export function latestUserContent(worldId: number): string | null {
   return row?.content ?? null
 }
 
+const latestUserTurnIdStmt = db.prepare<[number]>(
+  `SELECT id FROM turns WHERE world_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1`,
+)
+// Most recent player turn id in the world — used by the pre-narrator NPC
+// agent for [t:N] provenance on activity_append lines, since the narrator
+// turn doesn't exist yet at agent-call time.
+export function latestUserTurnId(worldId: number): number | null {
+  const row = latestUserTurnIdStmt.get(worldId) as { id: number } | undefined
+  return row?.id ?? null
+}
+
 export function getCharactersForWorld(worldId: number): Character[] {
   return charactersForWorldStmt.all(worldId) as Character[]
 }
@@ -239,6 +254,8 @@ export type UsageTotals = {
   narratorOutput: number
   archivistInput: number
   archivistOutput: number
+  npcAgentInput: number
+  npcAgentOutput: number
 }
 
 export function getUsageTotals(worldId: number): UsageTotals {

@@ -145,6 +145,44 @@ describe('applyArchivistPatch', () => {
     )
   })
 
+  it('appends observations on NPC insert and on subsequent update; each line suffixed with [t:N]', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', observations_append: 'noticed Edith repeated the same question' }],
+    })
+    const secondTurn = insertTurn(worldId, 'assistant', 'Another turn.', null)
+    applyArchivistPatch(worldId, secondTurn.id, {
+      characters: [{ name: 'Tom', observations_append: 'watched Edith stare at the lamp without answering' }],
+    })
+
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.observations).toBe(
+      `noticed Edith repeated the same question [t:${turnId}]\nwatched Edith stare at the lamp without answering [t:${secondTurn.id}]`,
+    )
+  })
+
+  it('observations_append on the player is dropped silently (NPC-only field)', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Edith', observations_append: 'this should never persist' }],
+    })
+
+    const edith = getCharactersForWorld(worldId).find((c) => c.name === 'Edith')!
+    expect(edith.is_player).toBe(1)
+    expect(edith.observations).toBeNull()
+  })
+
+  it('omitting observations_append leaves existing observations unchanged', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', observations_append: 'noticed something off' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Tom', current_attitude: 'wary' }],
+    })
+
+    const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
+    expect(tom.observations).toBe(`noticed something off [t:${turnId}]`)
+    expect(tom.current_attitude).toBe('wary')
+  })
+
   it('upserts place by case-insensitive name; idempotent on repeat', () => {
     applyArchivistPatch(worldId, turnId, { places: [{ name: 'The Ship Inn', kind: 'tavern' }] })
     applyArchivistPatch(worldId, turnId, {

@@ -9,11 +9,14 @@ import { z } from 'zod'
 
 import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { CLASSIFIER_MODEL, classifyAction } from '@/lib/classifier'
+import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
+import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
 import {
   getActiveSceneForWorld,
   insertTurn,
   latestUserContent,
+  latestUserTurnId,
   recentTurns,
   updateTurnMetadata,
 } from '@/lib/db'
@@ -136,13 +139,45 @@ export async function POST(req: Request) {
   // overwhelmingly likely to be the protagonist asking aloud (say + in-
   // character); without scene context the classifier had no way to know.
   const priorState = getNarratorWorldState(worldId)
-  const classification = await classifyAction(
-    playerText,
-    formatSceneDigestForClassifier(priorState),
-  )
-  const { stance, input_mode } = classification
 
-  const stateBlock = formatStateBlock(priorState)
+  // Auto-promote any NPC that has now appeared in scene 3+ times. Runs
+  // before the NPC agent call so newly-promoted NPCs get their first
+  // agentic plan on the same turn they crossed the threshold.
+  const promotion = recordAppearancesAndAutoPromote(priorState.presentCharacters)
+
+  // Capture the just-inserted player turn id for [t:N] provenance on the
+  // NPC agent's activity_append lines. The narrator turn doesn't exist
+  // yet — agent runs pre-narrator.
+  const playerTurnId = latestUserTurnId(worldId) ?? 0
+
+  // Classifier and NPC agent are independent (neither depends on the other's
+  // output) so they run in parallel to minimise first-token latency. NPC
+  // agent updates state in-DB and returns plans for the narrator to stage.
+  //
+  // NPC agent failure must NEVER block the narrator — if Haiku errors,
+  // schema validation fails, or the network blips, we degrade to plan-less
+  // narration rather than killing the whole turn. The user gets prose; the
+  // audio pipeline still runs; only the agent's plans are missing this turn.
+  const recentForAgents = recentTurns(worldId, 4)
+  const [classification, npcAgentSettled] = await Promise.all([
+    classifyAction(playerText, formatSceneDigestForClassifier(priorState)),
+    runNpcAgentTick(worldId, playerTurnId, world.premise, playerText, recentForAgents).catch(
+      (err) => {
+        console.error('[npc agent failed pre-narrator]', err)
+        return { error: String(err) } as const
+      },
+    ),
+  ])
+  const { stance, input_mode } = classification
+  const npcAgentResult =
+    npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
+  const npcAgentError =
+    npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
+  const plans = npcAgentResult?.plans ?? []
+
+  // Re-read state so the narrator sees any place changes the agent applied.
+  const narratorState = npcAgentResult ? getNarratorWorldState(worldId) : priorState
+  const stateBlock = formatStateBlock(narratorState, plans)
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // Cacheable prefix = system + all prior turns (excluding the new player action).
@@ -190,15 +225,36 @@ export async function POST(req: Request) {
         error: classification.error,
       }
 
-      // Visible cost (narrator + classifier) lands immediately so the cost
-      // footer reflects the turn the moment the stream ends, regardless of
-      // archivist latency. updateTurnMetadata uses json_patch under the hood,
-      // so the archivist follow-up below merges rather than clobbering.
-      updateTurnMetadata(narratorTurn.id, {
+      // Visible cost (narrator + classifier + npc agent + promotion) lands
+      // immediately so the cost footer reflects the turn the moment the
+      // stream ends. updateTurnMetadata uses json_patch under the hood, so
+      // the archivist follow-up below merges rather than clobbering.
+      const upfrontMeta: Record<string, unknown> = {
         narrator: narratorMeta,
         classifier: classifierMeta,
-      })
+      }
+      if (npcAgentResult) {
+        upfrontMeta.npc_agent = {
+          model: NPC_AGENT_MODEL,
+          usage: npcAgentResult.usage,
+          patch: npcAgentResult.patch,
+        }
+      } else if (npcAgentError) {
+        upfrontMeta.npc_agent = { model: NPC_AGENT_MODEL, error: npcAgentError }
+      }
+      if (promotion.promoted.length > 0) {
+        upfrontMeta.npc_promotion = { promoted: promotion.promoted }
+        console.log(
+          `[npc promotion] world=${worldId} promoted=${promotion.promoted.join(', ')}`,
+        )
+      }
+      updateTurnMetadata(narratorTurn.id, upfrontMeta)
 
+      // Archivist runs async after the stream completes — it extracts
+      // structural state (characters, places, scene transitions, time)
+      // from the narration. NPC agent and promotion have already run
+      // pre-stream, so the only remaining post-stream work is the
+      // archivist patch.
       const archivistPromise = extractPatch(world.premise, priorState, [
         { role: 'user', content: playerText },
         { role: 'assistant', content: trimmed },

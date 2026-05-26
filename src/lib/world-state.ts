@@ -9,6 +9,8 @@ import {
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 
+export type CharacterAgencyLevel = 'npc' | 'agent'
+
 export type Character = {
   id: number
   world_id: number
@@ -20,6 +22,12 @@ export type Character = {
   status: 'active' | 'inactive' | 'dead'
   active_goal: string | null
   current_attitude: string | null
+  observations: string | null
+  agency_level: CharacterAgencyLevel
+  personal_goals: string | null
+  current_focus: string | null
+  recent_activity: string | null
+  appearance_count: number
 }
 
 export type Place = {
@@ -109,7 +117,12 @@ export function formatSceneDigestForClassifier(state: NarratorWorldState): strin
   return lines.join('\n')
 }
 
-export function formatStateBlock(state: NarratorWorldState): string {
+export type NpcPlannedAction = { npc_name: string; intent: string }
+
+export function formatStateBlock(
+  state: NarratorWorldState,
+  plannedActions: NpcPlannedAction[] = [],
+): string {
   const lines: string[] = [
     '## AUTHORITATIVE STATE',
     'Two layers: FIXED FACTS are ground truth — never silently rewrite them. OPEN CANVAS is',
@@ -143,12 +156,36 @@ export function formatStateBlock(state: NarratorWorldState): string {
           lines.push(`  - ${fact}`)
         }
       }
-      // Goal / attitude shown only for present NPCs, only when non-null. The
-      // narrator may act on these to put pressure on the scene; they are not
-      // visible to the player.
+      // NPC-only social/agency fields, in order of arc-width: personal_goals
+      // (long arc) → focus (current preoccupation) → active_goal (scene-
+      // immediate) → attitude (right now) → recent_activity (off-scene
+      // gap-fill) → observed (what they've noticed about the protagonist).
+      // Each is omitted when null to keep state-block tokens bounded.
       if (c.is_player !== 1) {
+        if (c.personal_goals) {
+          const goals = c.personal_goals.split('\n').filter((s) => s.trim().length > 0)
+          if (goals.length === 1) {
+            lines.push(`  - personal goal: ${goals[0]}`)
+          } else {
+            lines.push('  - personal goals:')
+            for (const g of goals) lines.push(`    - ${g}`)
+          }
+        }
+        if (c.current_focus) lines.push(`  - focus: ${c.current_focus}`)
         if (c.active_goal) lines.push(`  - goal: ${c.active_goal}`)
         if (c.current_attitude) lines.push(`  - attitude: ${c.current_attitude}`)
+        const activity = stripFactProvenance(c.recent_activity)
+        if (activity) {
+          for (const line of activity.split('\n').filter((s) => s.trim().length > 0)) {
+            lines.push(`  - activity: ${line}`)
+          }
+        }
+        const obs = stripFactProvenance(c.observations)
+        if (obs) {
+          for (const line of obs.split('\n').filter((s) => s.trim().length > 0)) {
+            lines.push(`  - observed: ${line}`)
+          }
+        }
       }
     }
   }
@@ -160,6 +197,17 @@ export function formatStateBlock(state: NarratorWorldState): string {
     'about themselves or their equipment, weave it into the fiction. Deflect grand additions',
     'inside the story — never out-of-character.',
   )
+
+  // Agent NPCs' planned moves for THIS turn. Decided by the NPC agent before
+  // the narrator runs; the narrator stages them as the actual scene rather
+  // than improvising those characters' choices. Omitted when there are no
+  // present agent NPCs or the agent returned no plans.
+  if (plannedActions.length > 0) {
+    lines.push('', '### PLANNED MOVES THIS TURN (agent NPCs)')
+    for (const p of plannedActions) {
+      lines.push(`- **${p.npc_name}** — ${p.intent}`)
+    }
+  }
 
   return lines.join('\n')
 }

@@ -21,6 +21,7 @@ export type TurnCost = {
   narrator?: AgentCost
   archivist?: AgentCost
   classifier?: AgentCost
+  npcAgent?: AgentCost
   tts?: TtsCost
   total: number
 }
@@ -52,8 +53,13 @@ export function summarizeTurn(id: number, metadata: Record<string, unknown>): Tu
   const archivist =
     agentCost(metadata.archivist as AgentMeta) ?? agentCost(metadata.extractor as AgentMeta)
   const classifier = agentCost(metadata.classifier as AgentMeta)
+  const npcAgent = agentCost(metadata.npc_agent as AgentMeta)
   const tts = ttsCost(metadata.tts as TtsMeta)
   const total =
-    (narrator?.cost ?? 0) + (archivist?.cost ?? 0) + (classifier?.cost ?? 0) + (tts?.cost ?? 0)
-  return { id, narrator, archivist, classifier, tts, total }
+    (narrator?.cost ?? 0) +
+    (archivist?.cost ?? 0) +
+    (classifier?.cost ?? 0) +
+    (npcAgent?.cost ?? 0) +
+    (tts?.cost ?? 0)
+  return { id, narrator, archivist, classifier, npcAgent, tts, total }
 }

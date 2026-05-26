@@ -17,7 +17,9 @@ const todaysTokensStmt = db.prepare(`
     COALESCE(json_extract(metadata, '$.extractor.usage.inputTokens'),   0) +
     COALESCE(json_extract(metadata, '$.extractor.usage.outputTokens'),  0) +
     COALESCE(json_extract(metadata, '$.classifier.usage.inputTokens'),  0) +
-    COALESCE(json_extract(metadata, '$.classifier.usage.outputTokens'), 0)
+    COALESCE(json_extract(metadata, '$.classifier.usage.outputTokens'), 0) +
+    COALESCE(json_extract(metadata, '$.npc_agent.usage.inputTokens'),   0) +
+    COALESCE(json_extract(metadata, '$.npc_agent.usage.outputTokens'),  0)
   ), 0) AS total
   FROM turns
   WHERE metadata IS NOT NULL

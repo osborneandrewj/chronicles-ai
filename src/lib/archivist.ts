@@ -64,6 +64,16 @@ const CharacterPatchSchema = z.object({
         'prior attitude has clearly dropped. Keep it immediate and observable, not a full ' +
         'psychological profile.',
     ),
+  observations_append: z
+    .string()
+    .optional()
+    .describe(
+      'A single short sentence describing something this NPC noticed about the protagonist in ' +
+        'the latest turns — only for present NPCs, and only when the protagonist did something ' +
+        'observably off-pattern (repeated themselves, agitated, dissociated, ignored what they ' +
+        'would normally notice, said something out of character). Append-only. Omit on routine ' +
+        'turns; never set for the player.',
+    ),
 })
 
 export const ArchivistPatchSchema = z.object({
@@ -107,6 +117,7 @@ export async function extractPatch(
         description: c.description,
         memorable_facts: stripFactProvenance(c.memorable_facts),
         status: c.status,
+        observations: c.is_player === 1 ? undefined : stripFactProvenance(c.observations),
       })),
     },
     null,
@@ -150,15 +161,26 @@ const updatePlaceStmt = db.prepare<[string | null, string | null, number]>(
 )
 
 const findCharacterByNameStmt = db.prepare<[number, string]>(
-  `SELECT id, memorable_facts FROM characters
+  `SELECT id, is_player, memorable_facts, observations FROM characters
    WHERE world_id = ? AND lower(name) = lower(?)`,
 )
 const insertCharacterStmt = db.prepare<
-  [number, string, string | null, number, number | null, string | null, string, string | null, string | null]
+  [
+    number,
+    string,
+    string | null,
+    number,
+    number | null,
+    string | null,
+    string,
+    string | null,
+    string | null,
+    string | null,
+  ]
 >(
   `INSERT INTO characters (world_id, name, description, is_player, current_place_id,
-                           memorable_facts, status, active_goal, current_attitude)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+                           memorable_facts, status, active_goal, current_attitude, observations)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 )
 const updateCharacterStmt = db.prepare<
   [string | null, number | null, number | null, string | null, string | null, number]
@@ -181,6 +203,13 @@ const setActiveGoalStmt = db.prepare<[string | null, number]>(
 )
 const setCurrentAttitudeStmt = db.prepare<[string | null, number]>(
   `UPDATE characters SET current_attitude = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+// Observations are append-only — like memorable_facts, never cleared by patch.
+// COALESCE pattern: pass null to leave unchanged, or the new fully-built value
+// to overwrite. The appender builds the next value (existing + new line).
+const setObservationsStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET observations = COALESCE(?, observations), updated_at = datetime('now')
+   WHERE id = ?`,
 )
 
 const closeSceneStmt = db.prepare<[string, number, number]>(
@@ -253,7 +282,7 @@ export function applyArchivistPatch(
             ? upsertPlace(worldId, c.current_place_name, undefined, undefined)
             : null
         const existing = findCharacterByNameStmt.get(worldId, c.name) as
-          | { id: number; memorable_facts: string | null }
+          | { id: number; is_player: number; memorable_facts: string | null; observations: string | null }
           | undefined
         if (existing) {
           const nextFacts = appendFactWithProvenance(
@@ -277,17 +306,32 @@ export function applyArchivistPatch(
           if (c.current_attitude !== undefined) {
             setCurrentAttitudeStmt.run(c.current_attitude, existing.id)
           }
+          // Observations are NPC-only and append-only. Drop silently if the
+          // model tries to attach one to the player — that's a prompt failure
+          // we don't want to persist.
+          if (c.observations_append && existing.is_player === 0) {
+            const nextObs = appendFactWithProvenance(
+              existing.observations,
+              c.observations_append,
+              narratorTurnId,
+            )
+            setObservationsStmt.run(nextObs, existing.id)
+          }
         } else {
+          const isPlayer = c.is_player ? 1 : 0
           insertCharacterStmt.run(
             worldId,
             c.name,
             c.description ?? null,
-            c.is_player ? 1 : 0,
+            isPlayer,
             placeId,
             appendFactWithProvenance(null, c.memorable_facts_append, narratorTurnId),
             c.status ?? 'active',
             c.active_goal ?? null,
             c.current_attitude ?? null,
+            isPlayer === 1
+              ? null
+              : appendFactWithProvenance(null, c.observations_append, narratorTurnId),
           )
         }
       }

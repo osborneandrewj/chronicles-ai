@@ -651,6 +651,7 @@ function CostFooter({ cost }: { cost: TurnCost }) {
   if (cost.narrator) segments.push(agentSegment("narrator", cost.narrator));
   if (cost.archivist) segments.push(agentSegment("archivist", cost.archivist));
   if (cost.classifier) segments.push(agentSegment("class", cost.classifier));
+  if (cost.npcAgent) segments.push(agentSegment("npc", cost.npcAgent));
   if (cost.tts) segments.push(`tts ${fmt(cost.tts.chars)} chars`);
   return (
     <div className="truncate font-sans text-[11px] tabular-nums text-neutral-600">

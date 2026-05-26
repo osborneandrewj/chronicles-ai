@@ -282,6 +282,38 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE characters ADD COLUMN current_attitude TEXT')
     },
   },
+  {
+    // v0.6.2 — per-character observations of the protagonist. Append-only
+    // newline-separated string with `[t:N]` provenance suffixes, identical
+    // storage shape to memorable_facts. Used by the narrator to let present
+    // NPCs notice and react to unusual protagonist behavior (repeated lines,
+    // agitation, dissociation) instead of replaying first-time deliveries.
+    // Existing rows get NULL meaning "nothing observed yet".
+    version: 7,
+    name: 'character_observations',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN observations TEXT')
+    },
+  },
+  {
+    // v0.6.2 — agentic NPCs. Two-tier system: most NPCs stay 'npc' (narrator
+    // handles entirely), promoted NPCs become 'agent' and get a per-turn Haiku
+    // call that updates their own goals, focus, activity log, and location —
+    // so the world keeps moving while the protagonist is elsewhere. Auto-
+    // promotion is deterministic: appearance_count is bumped each turn the NPC
+    // is present, and at threshold the apply layer flips agency_level. All
+    // new columns are nullable except agency_level + appearance_count which
+    // default to safe values; no backfill needed.
+    version: 8,
+    name: 'agentic_npcs',
+    up: (db) => {
+      db.exec("ALTER TABLE characters ADD COLUMN agency_level TEXT NOT NULL DEFAULT 'npc'")
+      db.exec('ALTER TABLE characters ADD COLUMN personal_goals TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN current_focus TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN recent_activity TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN appearance_count INTEGER NOT NULL DEFAULT 0')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run
