@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { FullWorldState } from "@/lib/world-state";
 
@@ -18,27 +18,39 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchState = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/world-state?worldId=${worldId}`);
-      if (!res.ok) {
-        setError(`Inspector unavailable (${res.status})`);
-        return;
-      }
-      setState((await res.json()) as FullWorldState);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [worldId]);
-
+  // AbortController guards against a slow /api/world-state response landing
+  // *after* a newer fetch has already updated state. Without this, rapid
+  // open/close or worldId switches could flash a stale shape over the current
+  // one. Either kind of change triggers effect cleanup, which aborts the
+  // in-flight request.
   useEffect(() => {
     if (!open) return;
-    void fetchState();
-  }, [open, refreshKey, fetchState]);
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/world-state?worldId=${worldId}`, {
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) return;
+        if (!res.ok) {
+          setError(`Inspector unavailable (${res.status})`);
+          return;
+        }
+        const data = (await res.json()) as FullWorldState;
+        if (ctrl.signal.aborted) return;
+        setState(data);
+      } catch (err) {
+        if (ctrl.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError(String(err));
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => ctrl.abort();
+  }, [open, refreshKey, worldId]);
 
   return (
     <aside
