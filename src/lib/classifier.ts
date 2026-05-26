@@ -24,29 +24,47 @@ const FALLBACK: Classification = { stance: 'do', input_mode: 'in-character' }
 
 const ClassificationSchema = z.object({
   stance: z.enum(STANCES).describe(
-    'do: physical action that advances the scene. say: dialogue or speech. think: internal thought, no outward action. observe: looking, listening, examining — no scene advance. meta: question to the narrator, not in-character.',
+    'do: physical action that advances the scene. say: dialogue or speech (including bare in-world questions the protagonist would ask aloud). think: internal thought, no outward action. observe: looking, listening, examining — no scene advance. meta: a question or comment about the game/system/UI itself.',
   ),
   input_mode: z.enum(INPUT_MODES).describe(
-    'in-character: clearly a character action or speech. ooc: clearly out-of-character (questions to narrator, system requests). ambiguous: could be either.',
+    'in-character: the protagonist acting or speaking — the default. ooc: clearly addresses the narrator-as-system about the game/UI/rules. ambiguous: only when context truly cannot break the tie.',
   ),
 })
 
 const CLASSIFIER_SYSTEM = `
 You classify a player's input in an interactive novel. Output two enums only.
 
+The protagonist is always in a scene with people, places, and a clock. A
+bare question like "Where is the farmstead?" or "What time is it?" is
+almost always the protagonist asking aloud — classify as say + in-character.
+Reserve meta + ooc for inputs that clearly address the game itself, not
+the world.
+
 stance — what kind of move the player is making:
 - do: a physical action that should advance the scene
-- say: dialogue or speech to another character
+- say: dialogue or speech to another character. Bare in-world questions
+  ("Where is X?", "Who's that?", "What time is it?", "Tell me about Y")
+  are say — the protagonist is asking aloud.
 - think: internal thought, no outward action
 - observe: looking, listening, examining — no scene advance
-- meta: a question or comment to the narrator, not in-character
+- meta: a question or comment ABOUT the game/system/UI/rules — not a
+  question the protagonist would ask aloud. Examples: "how do I save?",
+  "what model are you?", "summarise the story so far", "is this a game?",
+  "(ooc) what just happened?". Bare in-world questions are NOT meta.
 
 input_mode — how the input is framed:
-- in-character: clearly the protagonist acting or speaking
-- ooc: clearly out-of-character (questions to narrator, system requests)
-- ambiguous: could be either
+- in-character: the protagonist acting or speaking. Default for any
+  input that could plausibly be the protagonist's voice or action,
+  including bare questions, one-word inputs, and ambiguous phrasings.
+- ooc: explicitly addresses the narrator-as-system about the game,
+  the model, the UI, the rules, or asks for a recap/summary the
+  protagonist couldn't ask for. Often marked with "(ooc)" or
+  similar; otherwise rare.
+- ambiguous: only when the input genuinely could go either way and
+  no leaning is possible. Prefer in-character when in doubt.
 
-Pick the dominant intent. If unsure between do and observe, prefer observe.
+Default toward in-character + say for bare information questions. If
+unsure between do and observe, prefer observe.
 `.trim()
 
 export async function classifyAction(text: string): Promise<ClassificationResult> {
