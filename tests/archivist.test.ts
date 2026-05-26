@@ -121,6 +121,75 @@ describe('applyArchivistPatch', () => {
     expect(tom.status).toBe('inactive') // updated
   })
 
+  it('canonicalizes short/full character names onto one row', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Marcus',
+          description: 'Andrew peer at Covenant Security.',
+          active_goal: 'monitor Andrew',
+        },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Marcus Reeves',
+          description: 'Andrew peer at Covenant Security who called Jordana.',
+          current_attitude: 'resolute',
+        },
+      ],
+    })
+
+    const chars = getCharactersForWorld(worldId)
+    const marcusRows = chars.filter((c) => c.name === 'Marcus' || c.name === 'Marcus Reeves')
+    expect(marcusRows).toHaveLength(1)
+    expect(marcusRows[0].description).toBe(
+      'Andrew peer at Covenant Security who called Jordana.',
+    )
+    expect(marcusRows[0].active_goal).toBe('monitor Andrew')
+    expect(marcusRows[0].current_attitude).toBe('resolute')
+  })
+
+  it('canonicalizes full/short character names onto one row', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Jordana Osborne',
+          description: "Andrew's wife.",
+          current_attitude: 'worried',
+        },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Jordana', active_goal: 'reach Andrew at work' }],
+    })
+
+    const jordanaRows = getCharactersForWorld(worldId).filter((c) =>
+      ['Jordana', 'Jordana Osborne'].includes(c.name),
+    )
+    expect(jordanaRows).toHaveLength(1)
+    expect(jordanaRows[0].current_attitude).toBe('worried')
+    expect(jordanaRows[0].active_goal).toBe('reach Andrew at work')
+  })
+
+  it('does not soft-merge an ambiguous short character name', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Marcus Reeves', description: 'One coworker.' },
+        { name: 'Marcus Bell', description: 'Another coworker.' },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Marcus', description: 'Ambiguous Marcus reference.' }],
+    })
+
+    const marcusRows = getCharactersForWorld(worldId).filter((c) =>
+      c.name.startsWith('Marcus'),
+    )
+    expect(marcusRows).toHaveLength(3)
+  })
+
   it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
     applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'gave the player a silver locket' }],
@@ -199,6 +268,66 @@ describe('applyArchivistPatch', () => {
     expect(places.filter((p) => p.name.toLowerCase() === 'the ship inn')).toHaveLength(1)
     expect(inn.kind).toBe('tavern') // preserved
     expect(inn.description).toBe('Smoky front room.') // updated on second call
+  })
+
+  it('canonicalizes qualified and nested house place names', () => {
+    applyArchivistPatch(worldId, turnId, {
+      places: [{ name: '33rd Street house', description: "Andrew and Jordana's home." }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      places: [
+        { name: '33rd Street house - kitchen', kind: 'room' },
+        { name: '33rd Street house, Spokane', description: 'A home in Spokane.' },
+      ],
+    })
+
+    const places = getPlacesForWorld(worldId)
+    expect(places.filter((p) => p.name.startsWith('33rd Street house'))).toHaveLength(1)
+    const house = places.find((p) => p.name === '33rd Street house')!
+    expect(house.description).toBe('A home in Spokane.')
+    expect(house.kind).toBe('room')
+  })
+
+  it('maps generic residential rooms to the current house instead of creating pseudo-places', () => {
+    applyArchivistPatch(worldId, turnId, {
+      scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
+    })
+    applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Kitchen' }],
+      characters: [{ name: 'Jordana', current_place_name: 'Bedroom' }],
+    })
+
+    const places = getPlacesForWorld(worldId)
+    const house = places.find((p) => p.name === '33rd Street house')!
+    const jordana = getCharactersForWorld(worldId).find((c) => c.name === 'Jordana')!
+    expect(places.some((p) => p.name === 'Kitchen')).toBe(false)
+    expect(places.some((p) => p.name === 'Bedroom')).toBe(false)
+    expect(jordana.current_place_id).toBe(house.id)
+  })
+
+  it('canonicalizes office and transit-flavored place variants', () => {
+    applyArchivistPatch(worldId, turnId, {
+      places: [
+        { name: 'Covenant Security' },
+        { name: 'House on Rosebury Ln' },
+        { name: 'Spokane' },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      places: [
+        { name: 'Covenant Security office' },
+        { name: 'Covenant Security third floor' },
+        { name: 'His house on Rosebury Ln, Spokane' },
+        { name: 'not yet at Covenant Security office' },
+        { name: 'Spokane, Washington, USA' },
+        { name: 'Spokane - En route to downtown' },
+      ],
+    })
+
+    const places = getPlacesForWorld(worldId)
+    expect(places.filter((p) => p.name.startsWith('Covenant Security'))).toHaveLength(1)
+    expect(places.filter((p) => p.name.includes('Rosebury Ln'))).toHaveLength(1)
+    expect(places.filter((p) => p.name.startsWith('Spokane'))).toHaveLength(1)
   })
 
   it("closes the active scene with a summary and turn pointer", () => {

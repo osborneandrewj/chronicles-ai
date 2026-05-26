@@ -60,6 +60,8 @@ export type NarratorWorldState = {
   currentScene: Scene | null
   currentPlace: Place | null
   presentCharacters: Character[]
+  knownCharacters: Character[]
+  knownPlaces: Place[]
 }
 
 export type FullWorldState = {
@@ -75,7 +77,9 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
   const activeScene = getActiveSceneForWorld(worldId)
   const currentPlace = activeScene?.place_id ? getPlace(activeScene.place_id) : null
 
-  const player = getCharactersForWorld(worldId).filter((c) => c.is_player === 1)
+  const knownCharacters = getCharactersForWorld(worldId)
+  const knownPlaces = getPlacesForWorld(worldId)
+  const player = knownCharacters.filter((c) => c.is_player === 1)
   const npcsInPlace = currentPlace
     ? getCharactersInPlace(worldId, currentPlace.id).filter((c) => c.is_player === 0)
     : []
@@ -85,6 +89,8 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     currentScene: activeScene,
     currentPlace,
     presentCharacters: [...player, ...npcsInPlace],
+    knownCharacters,
+    knownPlaces,
   }
 }
 

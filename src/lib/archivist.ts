@@ -143,6 +143,16 @@ export async function extractPatch(
         status: c.status,
         observations: c.is_player === 1 ? undefined : lastNLines(stripFactProvenance(c.observations), 2),
       })),
+      known_characters: prior.knownCharacters.map((c) => ({
+        name: c.name,
+        is_player: c.is_player === 1,
+        status: c.status,
+        description: limit(c.description, 120),
+      })),
+      known_places: prior.knownPlaces.map((p) => ({
+        name: p.name,
+        kind: p.kind,
+      })),
     },
     null,
     2,
@@ -202,11 +212,52 @@ function lastNLines(value: string | null, n: number): string | null {
   return lines.slice(-n).join('\n') || null
 }
 
+function limit(value: string | null, max: number): string | null {
+  if (!value) return null
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= max) return compact
+  return `${compact.slice(0, max - 1).trimEnd()}...`
+}
+
 // Prepared statements for patch application. All writes happen inside the
 // transaction opened by applyArchivistPatch — better-sqlite3's db.transaction
 // composes prepared statements implicitly.
-const findPlaceByNameStmt = db.prepare<[number, string]>(
-  'SELECT id FROM places WHERE world_id = ? AND lower(name) = lower(?)',
+type PlaceRow = {
+  id: number
+  name: string
+  description: string | null
+  kind: string | null
+}
+
+type CharacterRow = {
+  id: number
+  name: string
+  description: string | null
+  is_player: number
+  current_place_id: number | null
+  memorable_facts: string | null
+  status: 'active' | 'inactive' | 'dead'
+  active_goal: string | null
+  current_attitude: string | null
+  observations: string | null
+  agency_level: string
+  personal_goals: string | null
+  current_focus: string | null
+  recent_activity: string | null
+  appearance_count: number
+  last_seen_turn_id: number | null
+  last_agent_tick_turn_id: number | null
+}
+
+const listPlacesForWorldStmt = db.prepare<[number]>(
+  'SELECT id, name, description, kind FROM places WHERE world_id = ? ORDER BY id ASC',
+)
+const currentPlaceForWorldStmt = db.prepare<[number]>(
+  `SELECT p.id, p.name, p.description, p.kind
+   FROM worlds w
+   JOIN scenes s ON s.id = w.current_scene_id
+   JOIN places p ON p.id = s.place_id
+   WHERE w.id = ?`,
 )
 const insertPlaceStmt = db.prepare<[number, string, string | null, string | null]>(
   `INSERT INTO places (world_id, name, description, kind)
@@ -219,10 +270,29 @@ const updatePlaceStmt = db.prepare<[string | null, string | null, number]>(
      updated_at  = datetime('now')
    WHERE id = ?`,
 )
+const mergePlaceStmt = db.prepare<[string | null, string | null, number]>(
+  `UPDATE places SET
+     description = ?,
+     kind        = ?,
+     updated_at  = datetime('now')
+   WHERE id = ?`,
+)
+const moveCharactersToPlaceStmt = db.prepare<[number, number]>(
+  'UPDATE characters SET current_place_id = ? WHERE current_place_id = ?',
+)
+const moveScenesToPlaceStmt = db.prepare<[number, number]>(
+  'UPDATE scenes SET place_id = ? WHERE place_id = ?',
+)
+const deletePlaceStmt = db.prepare<[number]>('DELETE FROM places WHERE id = ?')
 
-const findCharacterByNameStmt = db.prepare<[number, string]>(
-  `SELECT id, is_player, memorable_facts, observations FROM characters
-   WHERE world_id = ? AND lower(name) = lower(?)`,
+const listCharactersForWorldStmt = db.prepare<[number]>(
+  `SELECT id, name, description, is_player, current_place_id, memorable_facts,
+          status, active_goal, current_attitude, observations, agency_level,
+          personal_goals, current_focus, recent_activity, appearance_count,
+          last_seen_turn_id, last_agent_tick_turn_id
+   FROM characters
+   WHERE world_id = ?
+   ORDER BY id ASC`,
 )
 const insertCharacterStmt = db.prepare<
   [
@@ -271,6 +341,46 @@ const setObservationsStmt = db.prepare<[string | null, number]>(
   `UPDATE characters SET observations = COALESCE(?, observations), updated_at = datetime('now')
    WHERE id = ?`,
 )
+const mergeCharacterStmt = db.prepare<
+  [
+    string,
+    string | null,
+    number | null,
+    string | null,
+    string,
+    string | null,
+    string | null,
+    string | null,
+    string,
+    string | null,
+    string | null,
+    string | null,
+    number,
+    number | null,
+    number | null,
+    number,
+  ]
+>(
+  `UPDATE characters SET
+     name                    = ?,
+     description             = ?,
+     current_place_id        = ?,
+     memorable_facts         = ?,
+     status                  = ?,
+     active_goal             = ?,
+     current_attitude        = ?,
+     observations            = ?,
+     agency_level            = ?,
+     personal_goals          = ?,
+     current_focus           = ?,
+     recent_activity         = ?,
+     appearance_count        = ?,
+     last_seen_turn_id       = ?,
+     last_agent_tick_turn_id = ?,
+     updated_at              = datetime('now')
+   WHERE id = ?`,
+)
+const deleteCharacterStmt = db.prepare<[number]>('DELETE FROM characters WHERE id = ?')
 
 const closeSceneStmt = db.prepare<[string, number, number]>(
   `UPDATE scenes SET status = 'completed', summary = ?, closed_at_turn = ?
@@ -297,13 +407,85 @@ const autoCloseSceneStmt = db.prepare<[number, number]>(
    WHERE id = ? AND status = 'active'`,
 )
 
+const CHARACTER_TITLE_WORDS = new Set([
+  'captain',
+  'capt',
+  'chief',
+  'doctor',
+  'dr',
+  'father',
+  'general',
+  'inquisitor',
+  'lieutenant',
+  'lt',
+  'major',
+  'miss',
+  'mister',
+  'mr',
+  'mrs',
+  'ms',
+  'professor',
+  'prof',
+  'sergeant',
+  'sgt',
+])
+
+const DESCRIPTIVE_CHARACTER_WORDS = new Set([
+  'figure',
+  'man',
+  'shadow',
+  'stranger',
+  'woman',
+])
+
+const PLACE_DETAIL_WORDS = new Set([
+  'apartment',
+  'bedroom',
+  'breakroom',
+  'building',
+  'bullpen',
+  'campus',
+  'fifth',
+  'first',
+  'floor',
+  'food',
+  'fourth',
+  'front',
+  'garage',
+  'home',
+  'house',
+  'inside',
+  'kitchen',
+  'lot',
+  'office',
+  'room',
+  'second',
+  'shop',
+  'sixth',
+  'street',
+  'third',
+  'truck',
+])
+
+const GENERIC_ROOM_KEYS = new Set([
+  'attic',
+  'basement',
+  'bathroom',
+  'bedroom',
+  'garage',
+  'hallway',
+  'kitchen',
+  'living room',
+  'office',
+])
+
 function upsertPlace(
   worldId: number,
   name: string,
   description: string | undefined,
   kind: string | undefined,
 ): number {
-  const existing = findPlaceByNameStmt.get(worldId, name) as { id: number } | undefined
+  const existing = resolvePlace(worldId, name)
   if (existing) {
     if (description !== undefined || kind !== undefined) {
       updatePlaceStmt.run(description ?? null, kind ?? null, existing.id)
@@ -312,6 +494,218 @@ function upsertPlace(
   }
   const row = insertPlaceStmt.get(worldId, name, description ?? null, kind ?? null) as { id: number }
   return row.id
+}
+
+function resolvePlace(worldId: number, requestedName: string): PlaceRow | undefined {
+  const rows = listPlacesForWorldStmt.all(worldId) as PlaceRow[]
+  const currentPlace = currentPlaceForWorldStmt.get(worldId) as PlaceRow | undefined
+  const matches = rows.filter((row) => placesMatch(requestedName, row.name, currentPlace))
+  if (matches.length === 0) return undefined
+  const target = matches[0]
+  for (const duplicate of matches.slice(1)) {
+    mergePlaces(target, duplicate)
+  }
+  return target
+}
+
+function mergePlaces(target: PlaceRow, source: PlaceRow): void {
+  if (target.id === source.id) return
+  const description = chooseLonger(target.description, source.description)
+  const kind = target.kind ?? source.kind
+  moveCharactersToPlaceStmt.run(target.id, source.id)
+  moveScenesToPlaceStmt.run(target.id, source.id)
+  deletePlaceStmt.run(source.id)
+  mergePlaceStmt.run(description, kind, target.id)
+  target.description = description
+  target.kind = kind
+}
+
+function placesMatch(requestedName: string, existingName: string, currentPlace: PlaceRow | undefined): boolean {
+  const requested = canonicalPlaceKey(requestedName)
+  const existing = canonicalPlaceKey(existingName)
+  if (!requested || !existing) return false
+  if (requested === existing) return true
+  if (containsAsPhrase(requested, existing) || containsAsPhrase(existing, requested)) {
+    const requestedTokens = requested.split(' ')
+    const existingTokens = existing.split(' ')
+    const extraTokens =
+      requestedTokens.length > existingTokens.length
+        ? requestedTokens.filter((token) => !existingTokens.includes(token))
+        : existingTokens.filter((token) => !requestedTokens.includes(token))
+    return extraTokens.every((token) => PLACE_DETAIL_WORDS.has(token))
+  }
+  if (GENERIC_ROOM_KEYS.has(requested) && currentPlace?.id) {
+    return currentPlace.name === existingName && isResidentialPlace(currentPlace)
+  }
+  return false
+}
+
+function canonicalPlaceKey(value: string): string {
+  const withoutRouteNoise = value
+    .replace(/\([^)]*\ben route\b[^)]*\)/gi, '')
+    .replace(/\s+[-–—]\s+.*\ben route\b.*$/i, '')
+    .replace(/\b(?:not yet at|on the way to|headed to)\b/gi, '')
+    .replace(/\ben route to\s+/gi, '')
+  const commaHead = withoutRouteNoise.split(',')[0] ?? withoutRouteNoise
+  const dashHead = commaHead.split(/\s+[-–—]\s+/)[0] ?? commaHead
+  return normalize(dashHead).replace(/^(?:the|his|her|their|our)\s+/, '')
+}
+
+function isResidentialPlace(place: PlaceRow): boolean {
+  return /\b(?:apartment|bedroom|home|house|kitchen|residence)\b/i.test(
+    `${place.name} ${place.description ?? ''} ${place.kind ?? ''}`,
+  )
+}
+
+function resolveCharacter(worldId: number, requestedName: string): CharacterRow | undefined {
+  const rows = listCharactersForWorldStmt.all(worldId) as CharacterRow[]
+  const matches = rows.filter((row) => charactersMatch(requestedName, row.name))
+  if (matches.length === 0) return undefined
+
+  const exactMatches = matches.filter(
+    (row) => canonicalCharacterKey(row.name) === canonicalCharacterKey(requestedName),
+  )
+  if (exactMatches.length === 1 && matches.length === 1) return exactMatches[0]
+
+  const nonPlayerMatches = matches.filter((row) => row.is_player === 0)
+  if (nonPlayerMatches.length !== matches.length) {
+    return exactMatches.find((row) => row.is_player === 1) ?? exactMatches[0]
+  }
+  if (isAmbiguousCharacterMatch(requestedName, nonPlayerMatches)) {
+    return exactMatches.length === 1 ? exactMatches[0] : undefined
+  }
+
+  const target = nonPlayerMatches[0]
+  for (const duplicate of nonPlayerMatches.slice(1)) {
+    mergeCharacters(target, duplicate)
+  }
+  return target
+}
+
+function mergeCharacters(target: CharacterRow, source: CharacterRow): void {
+  if (target.id === source.id) return
+  const merged = {
+    name: target.name,
+    description: chooseLonger(target.description, source.description),
+    current_place_id: target.current_place_id ?? source.current_place_id,
+    memorable_facts: mergeLineBlocks(target.memorable_facts, source.memorable_facts),
+    status: strongestStatus(target.status, source.status),
+    active_goal: target.active_goal ?? source.active_goal,
+    current_attitude: target.current_attitude ?? source.current_attitude,
+    observations: mergeLineBlocks(target.observations, source.observations),
+    agency_level: strongestAgencyLevel(target.agency_level, source.agency_level),
+    personal_goals: mergeLineBlocks(target.personal_goals, source.personal_goals),
+    current_focus: target.current_focus ?? source.current_focus,
+    recent_activity: mergeLineBlocks(target.recent_activity, source.recent_activity),
+    appearance_count: Math.max(target.appearance_count, source.appearance_count),
+    last_seen_turn_id: maxNullable(target.last_seen_turn_id, source.last_seen_turn_id),
+    last_agent_tick_turn_id: maxNullable(
+      target.last_agent_tick_turn_id,
+      source.last_agent_tick_turn_id,
+    ),
+  }
+  deleteCharacterStmt.run(source.id)
+  mergeCharacterStmt.run(
+    merged.name,
+    merged.description,
+    merged.current_place_id,
+    merged.memorable_facts,
+    merged.status,
+    merged.active_goal,
+    merged.current_attitude,
+    merged.observations,
+    merged.agency_level,
+    merged.personal_goals,
+    merged.current_focus,
+    merged.recent_activity,
+    merged.appearance_count,
+    merged.last_seen_turn_id,
+    merged.last_agent_tick_turn_id,
+    target.id,
+  )
+  Object.assign(target, merged)
+}
+
+function charactersMatch(requestedName: string, existingName: string): boolean {
+  const requested = canonicalCharacterKey(requestedName)
+  const existing = canonicalCharacterKey(existingName)
+  if (!requested || !existing) return false
+  if (requested === existing) return true
+  if (isDescriptiveCharacterName(requestedName) || isDescriptiveCharacterName(existingName)) return false
+
+  const requestedTokens = characterTokens(requestedName)
+  const existingTokens = characterTokens(existingName)
+  if (requestedTokens.length === 0 || existingTokens.length === 0) return false
+
+  const shorter = requestedTokens.length <= existingTokens.length ? requestedTokens : existingTokens
+  const longer = requestedTokens.length <= existingTokens.length ? existingTokens : requestedTokens
+  if (shorter.length > 1) return shorter.every((token) => longer.includes(token))
+
+  const token = shorter[0]
+  if (token.length < 4) return false
+  return longer.includes(token)
+}
+
+function isAmbiguousCharacterMatch(requestedName: string, matches: CharacterRow[]): boolean {
+  const requestedTokens = characterTokens(requestedName)
+  if (requestedTokens.length !== 1) return false
+  const token = requestedTokens[0]
+  return matches.filter((row) => characterTokens(row.name).includes(token)).length > 1
+}
+
+function canonicalCharacterKey(value: string): string {
+  return characterTokens(value).join(' ')
+}
+
+function characterTokens(value: string): string[] {
+  return normalize(value)
+    .split(' ')
+    .filter((token) => token.length > 0 && !CHARACTER_TITLE_WORDS.has(token))
+}
+
+function isDescriptiveCharacterName(value: string): boolean {
+  const tokens = characterTokens(value)
+  return (
+    normalize(value).startsWith('the ') ||
+    tokens.some((token) => DESCRIPTIVE_CHARACTER_WORDS.has(token))
+  )
+}
+
+function containsAsPhrase(value: string, phrase: string): boolean {
+  return ` ${value} `.includes(` ${phrase} `)
+}
+
+function chooseLonger(a: string | null, b: string | null): string | null {
+  if (!a) return b
+  if (!b) return a
+  return b.length > a.length ? b : a
+}
+
+function mergeLineBlocks(a: string | null, b: string | null): string | null {
+  const lines = [...(a?.split('\n') ?? []), ...(b?.split('\n') ?? [])]
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) return null
+  return [...new Set(lines)].join('\n')
+}
+
+function strongestStatus(
+  a: CharacterRow['status'],
+  b: CharacterRow['status'],
+): CharacterRow['status'] {
+  const rank = { inactive: 0, active: 1, dead: 2 }
+  return rank[b] > rank[a] ? b : a
+}
+
+function strongestAgencyLevel(a: string, b: string): string {
+  const rank: Record<string, number> = { npc: 0, dormant: 1, distant: 2, nearby: 3, local: 4 }
+  return (rank[b] ?? 0) > (rank[a] ?? 0) ? b : a
+}
+
+function maxNullable(a: number | null, b: number | null): number | null {
+  if (a === null) return b
+  if (b === null) return a
+  return Math.max(a, b)
 }
 
 
@@ -341,9 +735,7 @@ export function applyArchivistPatch(
           c.current_place_name !== undefined
             ? upsertPlace(worldId, c.current_place_name, undefined, undefined)
             : null
-        const existing = findCharacterByNameStmt.get(worldId, c.name) as
-          | { id: number; is_player: number; memorable_facts: string | null; observations: string | null }
-          | undefined
+        const existing = resolveCharacter(worldId, c.name)
         if (existing) {
           const nextFacts = appendFactWithProvenance(
             existing.memorable_facts,
