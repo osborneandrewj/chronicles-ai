@@ -129,6 +129,31 @@ const assistantMetadataStmt = db.prepare<[number]>(
   `SELECT id, metadata FROM turns
    WHERE world_id = ? AND role = 'assistant' AND metadata IS NOT NULL ORDER BY id ASC`,
 )
+// History pagination (v0.6.1). Both queries fetch turns DESC by id then the
+// caller reverses to oldest-first for render order. SQLite has no efficient
+// way to express "the latest N rows in ASC order" without this dance.
+const latestTurnsStmt = db.prepare<[number, number]>(
+  `SELECT id, world_id, role, content, scene_id, created_at FROM turns
+   WHERE world_id = ? ORDER BY id DESC LIMIT ?`,
+)
+const turnsBeforeStmt = db.prepare<[number, number, number]>(
+  `SELECT id, world_id, role, content, scene_id, created_at FROM turns
+   WHERE world_id = ? AND id < ? ORDER BY id DESC LIMIT ?`,
+)
+const assistantMetadataSinceStmt = db.prepare<[number, number]>(
+  `SELECT id, metadata FROM turns
+   WHERE world_id = ? AND id >= ? AND role = 'assistant' AND metadata IS NOT NULL
+   ORDER BY id ASC`,
+)
+const assistantMetadataInRangeStmt = db.prepare<[number, number, number]>(
+  `SELECT id, metadata FROM turns
+   WHERE world_id = ? AND id >= ? AND id < ? AND role = 'assistant' AND metadata IS NOT NULL
+   ORDER BY id ASC`,
+)
+// Cheapest way to find out if a "Load older" click would surface anything.
+const hasTurnBeforeStmt = db.prepare<[number, number]>(
+  `SELECT 1 FROM turns WHERE world_id = ? AND id < ? LIMIT 1`,
+)
 
 export function insertTurn(
   worldId: number,
@@ -148,6 +173,19 @@ export function recentTurns(
   limit: number,
 ): Array<Pick<Turn, 'id' | 'role' | 'content'>> {
   const rows = recentStmt.all(worldId, limit) as Array<Pick<Turn, 'id' | 'role' | 'content'>>
+  return rows.reverse()
+}
+
+// History pagination. latestTurns is the initial page-render slice; turnsBefore
+// powers the "Load older" affordance. Both return oldest-to-newest so the
+// caller can render or prepend without re-sorting.
+export function latestTurns(worldId: number, limit: number): Turn[] {
+  const rows = latestTurnsStmt.all(worldId, limit) as Turn[]
+  return rows.reverse()
+}
+
+export function turnsBefore(worldId: number, beforeId: number, limit: number): Turn[] {
+  const rows = turnsBeforeStmt.all(worldId, beforeId, limit) as Turn[]
   return rows.reverse()
 }
 
@@ -221,8 +259,9 @@ export function getLatestMetadata(
 
 export type AssistantTurnMetadata = { id: number; metadata: Record<string, unknown> }
 
-export function allAssistantMetadata(worldId: number): AssistantTurnMetadata[] {
-  const rows = assistantMetadataStmt.all(worldId) as Array<{ id: number; metadata: string }>
+function parseMetadataRows(
+  rows: Array<{ id: number; metadata: string }>,
+): AssistantTurnMetadata[] {
   return rows.flatMap((row) => {
     try {
       return [{ id: row.id, metadata: JSON.parse(row.metadata) as Record<string, unknown> }]
@@ -230,4 +269,39 @@ export function allAssistantMetadata(worldId: number): AssistantTurnMetadata[] {
       return []
     }
   })
+}
+
+export function allAssistantMetadata(worldId: number): AssistantTurnMetadata[] {
+  return parseMetadataRows(
+    assistantMetadataStmt.all(worldId) as Array<{ id: number; metadata: string }>,
+  )
+}
+
+// History pagination companions to latestTurns / turnsBefore. "Since" returns
+// metadata for every assistant turn with id >= minId; "InRange" is bounded on
+// both sides for the older slice.
+export function assistantMetadataSince(
+  worldId: number,
+  minId: number,
+): AssistantTurnMetadata[] {
+  return parseMetadataRows(
+    assistantMetadataSinceStmt.all(worldId, minId) as Array<{ id: number; metadata: string }>,
+  )
+}
+
+export function assistantMetadataInRange(
+  worldId: number,
+  minId: number,
+  maxIdExclusive: number,
+): AssistantTurnMetadata[] {
+  return parseMetadataRows(
+    assistantMetadataInRangeStmt.all(worldId, minId, maxIdExclusive) as Array<{
+      id: number
+      metadata: string
+    }>,
+  )
+}
+
+export function hasTurnBefore(worldId: number, id: number): boolean {
+  return hasTurnBeforeStmt.get(worldId, id) !== undefined
 }

@@ -19,15 +19,39 @@ type Props = {
   worldName: string;
   initialMessages: UIMessage[];
   initialUsage: TurnCost[];
+  // Pagination cursor for "Load older". null when the world has no turns yet;
+  // initialHasOlder is true when more turns exist before this slice.
+  initialOldestId: number | null;
+  initialHasOlder: boolean;
 };
 
-export function Chat({ worldId, worldName, initialMessages, initialUsage }: Props) {
+type OlderTurn = {
+  id: number;
+  world_id: number;
+  role: "user" | "assistant";
+  content: string;
+  scene_id: number | null;
+  created_at: string;
+};
+type OlderResponse = { turns: OlderTurn[]; usage: TurnCost[]; hasMore: boolean };
+
+export function Chat({
+  worldId,
+  worldName,
+  initialMessages,
+  initialUsage,
+  initialOldestId,
+  initialHasOlder,
+}: Props) {
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
+  const [oldestId, setOldestId] = useState<number | null>(initialOldestId);
+  const [hasOlder, setHasOlder] = useState<boolean>(initialHasOlder);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const chatApi = `/api/chat?worldId=${worldId}`;
   const usageApi = `/api/usage?worldId=${worldId}`;
   const transport = useMemo(() => new DefaultChatTransport({ api: chatApi }), [chatApi]);
-  const { messages, sendMessage, regenerate, status, error } = useChat({
+  const { messages, setMessages, sendMessage, regenerate, status, error } = useChat({
     messages: initialMessages,
     transport,
   });
@@ -96,6 +120,51 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     setStickToBottom(distanceFromBottom < 80);
   }, []);
+
+  // Prepends an older slice without yanking the user's viewport. Capture the
+  // scroll geometry pre-prepend, let the DOM update, then re-anchor so the
+  // first previously-visible message stays where the user was looking.
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasOlder || oldestId === null) return;
+    setLoadingOlder(true);
+    const el = scrollRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const prevTop = el?.scrollTop ?? 0;
+    try {
+      const res = await fetch(`/api/turns?worldId=${worldId}&before=${oldestId}&limit=60`);
+      if (!res.ok) return;
+      const data = (await res.json()) as OlderResponse;
+      if (data.turns.length === 0) {
+        setHasOlder(false);
+        return;
+      }
+      const olderMessages: UIMessage[] = data.turns.map((t) => ({
+        id: String(t.id),
+        role: t.role,
+        parts: [{ type: "text", text: t.content }],
+      }));
+      // Stop sticking to the bottom while the prepend lands; otherwise the
+      // useEffect that calls scrollIntoView would snap us back down.
+      setStickToBottom(false);
+      setMessages([...olderMessages, ...messages]);
+      setUsage((prev) => [...data.usage, ...prev]);
+      setOldestId(data.turns[0].id);
+      setHasOlder(data.hasMore);
+      // After the DOM paints the new rows, restore the visual position: the
+      // old top message stays under the same Y coordinate by adding the new
+      // content's height delta to scrollTop.
+      requestAnimationFrame(() => {
+        const elNow = scrollRef.current;
+        if (!elNow) return;
+        const delta = elNow.scrollHeight - prevHeight;
+        elNow.scrollTop = prevTop + delta;
+      });
+    } catch {
+      // Network blip; leave the button in place so the user can retry.
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasOlder, loadingOlder, messages, oldestId, setMessages, worldId]);
 
   useEffect(() => {
     if (!stickToBottom) return;
@@ -310,6 +379,19 @@ export function Chat({ worldId, worldName, initialMessages, initialUsage }: Prop
           onScroll={onScroll}
           className="h-full space-y-7 overflow-y-auto px-5 py-8"
         >
+          {hasOlder && (
+            <li className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => void loadOlder()}
+                disabled={loadingOlder}
+                className="rounded-md border border-neutral-800 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-neutral-500 transition hover:border-neutral-700 hover:text-neutral-300 disabled:cursor-wait disabled:opacity-50"
+              >
+                {loadingOlder ? "Loading…" : "Load older"}
+              </button>
+            </li>
+          )}
+
           {messages.length === 0 && (
             <li className="pt-12 text-center text-sm text-neutral-500">
               <p className="font-serif italic">The page is blank. Begin.</p>
