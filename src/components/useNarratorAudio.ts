@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { splitNewChunks } from "@/lib/sentence-splitter";
-
 const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
+const PRIME_AUDIO_SECONDS = 0.05;
 
 export type NarratorAudioStatus = "idle" | "speaking";
+
+let sharedAudioContext: AudioContext | null = null;
+let sharedMediaElement: HTMLAudioElement | null = null;
+let sharedSilentMediaUrl: string | null = null;
+
+type AudioClip =
+  | { kind: "web-audio"; buffer: AudioBuffer }
+  | { kind: "media-element"; blob: Blob; url: string | null };
 
 interface UseNarratorAudioArgs {
   text: string;
@@ -31,12 +38,13 @@ interface JobState {
   cursor: number;
   nextSeq: number;
   playSeq: number;
-  pending: Map<number, AudioBuffer>;
+  pending: Map<number, AudioClip>;
   controllers: Set<AbortController>;
   flushed: boolean;
   reported: boolean;
   charsSent: number;
   sourceNode: AudioBufferSourceNode | null;
+  mediaUrl: string | null;
   failed: boolean;
 }
 
@@ -54,6 +62,7 @@ function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): 
     reported: false,
     charsSent: 0,
     sourceNode: null,
+    mediaUrl: null,
     failed: false,
   };
 }
@@ -74,7 +83,6 @@ export function useNarratorAudio({
   const [status, setStatus] = useState<NarratorAudioStatus>("idle");
   const [override, setOverride] = useState<Override | null>(null);
   const jobRef = useRef<JobState | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
   const mutedRef = useRef(false);
   const onTurnCompleteRef = useRef(onTurnComplete);
   // The first turn visible on mount is history, not a fresh narration request.
@@ -129,16 +137,21 @@ export function useNarratorAudio({
   }, [override, turnId, text, streaming]);
 
   const ensureAudioContext = useCallback(() => {
-    const existing = audioContextRef.current;
+    const existing = sharedAudioContext;
     if (existing && existing.state !== "closed") return existing;
     const Ctor = getAudioContextConstructor();
     if (!Ctor) return null;
     const ctx = new Ctor();
-    audioContextRef.current = ctx;
+    sharedAudioContext = ctx;
     return ctx;
   }, []);
 
   const primeAudio = useCallback(() => {
+    if (shouldUseMediaElementPlayback()) {
+      primeMediaElement();
+      return;
+    }
+
     const ctx = ensureAudioContext();
     if (!ctx) return;
     if (ctx.state === "suspended") {
@@ -148,9 +161,13 @@ export function useNarratorAudio({
     }
     try {
       const source = ctx.createBufferSource();
-      source.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      const frameCount = Math.max(1, Math.ceil(ctx.sampleRate * PRIME_AUDIO_SECONDS));
+      source.buffer = ctx.createBuffer(1, frameCount, ctx.sampleRate);
       source.connect(ctx.destination);
       source.start();
+      source.onended = () => {
+        source.disconnect();
+      };
     } catch (err) {
       console.error("[narrator-audio] audio context prime failed", err);
     }
@@ -169,6 +186,18 @@ export function useNarratorAudio({
       j.sourceNode.disconnect();
       j.sourceNode = null;
     }
+    if (j.mediaUrl) {
+      const audio = sharedMediaElement;
+      if (audio) {
+        audio.onended = null;
+        audio.onerror = null;
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
+      URL.revokeObjectURL(j.mediaUrl);
+      j.mediaUrl = null;
+    }
   }, []);
 
   const resetJob = useCallback(
@@ -186,11 +215,11 @@ export function useNarratorAudio({
     [stopCurrentAudio],
   );
 
-  const playNext = useCallback(() => {
+  const playNext = useCallback(async () => {
     const j = jobRef.current;
     if (!j || mutedRef.current) return;
-    const buffer = j.pending.get(j.playSeq);
-    if (!buffer) {
+    const clip = j.pending.get(j.playSeq);
+    if (!clip) {
       if (j.flushed && j.nextSeq === j.playSeq) {
         setStatus("idle");
         playedRef.current.add(j.turnId);
@@ -199,18 +228,22 @@ export function useNarratorAudio({
       return;
     }
     j.pending.delete(j.playSeq);
+    if (clip.kind === "media-element") {
+      await playMediaClip(clip, j, playNext, setStatus);
+      return;
+    }
+
     const ctx = ensureAudioContext();
     if (!ctx) {
       markFailed(j, "[narrator-audio] Web Audio API unavailable");
       return;
     }
-    if (ctx.state === "suspended") {
-      void ctx.resume().catch((err) => {
-        console.error("[narrator-audio] audio context resume rejected", err);
-      });
+    const resumed = await resumeAudioContext(ctx, j);
+    if (!resumed || jobRef.current !== j || mutedRef.current) {
+      return;
     }
     const source = ctx.createBufferSource();
-    source.buffer = buffer;
+    source.buffer = clip.buffer;
     source.connect(ctx.destination);
     j.sourceNode = source;
     setStatus("speaking");
@@ -220,7 +253,7 @@ export function useNarratorAudio({
       source.disconnect();
       cur.sourceNode = null;
       cur.playSeq += 1;
-      playNext();
+      void playNext();
     };
     try {
       source.start();
@@ -247,6 +280,17 @@ export function useNarratorAudio({
           markFailed(owner, `[narrator-audio] /api/tts ${res.status} ${await safeText(res)}`);
           return;
         }
+        if (jobRef.current !== owner) return;
+        if (shouldUseMediaElementPlayback()) {
+          const blob = await res.blob();
+          if (jobRef.current !== owner) return;
+          owner.pending.set(seq, { kind: "media-element", blob, url: null });
+          if (!owner.sourceNode && !owner.mediaUrl && seq === owner.playSeq && !mutedRef.current) {
+            void playNext();
+          }
+          return;
+        }
+
         const arrayBuffer = await res.arrayBuffer();
         if (jobRef.current !== owner) return;
         const ctx = ensureAudioContext();
@@ -254,11 +298,17 @@ export function useNarratorAudio({
           markFailed(owner, "[narrator-audio] Web Audio API unavailable");
           return;
         }
-        const buffer = await ctx.decodeAudioData(arrayBuffer);
+        let buffer: AudioBuffer;
+        try {
+          buffer = await ctx.decodeAudioData(arrayBuffer);
+        } catch (err) {
+          markFailed(owner, `[narrator-audio] decodeAudioData failed: ${String(err)}`);
+          return;
+        }
         if (jobRef.current !== owner) return;
-        owner.pending.set(seq, buffer);
-        if (!owner.sourceNode && seq === owner.playSeq && !mutedRef.current) {
-          playNext();
+        owner.pending.set(seq, { kind: "web-audio", buffer });
+        if (!owner.sourceNode && !owner.mediaUrl && seq === owner.playSeq && !mutedRef.current) {
+          void playNext();
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
@@ -289,20 +339,16 @@ export function useNarratorAudio({
 
     const j = jobRef.current;
     if (!j) return;
-    const { chunks, cursor } = splitNewChunks(effective.text, j.cursor, {
-      flush: !effective.streaming,
-    });
-    j.cursor = cursor;
-    if (!effective.streaming) j.flushed = true;
+    if (effective.streaming) return;
 
-    // Advance the cursor even while muted so unmuting mid-turn starts from
-    // "now" instead of replaying everything already on screen. Skip dispatch
-    // entirely if muted or this job has already hit a TTS error.
-    if (!mutedRef.current && !j.failed) {
-      for (const chunk of chunks) {
+    j.flushed = true;
+    const fullText = effective.text.trim();
+    if (j.cursor === 0) {
+      j.cursor = effective.text.length;
+      if (fullText && !mutedRef.current && !j.failed) {
         const seq = j.nextSeq++;
-        j.charsSent += chunk.length;
-        void fetchChunk(chunk, seq, j);
+        j.charsSent += fullText.length;
+        void fetchChunk(fullText, seq, j);
       }
     }
 
@@ -317,7 +363,7 @@ export function useNarratorAudio({
       }
     }
 
-    if (!effective.streaming && j.flushed && j.nextSeq === j.playSeq && !j.sourceNode) {
+    if (!effective.streaming && j.flushed && j.nextSeq === j.playSeq && !j.sourceNode && !j.mediaUrl) {
       setStatus("idle");
       playedRef.current.add(j.turnId);
       if (j.source === "replay") setOverride(null);
@@ -363,15 +409,158 @@ export function useNarratorAudio({
   useEffect(() => {
     return () => {
       resetJob(null, "", "stream");
-      const ctx = audioContextRef.current;
-      audioContextRef.current = null;
-      if (ctx && ctx.state !== "closed") void ctx.close();
     };
   }, [resetJob]);
 
   const activeTurnId = jobRef.current && status === "speaking" ? jobRef.current.turnId : undefined;
 
   return { muted, setMuted, status, activeTurnId, primeAudio, replay };
+}
+
+async function playMediaClip(
+  clip: Extract<AudioClip, { kind: "media-element" }>,
+  job: JobState,
+  playNext: () => Promise<void>,
+  setStatus: (status: NarratorAudioStatus) => void,
+): Promise<void> {
+  const audio = ensureMediaElement();
+  if (!audio) {
+    markFailed(job, "[narrator-audio] HTMLAudioElement unavailable");
+    return;
+  }
+
+  const url = URL.createObjectURL(clip.blob);
+  clip.url = url;
+  job.mediaUrl = url;
+
+  audio.onended = () => {
+    if (job.failed || job.mediaUrl !== url) return;
+    cleanupMediaUrl(job, audio);
+    job.playSeq += 1;
+    void playNext();
+  };
+  audio.onerror = () => {
+    if (job.failed || job.mediaUrl !== url) return;
+    cleanupMediaUrl(job, audio);
+    setStatus("idle");
+    markFailed(
+      job,
+      `[narrator-audio] media playback error: ${String(
+        audio.error?.message ?? audio.error?.code ?? "unknown",
+      )}`,
+    );
+  };
+
+  audio.src = url;
+  audio.currentTime = 0;
+  setStatus("speaking");
+  try {
+    await audio.play();
+  } catch (err) {
+    if (job.mediaUrl !== url) return;
+    cleanupMediaUrl(job, audio);
+    setStatus("idle");
+    markFailed(job, `[narrator-audio] media play rejected: ${String(err)}`);
+  }
+}
+
+function cleanupMediaUrl(job: JobState, audio: HTMLAudioElement): void {
+  audio.onended = null;
+  audio.onerror = null;
+  audio.removeAttribute("src");
+  audio.load();
+  if (job.mediaUrl) {
+    URL.revokeObjectURL(job.mediaUrl);
+    job.mediaUrl = null;
+  }
+}
+
+async function resumeAudioContext(ctx: AudioContext, job: JobState): Promise<boolean> {
+  if (ctx.state === "running") return true;
+  if (ctx.state === "closed") {
+    markFailed(job, "[narrator-audio] audio context is closed");
+    return false;
+  }
+  try {
+    await ctx.resume();
+  } catch (err) {
+    markFailed(job, `[narrator-audio] audio context resume rejected: ${String(err)}`);
+    return false;
+  }
+  const nextState = ctx.state as AudioContextState;
+  if (nextState === "running") return true;
+  markFailed(job, `[narrator-audio] audio context still ${nextState} after resume`);
+  return false;
+}
+
+function shouldUseMediaElementPlayback(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /Safari/i.test(ua) && !/(Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR|Android)/i.test(ua);
+}
+
+function ensureMediaElement(): HTMLAudioElement | null {
+  if (typeof Audio === "undefined") return null;
+  if (sharedMediaElement) return sharedMediaElement;
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.setAttribute("playsinline", "true");
+  sharedMediaElement = audio;
+  return audio;
+}
+
+function primeMediaElement(): void {
+  const audio = ensureMediaElement();
+  if (!audio) return;
+  try {
+    const primeUrl = getSilentMediaUrl();
+    audio.src = primeUrl;
+    audio.currentTime = 0;
+    void audio
+      .play()
+      .then(() => {
+        if (audio.src === primeUrl) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      })
+      .catch((err) => {
+        if (audio.src !== primeUrl) return;
+        console.error("[narrator-audio] media element prime rejected", err);
+      });
+  } catch (err) {
+    console.error("[narrator-audio] media element prime failed", err);
+  }
+}
+
+function getSilentMediaUrl(): string {
+  if (sharedSilentMediaUrl) return sharedSilentMediaUrl;
+  const sampleRate = 8000;
+  const frameCount = Math.ceil(sampleRate * PRIME_AUDIO_SECONDS);
+  const dataSize = frameCount * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+  sharedSilentMediaUrl = URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+  return sharedSilentMediaUrl;
+}
+
+function writeAscii(view: DataView, offset: number, value: string): void {
+  for (let i = 0; i < value.length; i += 1) {
+    view.setUint8(offset + i, value.charCodeAt(i));
+  }
 }
 
 function getAudioContextConstructor(): typeof AudioContext | undefined {

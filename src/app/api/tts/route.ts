@@ -3,7 +3,7 @@ import { streamSpeech, TtsError } from '@/lib/tts'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const MAX_TEXT_CHARS = 4000
+const MAX_TEXT_CHARS = 12000
 
 interface TtsRequestBody {
   text?: unknown
