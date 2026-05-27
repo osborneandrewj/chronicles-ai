@@ -234,6 +234,7 @@ const CHARACTER_COLS = `id, world_id, name, description, is_player, current_plac
         private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
         last_seen_turn_id, last_agent_tick_turn_id, player_notes,
         in_transit_to_place_id, arrival_world_time, last_known_situation,
+        aliases,
         created_at, updated_at`
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT ${CHARACTER_COLS}
