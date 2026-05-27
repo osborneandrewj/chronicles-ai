@@ -207,7 +207,7 @@ export function extractDeterministicPatch(
 
   const destinationKey = normalize(destination)
   if (!destinationKey || destinationKey === normalize(prior.currentPlace?.name ?? '')) return null
-  if (!normalize(narratorText).includes(destinationKey)) return null
+  if (!narratorAcceptsDestination(destination, narratorText)) return null
 
   const player = prior.presentCharacters.find((c) => c.is_player === 1)
   if (!player) return null
@@ -246,6 +246,12 @@ export async function extractPatch(
         name: c.name,
         is_player: c.is_player === 1,
         status: c.status,
+        current_place:
+          c.current_place_id && prior.currentPlace?.id === c.current_place_id
+            ? prior.currentPlace.name
+            : undefined,
+        memorable_facts:
+          c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
         observations: c.is_player === 1 ? undefined : lastNLines(stripFactProvenance(c.observations), 2),
       })),
       known_characters: prior.knownCharacters.map((c) => ({
@@ -253,6 +259,8 @@ export async function extractPatch(
         is_player: c.is_player === 1,
         status: c.status,
         description: limit(c.description, 120),
+        memorable_facts:
+          c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
       })),
       known_places: prior.knownPlaces.map((p) => ({
         name: p.name,
@@ -467,6 +475,50 @@ function extractDestination(text: string): string | null {
   return null
 }
 
+function narratorAcceptsDestination(destination: string, narratorText: string): boolean {
+  const narrator = normalize(narratorText)
+  if (!narrator) return false
+
+  const aliases = destinationMentionAliases(destination)
+  const mentionsDestination = aliases.some((alias) => containsAsPhrase(narrator, alias))
+  if (!mentionsDestination) return false
+
+  // The narrator has to depict actual relocation, arrival, or parking there.
+  // This keeps failed attempts ("the road blocks you") from moving state while
+  // still accepting natural prose like "Whitworth buildings rise ahead".
+  return hasActualMotion(narrator) || /\b(?:arrive|arrival|park|parking|pull into|pulls into|reach|reaches|come into view|comes into view)\b/.test(narrator)
+}
+
+function destinationMentionAliases(destination: string): string[] {
+  const normalized = normalize(destination)
+  const words = normalized.split(' ').filter(Boolean)
+  const generic = new Set([
+    'the',
+    'a',
+    'an',
+    'to',
+    'at',
+    'in',
+    'university',
+    'college',
+    'campus',
+    'department',
+    'building',
+    'buildings',
+    'room',
+    'office',
+    'entrance',
+    'main',
+  ])
+  const distinctive = words.filter((word) => word.length >= 4 && !generic.has(word))
+  const aliases = [normalized]
+
+  if (distinctive.length === 1) aliases.push(distinctive[0])
+  if (distinctive.length > 1) aliases.push(distinctive.join(' '))
+
+  return [...new Set(aliases.filter((alias) => alias.length > 0))]
+}
+
 function cleanDestination(raw: string): string | null {
   const value = raw
     .replace(/[“”"']/g, '')
@@ -559,7 +611,7 @@ function hasActualMotion(value: string): boolean {
   }
 
   return (
-    /\byou (?:go|goes|walk|walks|run|runs|drive|drives|head|heads|travel|travels|return|returns|enter|enters|arrive|arrives|follow|follows|leave|leaves|step|steps|cross|crosses|climb|climbs|move|moves|land|lands|wake|wakes)\b/.test(value) ||
+    /\byou (?:go|goes|walk|walks|run|runs|drive|drives|head|heads|travel|travels|return|returns|enter|enters|arrive|arrives|follow|follows|leave|leaves|step|steps|cross|crosses|climb|climbs|move|moves|land|lands|wake|wakes|park|parks|pull|pulls)\b/.test(value) ||
     /\byou make your way\b/.test(value) ||
     /\byou (?:are|re) (?:led|taken|carried|brought|ushered|escorted|shown)\b/.test(value) ||
     /\b(?:leads|takes|carries|brings|ushers|escorts|shows) you\b/.test(value) ||

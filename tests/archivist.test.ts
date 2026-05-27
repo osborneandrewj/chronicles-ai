@@ -799,6 +799,27 @@ describe('extractDeterministicPatch', () => {
     })
   })
 
+  it('accepts natural destination variants like a campus arrival', () => {
+    const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
+    const prior = getNarratorWorldState(worldId)
+
+    const patch = extractDeterministicPatch(
+      prior,
+      'I get into my Kia Sportage and drive to Whitworth university',
+      'You settle behind the wheel and take the quiet roads north. Seventeen minutes later the campus edges come into view, Whitworth buildings rising against the Spokane morning. You pull into a spot near the main entrance and kill the engine.',
+    )
+
+    expect(patch).toEqual({
+      places: [{ name: 'Whitworth university' }],
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Whitworth university' }],
+      scene: {
+        action: 'open',
+        title: 'At Whitworth university',
+        place_name: 'Whitworth university',
+      },
+    })
+  })
+
   it('does not extract a destination the narrator did not confirm', () => {
     const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
     const prior = getNarratorWorldState(worldId)

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { organizePlayerProfileFacts, type PlayerProfileGroup } from "@/lib/player-profile";
 import type { FullWorldState } from "@/lib/world-state";
 
 type InspectorTab = "now" | "story" | "wiki" | "archivist";
@@ -222,7 +223,12 @@ function NowView({ state }: { state: FullWorldState }) {
         ) : (
           <ul className="space-y-2">
             {presentCharacters.map((c) => (
-              <CharacterCard key={c.id} character={c} turnTimestamps={state.turnTimestamps} />
+              <CharacterCard
+                key={c.id}
+                character={c}
+                places={state.places}
+                turnTimestamps={state.turnTimestamps}
+              />
             ))}
           </ul>
         )}
@@ -370,7 +376,12 @@ function WikiView({ state }: { state: FullWorldState }) {
         ) : (
           <ul className="space-y-2">
             {state.characters.map((c) => (
-              <CharacterCard key={c.id} character={c} turnTimestamps={state.turnTimestamps} />
+              <CharacterCard
+                key={c.id}
+                character={c}
+                places={state.places}
+                turnTimestamps={state.turnTimestamps}
+              />
             ))}
           </ul>
         )
@@ -446,11 +457,20 @@ function WikiView({ state }: { state: FullWorldState }) {
 
 function CharacterCard({
   character: c,
+  places,
   turnTimestamps,
 }: {
   character: FullWorldState["characters"][number];
+  places: FullWorldState["places"];
   turnTimestamps: Record<number, string>;
 }) {
+  const currentPlace = c.current_place_id
+    ? places.find((p) => p.id === c.current_place_id)?.name
+    : null;
+  const playerProfileGroups = useMemo(
+    () => (c.is_player === 1 ? organizePlayerProfileFacts(c.memorable_facts) : []),
+    [c.is_player, c.memorable_facts],
+  );
   const hasMindFields =
     c.is_player !== 1 &&
     (c.long_term_agenda ||
@@ -480,6 +500,11 @@ function CharacterCard({
         )}
       </div>
       <TimestampText label="Updated" value={c.updated_at} />
+      {currentPlace && (
+        <div className="mt-0.5 text-[11px] text-neutral-500">
+          <span className="text-neutral-600">at</span> {currentPlace}
+        </div>
+      )}
       {c.is_player !== 1 && (
         <NpcAgencySummary character={c} turnTimestamps={turnTimestamps} />
       )}
@@ -562,7 +587,10 @@ function CharacterCard({
           )}
         </dl>
       )}
-      {c.memorable_facts && (
+      {c.is_player === 1 && playerProfileGroups.length > 0 && (
+        <PlayerProfileGroups groups={playerProfileGroups} turnTimestamps={turnTimestamps} />
+      )}
+      {c.is_player !== 1 && c.memorable_facts && (
         <StateEntryList
           value={c.memorable_facts}
           turnTimestamps={turnTimestamps}
@@ -571,6 +599,30 @@ function CharacterCard({
         />
       )}
     </li>
+  );
+}
+
+function PlayerProfileGroups({
+  groups,
+  turnTimestamps,
+}: {
+  groups: PlayerProfileGroup[];
+  turnTimestamps: Record<number, string>;
+}) {
+  return (
+    <dl className="mt-1.5 space-y-1.5 text-[12px]">
+      {groups.map((group) => (
+        <CharacterStateGroup key={group.key} label={group.label}>
+          <ul className="space-y-0.5">
+            {group.entries.map((entry, i) => (
+              <li key={`${group.key}-${i}`} className="text-neutral-300">
+                <StateEntryLine value={entry.line} turnTimestamps={turnTimestamps} />
+              </li>
+            ))}
+          </ul>
+        </CharacterStateGroup>
+      ))}
+    </dl>
   );
 }
 
