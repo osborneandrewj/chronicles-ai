@@ -17,6 +17,87 @@ export type Turn = {
 
 export type TurnTimestamp = { id: number; created_at: string }
 
+export type StoryThread = {
+  id: number
+  world_id: number
+  title: string
+  kind: 'quest' | 'mystery' | 'threat' | 'relationship' | 'background'
+  status: 'active' | 'resolved' | 'failed' | 'dormant'
+  summary: string | null
+  stakes: string | null
+  rewards: string | null
+  consequences: string | null
+  hidden: string | null
+  source_turn_id: number | null
+  resolved_turn_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type StoryClue = {
+  id: number
+  world_id: number
+  thread_id: number | null
+  thread_title: string | null
+  title: string
+  detail: string | null
+  implication: string | null
+  status: 'open' | 'interpreted' | 'spent' | 'false_lead'
+  source_turn_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type StoryObjective = {
+  id: number
+  world_id: number
+  thread_id: number | null
+  thread_title: string | null
+  title: string
+  status: 'active' | 'blocked' | 'completed' | 'failed'
+  detail: string | null
+  blocker: string | null
+  source_turn_id: number | null
+  completed_turn_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type StoryResource = {
+  id: number
+  world_id: number
+  owner_character_id: number | null
+  owner_name: string | null
+  name: string
+  kind: string | null
+  status: string | null
+  detail: string | null
+  source_turn_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+export type TimelineEvent = {
+  id: number
+  world_id: number
+  turn_id: number | null
+  thread_id: number | null
+  thread_title: string | null
+  world_time: string | null
+  title: string
+  summary: string
+  importance: number
+  created_at: string
+}
+
+export type StoryDossier = {
+  threads: StoryThread[]
+  clues: StoryClue[]
+  objectives: StoryObjective[]
+  resources: StoryResource[]
+  timeline: TimelineEvent[]
+}
+
 type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
 const g = globalThis as Globals
 
@@ -179,6 +260,56 @@ const hasTurnBeforeStmt = db.prepare<[number, number]>(
 )
 const turnTimestampsForWorldStmt = db.prepare<[number]>(
   `SELECT id, created_at FROM turns WHERE world_id = ? ORDER BY id ASC`,
+)
+const storyThreadsForWorldStmt = db.prepare<[number]>(
+  `SELECT id, world_id, title, kind, status, summary, stakes, rewards, consequences,
+          hidden, source_turn_id, resolved_turn_id, created_at, updated_at
+   FROM story_threads
+   WHERE world_id = ?
+   ORDER BY
+     CASE status WHEN 'active' THEN 0 WHEN 'dormant' THEN 1 ELSE 2 END,
+     CASE kind WHEN 'quest' THEN 0 WHEN 'mystery' THEN 1 WHEN 'threat' THEN 2 ELSE 3 END,
+     updated_at DESC,
+     id DESC`,
+)
+const storyCluesForWorldStmt = db.prepare<[number]>(
+  `SELECT c.id, c.world_id, c.thread_id, t.title AS thread_title, c.title, c.detail,
+          c.implication, c.status, c.source_turn_id, c.created_at, c.updated_at
+   FROM story_clues c
+   LEFT JOIN story_threads t ON t.id = c.thread_id
+   WHERE c.world_id = ?
+   ORDER BY
+     CASE c.status WHEN 'open' THEN 0 WHEN 'interpreted' THEN 1 WHEN 'spent' THEN 2 ELSE 3 END,
+     c.updated_at DESC,
+     c.id DESC`,
+)
+const storyObjectivesForWorldStmt = db.prepare<[number]>(
+  `SELECT o.id, o.world_id, o.thread_id, t.title AS thread_title, o.title, o.status,
+          o.detail, o.blocker, o.source_turn_id, o.completed_turn_id, o.created_at, o.updated_at
+   FROM story_objectives o
+   LEFT JOIN story_threads t ON t.id = o.thread_id
+   WHERE o.world_id = ?
+   ORDER BY
+     CASE o.status WHEN 'active' THEN 0 WHEN 'blocked' THEN 1 ELSE 2 END,
+     o.updated_at DESC,
+     o.id DESC`,
+)
+const storyResourcesForWorldStmt = db.prepare<[number]>(
+  `SELECT r.id, r.world_id, r.owner_character_id, c.name AS owner_name, r.name, r.kind,
+          r.status, r.detail, r.source_turn_id, r.created_at, r.updated_at
+   FROM story_resources r
+   LEFT JOIN characters c ON c.id = r.owner_character_id
+   WHERE r.world_id = ?
+   ORDER BY r.updated_at DESC, r.id DESC`,
+)
+const timelineEventsForWorldStmt = db.prepare<[number]>(
+  `SELECT e.id, e.world_id, e.turn_id, e.thread_id, t.title AS thread_title, e.world_time,
+          e.title, e.summary, e.importance, e.created_at
+   FROM timeline_events e
+   LEFT JOIN story_threads t ON t.id = e.thread_id
+   WHERE e.world_id = ?
+   ORDER BY e.id DESC
+   LIMIT 12`,
 )
 
 export function insertTurn(
@@ -362,4 +493,14 @@ export function hasTurnBefore(worldId: number, id: number): boolean {
 
 export function getTurnTimestampsForWorld(worldId: number): TurnTimestamp[] {
   return turnTimestampsForWorldStmt.all(worldId) as TurnTimestamp[]
+}
+
+export function getStoryDossierForWorld(worldId: number): StoryDossier {
+  return {
+    threads: storyThreadsForWorldStmt.all(worldId) as StoryThread[],
+    clues: storyCluesForWorldStmt.all(worldId) as StoryClue[],
+    objectives: storyObjectivesForWorldStmt.all(worldId) as StoryObjective[],
+    resources: storyResourcesForWorldStmt.all(worldId) as StoryResource[],
+    timeline: timelineEventsForWorldStmt.all(worldId) as TimelineEvent[],
+  }
 }

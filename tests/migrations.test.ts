@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(12)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -82,8 +82,30 @@ describe('v5 migration', () => {
       .all() as Array<{ name: string }>
     expect(tables.map((t) => t.name)).not.toContain('turn_states')
     expect(tables.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['characters', 'places', 'scenes', 'turns', 'worlds']),
+      expect.arrayContaining([
+        'characters',
+        'places',
+        'scenes',
+        'story_clues',
+        'story_objectives',
+        'story_resources',
+        'story_threads',
+        'timeline_events',
+        'turns',
+        'worlds',
+      ]),
     )
+
+    const threadColumns = db
+      .prepare("PRAGMA table_info('story_threads')")
+      .all() as Array<{ name: string }>
+    expect(threadColumns.map((c) => c.name)).toEqual(
+      expect.arrayContaining(['kind', 'rewards', 'consequences']),
+    )
+    const timelineColumns = db
+      .prepare("PRAGMA table_info('timeline_events')")
+      .all() as Array<{ name: string }>
+    expect(timelineColumns.map((c) => c.name)).toContain('thread_id')
 
     // Backfill seeded a player + place + scene 1, and used the latest
     // turn_state's prose (Evening, autumn 1897) — not the initial JSON.
@@ -203,7 +225,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(12)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -243,7 +265,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(12)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -351,7 +373,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(12)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -391,7 +413,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(9)
+    expect(db.pragma('user_version', { simple: true })).toBe(12)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{

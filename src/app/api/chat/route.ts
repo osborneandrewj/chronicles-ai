@@ -28,6 +28,7 @@ import {
   updateTurnMetadata,
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
+import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
   formatSceneDigestForClassifier,
@@ -216,10 +217,25 @@ export async function POST(req: Request) {
   const allRecent = recentTurns(worldId, NARRATOR_HISTORY_TURNS)
   const priorHistory = allRecent.slice(0, -1)
   const historyMessages = compactHistory(priorHistory)
+  const presentNpcCount = narratorState.presentCharacters.filter((c) => c.is_player !== 1).length
+  const turnGuidance = formatNarratorTurnGuidance({
+    stance,
+    inputMode: input_mode,
+    playerText,
+    recentTurns: priorHistory,
+    presentNpcCount,
+    plannedActionCount: plans.length,
+    activeObjectiveTitles: narratorState.dossier.objectives
+      .filter((o) => o.status === 'active' || o.status === 'blocked')
+      .map((o) => o.title),
+    openClueTitles: narratorState.dossier.clues
+      .filter((c) => c.status === 'open' || c.status === 'interpreted')
+      .map((c) => c.title),
+  })
 
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${premiseBlock}\n\n${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${premiseBlock}\n\n${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
   }
 
   const modelMessages: ModelMessage[] = [
@@ -363,6 +379,9 @@ function shouldRunArchivistLlm(
       text,
     ) ||
     /\b(dies|dead|wounded|injured|takes|picks up|hands|gives|receives|promises|learns|discovers)\b/.test(
+      text,
+    ) ||
+    /\b(clue|evidence|lead|objective|mission|thread|mystery|fragment|serial|pattern match|matches|matched|scan result|identif(?:y|ies|ied)|decode[sd]?|translat(?:e|es|ed))\b/.test(
       text,
     ) ||
     /\b(call|calls|called|text|texts|email|emails|post|posts|message|messages)\b/.test(text) ||

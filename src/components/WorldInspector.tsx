@@ -98,6 +98,8 @@ function InspectorBody({ state }: { state: FullWorldState }) {
         )}
       </section>
 
+      <DossierSection state={state} />
+
       <section>
         <SectionHeader>Characters ({state.characters.length})</SectionHeader>
         {state.characters.length === 0 ? (
@@ -226,6 +228,149 @@ function InspectorBody({ state }: { state: FullWorldState }) {
         )}
       </section>
     </div>
+  );
+}
+
+function DossierSection({ state }: { state: FullWorldState }) {
+  const { dossier } = state;
+  const activeQuests = dossier.threads
+    .filter((t) => t.status === "active" && t.kind === "quest")
+    .slice(0, 4);
+  const activeThreads = dossier.threads
+    .filter((t) => t.status === "active" && t.kind !== "quest")
+    .slice(0, 4);
+  const objectives = dossier.objectives
+    .filter((o) => o.status === "active" || o.status === "blocked")
+    .slice(0, 5);
+  const clues = dossier.clues
+    .filter((c) => c.status === "open" || c.status === "interpreted")
+    .slice(0, 6);
+  const resources = dossier.resources.slice(0, 5);
+
+  if (
+    activeQuests.length === 0 &&
+    activeThreads.length === 0 &&
+    objectives.length === 0 &&
+    clues.length === 0 &&
+    resources.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <section>
+      <SectionHeader>Dossier</SectionHeader>
+      <div className="space-y-3">
+        {activeQuests.length > 0 && (
+          <DossierGroup label="Quests">
+            {activeQuests.map((q) => (
+              <DossierItem
+                key={q.id}
+                title={q.title}
+                meta={[
+                  q.stakes ? `stakes: ${q.stakes}` : null,
+                  q.rewards ? `rewards: ${q.rewards}` : null,
+                  q.consequences ? `consequences: ${q.consequences}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || null}
+              >
+                {q.summary}
+              </DossierItem>
+            ))}
+          </DossierGroup>
+        )}
+        {activeThreads.length > 0 && (
+          <DossierGroup label="Threads">
+            {activeThreads.map((t) => (
+              <DossierItem
+                key={t.id}
+                title={t.title}
+                meta={[t.kind, t.stakes ? `stakes: ${t.stakes}` : null]
+                  .filter(Boolean)
+                  .join(" · ") || null}
+              >
+                {t.summary}
+              </DossierItem>
+            ))}
+          </DossierGroup>
+        )}
+        {objectives.length > 0 && (
+          <DossierGroup label="Objectives">
+            {objectives.map((o) => (
+              <DossierItem
+                key={o.id}
+                title={o.title}
+                meta={o.status === "blocked" ? `blocked: ${o.blocker ?? "unknown"}` : null}
+              >
+                {o.detail}
+              </DossierItem>
+            ))}
+          </DossierGroup>
+        )}
+        {clues.length > 0 && (
+          <DossierGroup label="Clues">
+            {clues.map((c) => (
+              <DossierItem
+                key={c.id}
+                title={c.title}
+                meta={c.thread_title ?? c.implication}
+              >
+                {c.detail}
+              </DossierItem>
+            ))}
+          </DossierGroup>
+        )}
+        {resources.length > 0 && (
+          <DossierGroup label="Resources">
+            {resources.map((r) => (
+              <DossierItem
+                key={r.id}
+                title={r.owner_name ? `${r.owner_name}: ${r.name}` : r.name}
+                meta={[r.kind, r.status].filter(Boolean).join(" · ") || null}
+              >
+                {r.detail}
+              </DossierItem>
+            ))}
+          </DossierGroup>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function DossierGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
+        {label}
+      </div>
+      <ul className="space-y-1.5">{children}</ul>
+    </div>
+  );
+}
+
+function DossierItem({
+  title,
+  meta,
+  children,
+}: {
+  title: string;
+  meta: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <li className="border-l-2 border-emerald-900/60 pl-2.5">
+      <div className="font-medium text-neutral-100">{title}</div>
+      {meta && <div className="text-[11px] text-emerald-400/70">{meta}</div>}
+      {children && <p className="mt-0.5 text-neutral-400">{children}</p>}
+    </li>
   );
 }
 

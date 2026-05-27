@@ -39,14 +39,15 @@ Listed in shipping order. Tags on `main` correspond to the row's version unless 
 | 19 | v0.5.2 | [v0.5.2-patch](19-v0.5.2-patch.md) | 2026-05-25 | Docs canon: README + milestone template + v0.5.0/v0.4.2 backfills + memory + parked branch rescue |
 | 20 | v0.6.0 | [v0.6.0-milestone](20-v0.6.0-milestone.md) | 2026-05-25 | Typed world-state (characters/places/scenes) + archivist patch pipeline + inspector. Rebased from the parked save/v0.5-typed-state with three audit-driven mitigations |
 | 21 | v0.6.1 | [v0.6.1-milestone](21-v0.6.1-milestone.md) | TBD (planning) | Narrator prose tuning + NPC active goals + v0.6.0 audit bug fixes (cost-cap drift, TTS world-binding, chat JSON parsing, detached archivist, history pagination) |
-| 22 | v0.6.3 | [v0.6.3-milestone](22-v0.6.3-milestone.md) | TBD (planning) | iOS / desktop Safari audio fix only — focused patch on `useNarratorAudio.ts` (Safari media-element playback fallback + whole-turn TTS). Mobile UI + replay-cost-footer split out to v0.6.4 |
+| 22 | v0.6.3 | [v0.6.3-milestone](22-v0.6.3-milestone.md) | TBD (planning) | iOS / desktop Safari audio fix only — focused patch on `useNarratorAudio.ts` (Safari media-element playback fallback + whole-turn TTS). Mobile UI + replay-cost-footer later moved to v0.6.5 |
 | 24 | v0.6.2 | [v0.6.2-milestone](24-v0.6.2-milestone.md) | TBD (planning) | Narrative style pass — narrator prose voice/tone, dialogue formatting, scene-shape rules, POV/tense/address |
-| 25 | v0.6.4 | [v0.6.4-milestone](25-v0.6.4-milestone.md) | TBD (planning) | Mobile + desktop UI pass + replay-cost-footer bug — split out of v0.6.3 once the audio fix was scoped down |
-| 26 | v0.6.5 | [v0.6.5-milestone](26-v0.6.5-milestone.md) | TBD (planning) | Archivist character canonicalization — same person referred to by full vs short name no longer creates duplicate rows (was v0.6.4 until mobile UI displaced it) |
+| 25 | v0.6.4 | [v0.6.4-milestone](25-v0.6.4-milestone.md) | TBD (planning) | Story-dossier memory — active threads, clues, objectives, resources, hidden pressure, and Markdown-shaped narrator digest |
+| 26 | v0.6.5 | [v0.6.5-milestone](26-v0.6.5-milestone.md) | TBD (planning) | Mobile + desktop UI pass + replay-cost-footer bug — shifted after the story-dossier memory work |
+| 27 | v0.6.6 | [v0.6.6-milestone](27-v0.6.6-milestone.md) | TBD (planning) | Archivist character canonicalization — same person referred to by full vs short name no longer creates duplicate rows |
 
 ## Conventions
 
-- **Filename is `NN-<slug>.md`.** `NN` is sequential in the order the doc was written, not in version order. Don't renumber existing files.
+- **Filename is `NN-<slug>.md`.** `NN` is sequential in the planning/shipping order. Once a milestone ships, don't renumber it; pre-ship planning docs may be reshuffled when the roadmap changes.
 - **One doc per shipped version.** Even tiny patches get a short doc. The cost of skipping (see v0.5.0 / v0.4.2 backfills) is reconstructing the release later from `git log` and tag annotations.
 - **Backfilled docs are flagged.** If a doc was written after the fact, say so at the top. Be honest about what's reconstructed from git vs. remembered.
 - **Use the template.** New milestone docs start by copying [`_template-milestone.md`](_template-milestone.md). The Decisions table and Exit criteria are the load-bearing sections.
