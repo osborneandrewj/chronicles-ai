@@ -84,6 +84,22 @@ describe('formatNarratorTurnGuidance', () => {
     expect(guidance).toContain('Do not invent a different time')
   })
 
+  it('treats public feeds and screens as wider-world surfaces', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'observe',
+      inputMode: 'in-character',
+      playerText: 'I open up X',
+      recentTurns: [],
+      presentNpcCount: 0,
+      plannedActionCount: 0,
+    })
+
+    expect(guidance).toContain('public information surface')
+    expect(guidance).toContain('not just "headlines and noise."')
+    expect(guidance).toContain('wider world feel alive')
+    expect(guidance).toContain('concrete enough to recur')
+  })
+
   it('flags recent reaction-only narration loops', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'say',

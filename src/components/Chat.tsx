@@ -390,10 +390,10 @@ export function Chat({
         <ol
           ref={scrollRef}
           onScroll={onScroll}
-          // pb-64 clears the floating composer plus the optional scroll-to-end
+          // pb-56 clears the floating composer plus the optional scroll-to-end
           // button, so bottom content can scroll above the controls instead of
           // being covered by them.
-          className="h-full space-y-8 overflow-y-auto overscroll-y-contain px-4 pt-6 pb-64 sm:px-8 sm:pt-8"
+          className="h-full space-y-8 overflow-y-auto overscroll-y-contain px-4 pt-6 pb-56 sm:px-8 sm:pt-8"
         >
           {hasOlder && (
             <li className="flex justify-center">
@@ -474,7 +474,7 @@ export function Chat({
         {/* Edge fades: soften the chat-→-composer overlap at every viewport.
             The bottom fade is sized to match the composer clearance. */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-black to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/90 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/90 to-transparent" />
       </div>
 
       <form
@@ -499,11 +499,11 @@ export function Chat({
             </button>
           </div>
         )}
-        {/* Grok-style composer card: pill-shaped, two-row, generously
-            padded. The textarea sits on top; an action row sits below with
+        {/* Grok-style composer card: pill-shaped and compact. The textarea
+            sits on top; an action row sits below with
             the slash-command button on the left and a round Send affordance
             on the right. */}
-        <div className="pointer-events-auto group relative mx-auto flex max-w-2xl flex-col gap-2 rounded-[2rem] border border-neutral-700/80 bg-[#1b1c1f] px-4 pt-4 pb-3 shadow-2xl shadow-black/50 backdrop-blur transition focus-within:border-neutral-500 focus-within:bg-[#1f2024]">
+        <div className="pointer-events-auto group relative mx-auto flex max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border border-neutral-700/80 bg-[#1b1c1f] px-4 pt-3 pb-2.5 shadow-2xl shadow-black/50 backdrop-blur transition focus-within:border-neutral-500 focus-within:bg-[#1f2024]">
           {slashOpen && (
             <SlashCommandMenu
               commands={filteredSlashCommands}
@@ -516,14 +516,14 @@ export function Chat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            rows={2}
+            rows={1}
             placeholder="What do you do?"
             disabled={busy}
             // text-base (16px) at every size — prevents iOS Safari from auto-
             // zooming on focus, and reads more comfortably on desktop too.
-            className="max-h-40 min-h-14 w-full resize-none bg-transparent text-base leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-50"
+            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-50"
           />
-          <div className="flex min-h-12 items-center justify-between gap-2">
+          <div className="flex min-h-11 items-center justify-between gap-2">
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -542,7 +542,7 @@ export function Chat({
               type="submit"
               disabled={busy || !input.trim()}
               aria-label="Send"
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-500 text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
             >
               {busy ? <BusyDots /> : <SendIcon />}
             </button>

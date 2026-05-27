@@ -118,6 +118,29 @@ describe('recordAppearancesAndAutoPromote', () => {
     expect(result.counted).toBe(0)
   })
 
+  it('does not promote routine service workers into agent-tier NPCs', () => {
+    const turn = insertTurn(worldId, 'assistant', 'A USPS driver waits for a signature.', null)
+    applyArchivistPatch(worldId, turn.id, {
+      characters: [
+        {
+          name: 'USPS driver',
+          description: 'A postal worker delivering a package.',
+          current_place_name: 'Covenant Security',
+          active_goal: 'get a signature for the package',
+        },
+      ],
+    })
+
+    for (let i = 0; i < NPC_AUTO_PROMOTE_THRESHOLD + 1; i++) {
+      tick([character(worldId, 'USPS driver')])
+    }
+
+    const driver = character(worldId, 'USPS driver')
+    expect(driver.agency_level).toBe('npc')
+    expect(driver.appearance_count).toBe(0)
+    expect(driver.active_goal).toBeNull()
+  })
+
   it('promotes multiple NPCs in the same call', () => {
     // Drive both Marcus and Kyle to threshold-1.
     for (let i = 0; i < NPC_AUTO_PROMOTE_THRESHOLD - 1; i++) {

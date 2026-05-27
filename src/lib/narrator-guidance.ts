@@ -16,6 +16,7 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
   const attentionOnlyMove = isAttentionOnlyMove(ctx.playerText)
   const investigativeMove = isInvestigativeMove(ctx.playerText)
   const timeCheckMove = isTimeCheckMove(ctx.playerText)
+  const mediaFeedMove = isMediaFeedMove(ctx.playerText)
   const transitionMove = isTransitionMove(ctx.playerText)
   const dangerMove = isDangerMove(ctx.playerText)
   const spokenLanguage = detectMarkedSpokenLanguage(ctx.playerText)
@@ -67,6 +68,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
     }
   }
 
+  if (mediaFeedMove) {
+    lines.push(
+      'The player is opening or checking an in-world public information surface: feed, social app, TV, radio, news, browser, notification stream, email, or waiting-room screen. Show specific content on it, not just "headlines and noise." Include at least one concrete background item that makes the wider world feel alive: a public incident, local dispute, celebrity/business scandal, weather emergency, transit disruption, missing person, market shock, sports result, or viral argument. It may be unrelated to the main quest now, but leave it concrete enough to recur if the player follows it.',
+    )
+  }
+
   if (timeCheckMove) {
     lines.push(
       `The player is checking an in-world time-bearing device. The device must show the authoritative world clock exactly: ${ctx.worldTime ?? '(unset)'}. Do not invent a different time, date, day, alarm, timestamp, battery clock, notification time, or timezone unless established state already says the device is wrong.`,
@@ -80,7 +87,14 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
   }
 
   const socialBeatNeedsPressure =
-    ctx.stance === 'say' || ctx.stance === 'observe' || attentionOnlyMove || investigativeMove || transitionMove || dangerMove || stalled
+    ctx.stance === 'say' ||
+    ctx.stance === 'observe' ||
+    attentionOnlyMove ||
+    investigativeMove ||
+    mediaFeedMove ||
+    transitionMove ||
+    dangerMove ||
+    stalled
 
   if (ctx.presentNpcCount > 0 && ctx.plannedActionCount === 0 && socialBeatNeedsPressure) {
     lines.push(
@@ -140,6 +154,20 @@ function isTimeCheckMove(text: string): boolean {
       compact,
     )
   return hasTimeQuestion || (hasCheckVerb && hasTimeDevice && /\btime|clock|watch|phone\b/.test(compact))
+}
+
+function isMediaFeedMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const hasOpenOrCheckVerb =
+    /\b(open|opens|check|checks|look at|looks at|look through|scroll|scrolls|read|reads|watch|watches|listen|listens|turn on|turns on|browse|browses|refresh|refreshes)\b/.test(
+      compact,
+    )
+  const hasMediaSurface =
+    /\b(x|twitter|feed|timeline|social media|news|headlines?|tv|television|radio|podcast|browser|web|internet|notifications?|alerts?|email|inbox|screen|phone)\b/.test(
+      compact,
+    )
+
+  return hasOpenOrCheckVerb && hasMediaSurface
 }
 
 function isTransitionMove(text: string): boolean {

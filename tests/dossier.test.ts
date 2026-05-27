@@ -109,4 +109,44 @@ describe('story dossier state', () => {
     expect(block).toContain('agenda:')
     expect(block).toContain('diegetic tools: can query field records and auspex logs')
   })
+
+  it('marks the protagonist row as durable continuity in the narrator state block', () => {
+    const { worldId, turnId } = seedWorld()
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Andras Voss',
+          is_player: true,
+          memorable_facts_append: 'carries a concealed bolt pistol at his hip',
+        },
+      ],
+    })
+
+    const state = getNarratorWorldState(worldId)
+    const block = formatStateBlock(state)
+
+    expect(block).toContain('Andras Voss (player)')
+    expect(block).toContain('continuity: this row is the protagonist')
+    expect(block).toContain('carries a concealed bolt pistol')
+  })
+
+  it('renders NPC observations as behavior cues instead of prose-ready observations', () => {
+    const { worldId, turnId } = seedWorld()
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Mara Vale',
+          description: 'A field analyst.',
+          current_place_name: 'Wheat field near a spire',
+          observations_append: 'noticed Andras repeat the same question twice',
+        },
+      ],
+    })
+
+    const state = getNarratorWorldState(worldId)
+    const block = formatStateBlock(state)
+
+    expect(block).toContain('behavior cue: noticed Andras repeat the same question twice')
+    expect(block).not.toContain('observed:')
+  })
 })

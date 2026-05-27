@@ -194,6 +194,10 @@ export function formatStateBlock(
     for (const c of state.presentCharacters) {
       const role = c.is_player === 1 ? 'player' : c.status
       lines.push(`- ${c.name} (${role})${c.description ? ` — ${limit(c.description, 180)}` : ''}`)
+      if (c.is_player === 1) {
+        if (c.status !== 'active') lines.push(`  - status: ${c.status}`)
+        lines.push('  - continuity: this row is the protagonist; preserve location, carried items, injuries, notable discoveries, obligations, and relationship facts unless narration clearly changes them.')
+      }
       const facts = stripFactProvenance(c.memorable_facts)
       if (facts) {
         const factLines = facts.split('\n').filter((f) => f.trim().length > 0).slice(-3)
@@ -204,7 +208,7 @@ export function formatStateBlock(
       // NPC-only social/agency fields, in order of arc-width: personal_goals
       // (long arc) → focus (current preoccupation) → active_goal (scene-
       // immediate) → attitude (right now) → recent_activity (off-scene
-      // gap-fill) → observed (what they've noticed about the protagonist).
+      // gap-fill) → behavior cue (what they've noticed about the protagonist).
       // Each is omitted when null to keep state-block tokens bounded.
       if (c.is_player !== 1) {
         if (c.personal_goals) {
@@ -261,7 +265,7 @@ export function formatStateBlock(
         const obs = stripFactProvenance(c.observations)
         if (obs) {
           for (const line of obs.split('\n').filter((s) => s.trim().length > 0).slice(-2)) {
-            lines.push(`  - observed: ${limit(line, 160)}`)
+            lines.push(`  - behavior cue: ${limit(line, 160)}`)
           }
         }
       }

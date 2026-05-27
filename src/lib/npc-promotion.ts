@@ -26,8 +26,16 @@ const promoteToLocalStmt = db.prepare<[number, number]>(
 const setAgencyLevelStmt = db.prepare<[CharacterAgencyLevel, number]>(
   `UPDATE characters SET agency_level = ?, updated_at = datetime('now') WHERE id = ?`,
 )
+const demoteTransientServiceNpcStmt = db.prepare<[number]>(
+  `UPDATE characters
+      SET agency_level = 'npc',
+          active_goal = NULL,
+          current_focus = NULL,
+          updated_at = datetime('now')
+    WHERE id = ?`,
+)
 const allNonPlayerCharactersStmt = db.prepare<[number]>(
-  `SELECT id, name, agency_level, active_goal, personal_goals, current_focus, last_seen_turn_id
+  `SELECT id, name, description, agency_level, active_goal, personal_goals, current_focus, last_seen_turn_id
    FROM characters
    WHERE world_id = ? AND is_player = 0 AND status != 'dead'`,
 )
@@ -47,7 +55,10 @@ export function recordAppearancesAndAutoPromote(
 } {
   // Player and dead characters don't count toward promotion.
   const eligible = presentCharacters.filter(
-    (c) => c.is_player === 0 && c.status !== 'dead',
+    (c) => c.is_player === 0 && c.status !== 'dead' && !isTransientServiceNpc(c),
+  )
+  const transientPresent = presentCharacters.filter(
+    (c) => c.is_player === 0 && c.status !== 'dead' && isTransientServiceNpc(c),
   )
   const promoted: string[] = []
   const tiers = {
@@ -58,6 +69,7 @@ export function recordAppearancesAndAutoPromote(
     demoted: [] as string[],
   }
   const presentIds = new Set(eligible.map((c) => c.id))
+  const transientPresentIds = new Set(transientPresent.map((c) => c.id))
 
   const tx = db.transaction(() => {
     for (const c of eligible) {
@@ -74,9 +86,17 @@ export function recordAppearancesAndAutoPromote(
       }
     }
 
+    for (const c of transientPresent) {
+      if (c.agency_level !== 'npc' || c.active_goal || c.current_focus) {
+        demoteTransientServiceNpcStmt.run(c.id)
+        tiers.demoted.push(c.name)
+      }
+    }
+
     const rows = allNonPlayerCharactersStmt.all(worldId) as Array<{
       id: number
       name: string
+      description: string | null
       agency_level: CharacterAgencyLevel | 'agent'
       active_goal: string | null
       personal_goals: string | null
@@ -85,6 +105,14 @@ export function recordAppearancesAndAutoPromote(
     }>
 
     for (const c of rows) {
+      if (isTransientServiceNpc(c)) {
+        if (transientPresentIds.has(c.id)) continue
+        if (c.agency_level !== 'npc' || c.active_goal || c.current_focus) {
+          demoteTransientServiceNpcStmt.run(c.id)
+          tiers.demoted.push(c.name)
+        }
+        continue
+      }
       if (presentIds.has(c.id) || c.agency_level === 'npc') continue
 
       const lastSeen = c.last_seen_turn_id
@@ -109,3 +137,24 @@ export function recordAppearancesAndAutoPromote(
 }
 
 export const NPC_AUTO_PROMOTE_THRESHOLD = AUTO_PROMOTE_THRESHOLD
+
+function isTransientServiceNpc(c: {
+  name: string
+  description: string | null
+  active_goal?: string | null
+  personal_goals?: string | null
+  current_focus?: string | null
+}): boolean {
+  const text = `${c.name} ${c.description ?? ''}`.toLowerCase()
+  const serviceRole =
+    /\b(usps|postal|mail carrier|mailman|mailwoman|courier|delivery driver|package driver|parcel carrier|fedex|ups|doordash|rideshare|taxi driver|cashier|receptionist|clerk|server|barista)\b/.test(
+      text,
+    )
+
+  if (!serviceRole) return false
+
+  const durableSignals = `${c.personal_goals ?? ''} ${c.current_focus ?? ''} ${c.active_goal ?? ''}`.toLowerCase()
+  return !/\b(minerva|black cloak|caesar|threat|follow|stalk|watch|spy|warn|secret|conspiracy|murder|missing|romance|debt|promise|protect|investigate)\b/.test(
+    durableSignals,
+  )
+}
