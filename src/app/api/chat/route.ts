@@ -2,6 +2,7 @@ import { xai } from '@ai-sdk/xai'
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
+  stepCountIs,
   streamText,
   type ModelMessage,
 } from 'ai'
@@ -28,7 +29,9 @@ import {
   updateTurnMetadata,
 } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
+import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
+import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
   formatSceneDigestForClassifier,
@@ -186,6 +189,14 @@ export async function POST(req: Request) {
 
   const classification = await classifyAction(playerText, formatSceneDigestForClassifier(priorState))
 
+  // Lazy real-world geocoding. Any place rows still flagged unresolved get a
+  // single Nominatim attempt before the NPC agent and narrator see state.
+  // Bounded parallelism + per-call timeout keep latency capped (first turn
+  // referencing a new place pays once; subsequent turns are free).
+  await resolveUnresolvedPlaces(worldId).catch((err) => {
+    console.error('[place-resolver pre-narrator]', err)
+  })
+
   // NPC agent failure must NEVER block the narrator — if Haiku errors, schema
   // validation fails, or the network blips, we degrade to plan-less narration.
   const postPromotionState = getNarratorWorldState(worldId)
@@ -225,6 +236,7 @@ export async function POST(req: Request) {
     recentTurns: priorHistory,
     presentNpcCount,
     plannedActionCount: plans.length,
+    worldTime: narratorState.worldTime,
     activeObjectiveTitles: narratorState.dossier.objectives
       .filter((o) => o.status === 'active' || o.status === 'blocked')
       .map((o) => o.title),
@@ -247,11 +259,17 @@ export async function POST(req: Request) {
   const result = streamText({
     model: xai(NARRATOR_MODEL),
     messages: modelMessages,
-    onFinish: ({ text, usage: narratorUsage }) => {
+    tools: narratorMapTools,
+    stopWhen: stepCountIs(2),
+    onFinish: ({ text, usage: narratorUsage, toolResults }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
       const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
-      const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage }
+      const narratorMeta = {
+        model: NARRATOR_MODEL,
+        usage: narratorUsage,
+        toolResults: toolResults.length > 0 ? toolResults : undefined,
+      }
       const classifierMeta = {
         model: classification.model,
         method: classification.method,

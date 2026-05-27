@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -226,7 +226,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -266,7 +266,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -374,7 +374,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -414,7 +414,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -469,7 +469,7 @@ describe('v13 migration (player_canon_and_corrections)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -518,5 +518,182 @@ describe('v13 migration (player_canon_and_corrections)', () => {
     expect(row.player_text).toBe('I drive a Subaru')
     expect(row.archivist_reply).toBe('Updated.')
     expect(typeof row.created_at).toBe('string')
+  })
+})
+
+describe('v15-v16 migrations (npc_cognition + npc_reveries)', () => {
+  it('adds nullable NPC cognition and reverie columns to characters', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Thinking World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Mevagissey harbour',
+        identity: 'Travel-worn letter-writer.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(cols.map((c) => [c.name, c]))
+
+    for (const name of [
+      'private_beliefs',
+      'reveries',
+      'relationship_to_player',
+      'long_term_agenda',
+      'tool_access',
+    ]) {
+      const col = byName.get(name)
+      expect(col?.type.toUpperCase()).toBe('TEXT')
+      expect(col?.notnull).toBe(0)
+      expect(col?.dflt_value).toBeNull()
+    }
+
+    const player = db
+      .prepare(
+        `SELECT private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access
+         FROM characters WHERE world_id = 1`,
+      )
+      .get() as {
+      private_beliefs: string | null
+      reveries: string | null
+      relationship_to_player: string | null
+      long_term_agenda: string | null
+      tool_access: string | null
+    }
+    expect(player.private_beliefs).toBeNull()
+    expect(player.reveries).toBeNull()
+    expect(player.relationship_to_player).toBeNull()
+    expect(player.long_term_agenda).toBeNull()
+    expect(player.tool_access).toBeNull()
+  })
+})
+
+describe('v17 migration (place_geo_anchors)', () => {
+  it('adds setting_region on worlds and OSM anchor columns on places', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Real-world test',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Hayden, Idaho',
+        identity: 'Driver, mid-thirties.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const settingRegion = worldCols.find((c) => c.name === 'setting_region')
+    expect(settingRegion?.type.toUpperCase()).toBe('TEXT')
+    expect(settingRegion?.notnull).toBe(0)
+    expect(settingRegion?.dflt_value).toBeNull()
+
+    const placeCols = db.prepare("PRAGMA table_info('places')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(placeCols.map((c) => [c.name, c]))
+    for (const name of [
+      'osm_display_name',
+      'osm_street',
+      'osm_neighborhood',
+    ]) {
+      const col = byName.get(name)
+      expect(col?.type.toUpperCase()).toBe('TEXT')
+      expect(col?.notnull).toBe(0)
+    }
+    expect(byName.get('osm_lat')?.type.toUpperCase()).toBe('REAL')
+    expect(byName.get('osm_lng')?.type.toUpperCase()).toBe('REAL')
+    const geoStatus = byName.get('geo_status')
+    expect(geoStatus?.type.toUpperCase()).toBe('TEXT')
+    expect(geoStatus?.notnull).toBe(1)
+    expect(geoStatus?.dflt_value).toBe("'unresolved'")
+  })
+})
+
+describe('v18 migration (npc_journey_state)', () => {
+  it('adds in_transit_to_place_id, arrival_world_time, last_known_situation to characters', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Journey World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Hayden, Idaho',
+        identity: 'Driver, mid-thirties.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(cols.map((c) => [c.name, c]))
+
+    const inTransit = byName.get('in_transit_to_place_id')
+    expect(inTransit?.type.toUpperCase()).toBe('INTEGER')
+    expect(inTransit?.notnull).toBe(0)
+    expect(inTransit?.dflt_value).toBeNull()
+
+    for (const name of ['arrival_world_time', 'last_known_situation']) {
+      const col = byName.get(name)
+      expect(col?.type.toUpperCase()).toBe('TEXT')
+      expect(col?.notnull).toBe(0)
+      expect(col?.dflt_value).toBeNull()
+    }
+
+    // FK on in_transit_to_place_id should be ON DELETE SET NULL — verify by
+    // round-trip: create a place, point a character at it, delete the place,
+    // expect the character's in_transit_to_place_id to clear.
+    const place = db
+      .prepare(`INSERT INTO places (world_id, name) VALUES (1, 'Office') RETURNING id`)
+      .get() as { id: number }
+    db.prepare(
+      `UPDATE characters SET in_transit_to_place_id = ? WHERE world_id = 1`,
+    ).run(place.id)
+    db.prepare('DELETE FROM places WHERE id = ?').run(place.id)
+    const after = db
+      .prepare('SELECT in_transit_to_place_id FROM characters WHERE world_id = 1')
+      .get() as { in_transit_to_place_id: number | null }
+    expect(after.in_transit_to_place_id).toBeNull()
   })
 })

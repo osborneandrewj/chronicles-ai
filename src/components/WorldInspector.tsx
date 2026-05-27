@@ -451,14 +451,21 @@ function CharacterCard({
   character: FullWorldState["characters"][number];
   turnTimestamps: Record<number, string>;
 }) {
-  const hasAgencyFields =
+  const hasMindFields =
     c.is_player !== 1 &&
-    (c.personal_goals ||
-      c.active_goal ||
-      c.current_focus ||
-      c.current_attitude ||
-      c.recent_activity ||
-      c.observations);
+    (c.long_term_agenda ||
+      c.relationship_to_player ||
+      c.private_beliefs ||
+      c.reveries ||
+      c.tool_access);
+  const hasNowFields =
+    c.is_player !== 1 &&
+    (c.personal_goals || c.active_goal || c.current_focus || c.current_attitude);
+  const hasHistoryFields =
+    c.is_player !== 1 &&
+    (c.recent_activity || c.observations);
+  const hasAgencyFields =
+    hasMindFields || hasNowFields || hasHistoryFields;
   return (
     <li className="border-l-2 border-neutral-800 pl-2.5">
       <div className="flex items-baseline gap-2">
@@ -473,6 +480,9 @@ function CharacterCard({
         )}
       </div>
       <TimestampText label="Updated" value={c.updated_at} />
+      {c.is_player !== 1 && (
+        <NpcAgencySummary character={c} turnTimestamps={turnTimestamps} />
+      )}
       {c.description && <p className="mt-0.5 text-neutral-400">{c.description}</p>}
       {c.player_notes && (
         <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-[12px]">
@@ -490,30 +500,65 @@ function CharacterCard({
         </div>
       )}
       {hasAgencyFields && (
-        <dl className="mt-1 space-y-0.5 text-[12px]">
-          {c.personal_goals && (
-            <CharField label="personal goals" tone="emerald">
-              <MultiLine value={c.personal_goals} turnTimestamps={turnTimestamps} />
-            </CharField>
+        <dl className="mt-1.5 space-y-1.5 text-[12px]">
+          {hasMindFields && (
+            <CharacterStateGroup label="Mind">
+              {c.long_term_agenda && (
+                <CharField label="agenda" tone="emerald">
+                  <MultiLine value={c.long_term_agenda} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+              {c.relationship_to_player && (
+                <CharField label="relationship" tone="amber">{c.relationship_to_player}</CharField>
+              )}
+              {c.private_beliefs && (
+                <CharField label="beliefs" tone="sky">
+                  <MultiLine value={c.private_beliefs} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+              {c.reveries && (
+                <CharField label="reveries" tone="violet">
+                  <MultiLine value={c.reveries} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+              {c.tool_access && (
+                <CharField label="tools" tone="sky">
+                  <MultiLine value={c.tool_access} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+            </CharacterStateGroup>
           )}
-          {c.active_goal && (
-            <CharField label="goal" tone="amber">{c.active_goal}</CharField>
+          {hasNowFields && (
+            <CharacterStateGroup label="Now">
+              {c.personal_goals && (
+                <CharField label="personal goals" tone="emerald">
+                  <MultiLine value={c.personal_goals} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+              {c.active_goal && (
+                <CharField label="goal" tone="amber">{c.active_goal}</CharField>
+              )}
+              {c.current_focus && (
+                <CharField label="focus" tone="sky">{c.current_focus}</CharField>
+              )}
+              {c.current_attitude && (
+                <CharField label="attitude" tone="amber">{c.current_attitude}</CharField>
+              )}
+            </CharacterStateGroup>
           )}
-          {c.current_focus && (
-            <CharField label="focus" tone="sky">{c.current_focus}</CharField>
-          )}
-          {c.current_attitude && (
-            <CharField label="attitude" tone="amber">{c.current_attitude}</CharField>
-          )}
-          {c.recent_activity && (
-            <CharField label="activity" tone="sky">
-              <MultiLine value={c.recent_activity} turnTimestamps={turnTimestamps} />
-            </CharField>
-          )}
-          {c.observations && (
-            <CharField label="observed" tone="amber">
-              <MultiLine value={c.observations} turnTimestamps={turnTimestamps} />
-            </CharField>
+          {hasHistoryFields && (
+            <CharacterStateGroup label="History">
+              {c.recent_activity && (
+                <CharField label="activity" tone="sky">
+                  <MultiLine value={c.recent_activity} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+              {c.observations && (
+                <CharField label="observed" tone="amber">
+                  <MultiLine value={c.observations} turnTimestamps={turnTimestamps} />
+                </CharField>
+              )}
+            </CharacterStateGroup>
           )}
         </dl>
       )}
@@ -526,6 +571,28 @@ function CharacterCard({
         />
       )}
     </li>
+  );
+}
+
+function NpcAgencySummary({
+  character: c,
+  turnTimestamps,
+}: {
+  character: FullWorldState["characters"][number];
+  turnTimestamps: Record<number, string>;
+}) {
+  const parts = [`seen ${c.appearance_count}x`];
+  const lastSeen = turnLabel(c.last_seen_turn_id, turnTimestamps);
+  const lastTick = turnLabel(c.last_agent_tick_turn_id, turnTimestamps);
+  if (lastSeen) parts.push(`last seen ${lastSeen}`);
+  if (lastTick) parts.push(`agent tick ${lastTick}`);
+
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
+      {parts.map((part) => (
+        <span key={part}>{part}</span>
+      ))}
+    </div>
   );
 }
 
@@ -572,12 +639,30 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-type FieldTone = "amber" | "sky" | "emerald";
+type FieldTone = "amber" | "sky" | "emerald" | "violet";
 const TONE_CLASS: Record<FieldTone, string> = {
   amber: "text-amber-500/70",
   sky: "text-sky-400/80",
   emerald: "text-emerald-400/80",
+  violet: "text-violet-400/80",
 };
+
+function CharacterStateGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-l border-neutral-800/80 pl-2">
+      <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+        {label}
+      </div>
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
 
 function CharField({
   label,
@@ -591,9 +676,18 @@ function CharField({
   return (
     <div className="flex gap-1.5">
       <dt className={`shrink-0 ${TONE_CLASS[tone]}`}>{label}:</dt>
-      <dd className="text-neutral-300">{children}</dd>
+      <dd className="min-w-0 break-words text-neutral-300">{children}</dd>
     </div>
   );
+}
+
+function turnLabel(
+  turnId: number | null | undefined,
+  turnTimestamps: Record<number, string>,
+): string | null {
+  if (!turnId) return null;
+  const timestamp = turnTimestamps[turnId];
+  return timestamp ? formatTimestamp(timestamp) : `#${turnId}`;
 }
 
 function MultiLine({

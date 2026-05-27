@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { applyArchivistPatch } from '@/lib/archivist'
-import { insertTurn } from '@/lib/db'
+import { applyNpcAgentPatch } from '@/lib/npc-agent'
+import { db, insertTurn } from '@/lib/db'
 import { createWorld } from '@/lib/worlds'
 import { formatDossierBlock, formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
 
@@ -69,5 +70,43 @@ describe('story dossier state', () => {
     expect(formatDossierBlock({ threads: [], clues: [], objectives: [], resources: [], timeline: [] })).toBe(
       '',
     )
+  })
+
+  it('renders NPC cognition into the narrator state block', () => {
+    const { worldId, turnId } = seedWorld()
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Mara Vale',
+          description: 'A field analyst with rain in her coat seams.',
+          current_place_name: 'Wheat field near a spire',
+        },
+      ],
+    })
+    db.prepare(
+      `UPDATE characters SET agency_level = 'local'
+       WHERE world_id = ? AND name = 'Mara Vale'`,
+    ).run(worldId)
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [
+        {
+          name: 'Mara Vale',
+          private_beliefs: 'believes the relay fragment was planted as bait',
+          reveries: 'rain on wheat recalls the informant she lost outside Hive Tarsus',
+          relationship_to_player: 'trusts Andras with evidence but not with motives',
+          long_term_agenda: 'protect her informant\nforce the spire to reveal its transmitter',
+          tool_access: 'can query field records and auspex logs',
+        },
+      ],
+    })
+
+    const state = getNarratorWorldState(worldId)
+    const block = formatStateBlock(state)
+
+    expect(block).toContain('private belief: believes the relay fragment was planted as bait')
+    expect(block).toContain('reverie: rain on wheat recalls the informant')
+    expect(block).toContain('relationship to protagonist: trusts Andras with evidence')
+    expect(block).toContain('agenda:')
+    expect(block).toContain('diegetic tools: can query field records and auspex logs')
   })
 })

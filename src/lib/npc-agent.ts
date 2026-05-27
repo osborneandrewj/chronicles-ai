@@ -40,6 +40,69 @@ const NpcUpdateSchema = z.object({
       'Replace personal_goals (newline-separated, multi-line). Include any prior goals you want to keep. ' +
         'Most patches omit this — only update when narration revealed something genuinely new.',
     ),
+  private_beliefs: z
+    .string()
+    .optional()
+    .describe(
+      'Replace private_beliefs (newline-separated). What this NPC personally believes, suspects, ' +
+        'misunderstands, or knows privately. Include prior beliefs you want to keep. Use only when a belief changes.',
+    ),
+  reveries: z
+    .string()
+    .optional()
+    .describe(
+      'Replace reveries (newline-separated). Charged sensory or emotional memories that can flare ' +
+        'when the current scene echoes them. Include prior reveries you want to keep. Use sparingly.',
+    ),
+  relationship_to_player: z
+    .string()
+    .optional()
+    .describe(
+      'Replace the compact relationship anchor to the protagonist: trust, fear, debt, resentment, ' +
+        'promises, leverage, shared secrets, or open tension. Use only when it meaningfully changes.',
+    ),
+  long_term_agenda: z
+    .string()
+    .optional()
+    .describe(
+      'Replace long_term_agenda (newline-separated). Durable wants, pressure, deadline, secret, ' +
+        'fallback plan, or line they will not cross. Include prior agenda items you want to keep.',
+    ),
+  tool_access: z
+    .string()
+    .optional()
+    .describe(
+      'Replace diegetic tool access: in-world resources this NPC can plausibly use, such as records, ' +
+        'contacts, devices, institutional authority, spells, scanners, or the public web in modern settings.',
+    ),
+  in_transit_to: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Destination this NPC is currently traveling toward. Must match a known place name (case-insensitive). ' +
+        'Set when an off-scene NPC starts a journey; the narrator will not arrive them at the destination ' +
+        'until the world clock catches up to arrival_world_time. Pass null to clear (journey complete or aborted). ' +
+        'Unknown destinations are silently dropped.',
+    ),
+  arrival_world_time: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'Free-text world-clock string for expected arrival at in_transit_to (e.g. "11:36 AM", "Day 2, 2pm"). ' +
+        'Estimate honestly from realistic travel time given the world clock + the route distance. ' +
+        'Do not arrive an NPC before this time. Pass null to clear when the journey ends.',
+    ),
+  last_known_situation: z
+    .string()
+    .optional()
+    .describe(
+      'A short present-tense snapshot of this NPC\'s physical state RIGHT NOW (e.g. "in her sedan, ' +
+        'southbound on Government Way, two minutes from the office", "at her desk on a call with HR"). ' +
+        'Distinct from current_focus (mental). The narrator reads this when staging off-scene dialogue, ' +
+        'phone calls, messages, or references. Overwrites prior value. Update every turn for off-scene NPCs.',
+    ),
 })
 
 const PlannedActionSchema = z.object({
@@ -85,19 +148,32 @@ type AgentNpcRow = {
   personal_goals: string | null
   current_focus: string | null
   recent_activity: string | null
+  private_beliefs: string | null
+  reveries: string | null
+  relationship_to_player: string | null
+  long_term_agenda: string | null
+  tool_access: string | null
   active_goal: string | null
   current_attitude: string | null
   current_place_id: number | null
   current_place_name: string | null
   agency_level: string
   last_agent_tick_turn_id: number | null
+  in_transit_to_place_id: number | null
+  in_transit_to_name: string | null
+  arrival_world_time: string | null
+  last_known_situation: string | null
 }
 
 const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
+         c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
+         c.reveries,
          c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
          c.last_agent_tick_turn_id,
-         (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name
+         c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
+         (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name,
+         (SELECT name FROM places WHERE id = c.in_transit_to_place_id) AS in_transit_to_name
     FROM characters c
    WHERE c.world_id = ?
      AND c.agency_level IN ('local', 'nearby', 'distant', 'agent')
@@ -121,8 +197,12 @@ const playerLocationStmt = db.prepare<[number]>(`
 `)
 
 const worldTimeStmt = db.prepare<[number]>('SELECT world_time FROM worlds WHERE id = ?')
+const settingRegionStmt = db.prepare<[number]>(
+  'SELECT setting_region FROM worlds WHERE id = ?',
+)
 const placesForWorldStmt = db.prepare<[number]>(
-  'SELECT id, name FROM places WHERE world_id = ? ORDER BY id ASC',
+  `SELECT id, name, osm_street, osm_neighborhood, osm_display_name, geo_status
+     FROM places WHERE world_id = ? ORDER BY id ASC`,
 )
 const setLastAgentTickStmt = db.prepare<[number, number]>(
   `UPDATE characters SET last_agent_tick_turn_id = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -153,7 +233,18 @@ export async function runNpcAgentTick(
   const { world_time: worldTime } = (worldTimeStmt.get(worldId) as { world_time: string | null }) ?? {
     world_time: null,
   }
-  const knownPlaces = placesForWorldStmt.all(worldId) as Array<{ id: number; name: string }>
+  const { setting_region: settingRegion } =
+    (settingRegionStmt.get(worldId) as { setting_region: string | null }) ?? {
+      setting_region: null,
+    }
+  const knownPlaces = placesForWorldStmt.all(worldId) as Array<{
+    id: number
+    name: string
+    osm_street: string | null
+    osm_neighborhood: string | null
+    osm_display_name: string | null
+    geo_status: string
+  }>
 
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
@@ -161,6 +252,11 @@ export async function runNpcAgentTick(
     name: a.name,
     description: a.description,
     personal_goals: a.personal_goals,
+    private_beliefs: lastNLines(stripFactProvenance(a.private_beliefs), 4),
+    reveries: lastNLines(stripFactProvenance(a.reveries), 4),
+    relationship_to_player: a.relationship_to_player,
+    long_term_agenda: lastNLines(stripFactProvenance(a.long_term_agenda), 4),
+    tool_access: a.tool_access,
     agency_level: a.agency_level,
     tick_rate:
       a.agency_level === 'local' || a.agency_level === 'agent'
@@ -175,6 +271,13 @@ export async function runNpcAgentTick(
     present_with_protagonist:
       a.current_place_id !== null && a.current_place_id === player?.current_place_id,
     recent_activity: lastNLines(stripFactProvenance(a.recent_activity), 3),
+    // Journey state: where they're heading (if anywhere), when they should
+    // arrive, and a short present-tense snapshot of physical state right now.
+    // The agent advances last_known_situation each turn the NPC is in transit
+    // and only flips current_place when the world clock catches up to ETA.
+    in_transit_to: a.in_transit_to_name,
+    arrival_world_time: a.arrival_world_time,
+    last_known_situation: a.last_known_situation,
   }))
 
   const priorNarration = recentTurns
@@ -189,13 +292,14 @@ export async function runNpcAgentTick(
     system: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
     prompt: [
       `WORLD TIME: ${worldTime ?? '(unset)'}`,
+      `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
       `PROTAGONIST IS AT: ${player?.current_place_name ?? '(unknown)'}`,
       '',
       'AGENT NPCs:',
       JSON.stringify(npcContext, null, 2),
       '',
-      'KNOWN PLACES:',
-      knownPlaces.map((p) => `- ${p.name}`).join('\n'),
+      'KNOWN PLACES (real-world street/neighborhood facts are authoritative — do not contradict them):',
+      knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
       '',
       priorNarration ? `PRIOR NARRATION (what just happened — base your updates on this):\n${priorNarration}` : 'PRIOR NARRATION: (none — this is the first turn)',
       '',
@@ -235,6 +339,30 @@ const setPlaceStmt = db.prepare<[number, number]>(
 )
 const setPersonalGoalsStmt = db.prepare<[string, number]>(
   `UPDATE characters SET personal_goals = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setPrivateBeliefsStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET private_beliefs = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setReveriesStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET reveries = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setLongTermAgendaStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET long_term_agenda = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setToolAccessStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET tool_access = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setInTransitToStmt = db.prepare<[number | null, number]>(
+  `UPDATE characters SET in_transit_to_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setArrivalWorldTimeStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET arrival_world_time = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setLastKnownSituationStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET last_known_situation = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 
 export function applyNpcAgentPatch(
@@ -279,9 +407,54 @@ export function applyNpcAgentPatch(
       if (u.personal_goals !== undefined) {
         setPersonalGoalsStmt.run(u.personal_goals, existing.id)
       }
+      if (u.private_beliefs !== undefined) {
+        setPrivateBeliefsStmt.run(u.private_beliefs, existing.id)
+      }
+      if (u.reveries !== undefined) {
+        setReveriesStmt.run(u.reveries, existing.id)
+      }
+      if (u.relationship_to_player !== undefined) {
+        setRelationshipToPlayerStmt.run(u.relationship_to_player, existing.id)
+      }
+      if (u.long_term_agenda !== undefined) {
+        setLongTermAgendaStmt.run(u.long_term_agenda, existing.id)
+      }
+      if (u.tool_access !== undefined) {
+        setToolAccessStmt.run(u.tool_access, existing.id)
+      }
+      if (u.in_transit_to !== undefined) {
+        if (u.in_transit_to === null) {
+          setInTransitToStmt.run(null, existing.id)
+        } else {
+          const place = findPlaceByNameStmt.get(worldId, u.in_transit_to) as
+            | { id: number }
+            | undefined
+          if (place) setInTransitToStmt.run(place.id, existing.id)
+          // Unknown destination: silently drop, mirroring current_place_name.
+        }
+      }
+      if (u.arrival_world_time !== undefined) {
+        setArrivalWorldTimeStmt.run(u.arrival_world_time, existing.id)
+      }
+      if (u.last_known_situation !== undefined) {
+        setLastKnownSituationStmt.run(u.last_known_situation, existing.id)
+      }
     }
   })
   tx()
+}
+
+function formatKnownPlaceLine(p: {
+  name: string
+  osm_street: string | null
+  osm_neighborhood: string | null
+  geo_status: string
+}): string {
+  if (p.geo_status !== 'ok') return p.name
+  const bits: string[] = []
+  if (p.osm_street) bits.push(p.osm_street)
+  if (p.osm_neighborhood && p.osm_neighborhood !== p.osm_street) bits.push(p.osm_neighborhood)
+  return bits.length > 0 ? `${p.name} — ${bits.join(' · ')}` : p.name
 }
 
 function lastNLines(value: string | null, n: number): string | null {
