@@ -42,6 +42,7 @@ export type Character = {
   in_transit_to_place_id: number | null
   arrival_world_time: string | null
   last_known_situation: string | null
+  aliases: string | null
   created_at: string
   updated_at: string
 }

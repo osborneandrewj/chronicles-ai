@@ -569,6 +569,20 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE characters ADD COLUMN last_known_situation TEXT')
     },
   },
+  {
+    // v0.6.8 — character aliases. Newline-separated alternate descriptors
+    // that resolve to the same canonical character row. Lets the archivist
+    // record "the man at the gyro van" + "the man in the canvas vest" as
+    // aliases on a single entity rather than minting a new row for each
+    // descriptor variant. The player-correction channel already used the
+    // word "aliases" for an in-memory merge directive — this column is the
+    // first persistent home for them.
+    version: 19,
+    name: 'character_aliases',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN aliases TEXT')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

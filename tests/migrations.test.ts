@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -226,7 +226,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -266,7 +266,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -374,7 +374,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -414,7 +414,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -469,7 +469,7 @@ describe('v13 migration (player_canon_and_corrections)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -539,7 +539,7 @@ describe('v15-v16 migrations (npc_cognition + npc_reveries)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -601,7 +601,7 @@ describe('v17 migration (place_geo_anchors)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -658,7 +658,7 @@ describe('v18 migration (npc_journey_state)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(18)
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -695,5 +695,52 @@ describe('v18 migration (npc_journey_state)', () => {
       .prepare('SELECT in_transit_to_place_id FROM characters WHERE world_id = 1')
       .get() as { in_transit_to_place_id: number | null }
     expect(after.in_transit_to_place_id).toBeNull()
+  })
+})
+
+describe('v19 migration (character_aliases)', () => {
+  it('adds a nullable aliases TEXT column to characters', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Alias World',
+      'p',
+      JSON.stringify({
+        time: 'morning',
+        location: 'somewhere',
+        identity: 'a face',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(19)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const byName = new Map(cols.map((c) => [c.name, c]))
+    const aliases = byName.get('aliases')
+    expect(aliases?.type.toUpperCase()).toBe('TEXT')
+    expect(aliases?.notnull).toBe(0)
+    expect(aliases?.dflt_value).toBeNull()
+
+    // Round-trip: write + read a newline-separated alias list.
+    db.prepare(
+      `UPDATE characters SET aliases = ? WHERE world_id = 1 AND is_player = 1`,
+    ).run('the man at the gyro van\nthe pale-eyed figure')
+    const row = db
+      .prepare('SELECT aliases FROM characters WHERE world_id = 1 AND is_player = 1')
+      .get() as { aliases: string }
+    expect(row.aliases.split('\n')).toEqual([
+      'the man at the gyro van',
+      'the pale-eyed figure',
+    ])
   })
 })

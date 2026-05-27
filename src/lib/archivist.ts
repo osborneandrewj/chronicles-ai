@@ -96,11 +96,18 @@ const CharacterPatchSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Other names that refer to the same character — only set from the correction channel. ' +
-        'Each alias is looked up by case-insensitive exact match against existing characters; ' +
-        'each matching row is merged into this one and the alias row deleted. Use this when the ' +
-        'player explicitly tells the archivist that two existing characters are the same person ' +
-        '(e.g. "Bob and Robert are the same"). Never set from narrator extraction.',
+      'Other names or descriptors that refer to the same character. Used in two ways: (1) the ' +
+        'correction channel can list pre-existing rows that should be merged into this one ' +
+        '(e.g. "Bob and Robert are the same"); (2) the narrator-extraction path lists alternate ' +
+        'descriptors seen in prose for unnamed figures so subsequent turns resolve them to this ' +
+        'same row. Each alias is looked up by case-insensitive exact match against existing ' +
+        'characters and any match is merged in; all final aliases are persisted on the canonical ' +
+        'row so future references resolve correctly. ' +
+        'NARRATOR-EXTRACTION USE: when a figure is unnamed and described by a new variant ' +
+        '(e.g. "the man at the gyro van" → "the man in the canvas vest" → "the pale-eyed man"), ' +
+        'list the new descriptor here on the same row, do NOT mint a new character. ' +
+        'CORRECTION USE: only set when the player explicitly tells the archivist two existing ' +
+        'rows are the same person.',
     ),
 })
 
@@ -613,6 +620,7 @@ type CharacterRow = {
   last_seen_turn_id: number | null
   last_agent_tick_turn_id: number | null
   player_notes: string | null
+  aliases: string | null
   updated_at: string
 }
 
@@ -657,7 +665,7 @@ const listCharactersForWorldStmt = db.prepare<[number]>(
           status, active_goal, current_attitude, observations, agency_level,
           personal_goals, current_focus, recent_activity,
           private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
-          last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
+          last_seen_turn_id, last_agent_tick_turn_id, player_notes, aliases, updated_at
    FROM characters
    WHERE world_id = ?
    ORDER BY id ASC`,
@@ -671,7 +679,7 @@ const findCharacterByExactLowerNameStmt = db.prepare<[number, string]>(
           status, active_goal, current_attitude, observations, agency_level,
           personal_goals, current_focus, recent_activity,
           private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
-          last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
+          last_seen_turn_id, last_agent_tick_turn_id, player_notes, aliases, updated_at
    FROM characters
    WHERE world_id = ? AND lower(name) = lower(?)`,
 )
@@ -767,6 +775,7 @@ const mergeCharacterStmt = db.prepare<
     number | null,
     number | null,
     string | null,
+    string | null,
     number,
   ]
 >(
@@ -792,6 +801,7 @@ const mergeCharacterStmt = db.prepare<
      last_seen_turn_id       = ?,
      last_agent_tick_turn_id = ?,
      player_notes            = ?,
+     aliases                 = ?,
      updated_at              = datetime('now')
    WHERE id = ?`,
 )
@@ -799,6 +809,9 @@ const deleteCharacterStmt = db.prepare<[number]>('DELETE FROM characters WHERE i
 // Used by mergeCharacters when the caller passes a canonicalName different
 // from the kept row's existing name (alias-merge canonicalisation). Bumps
 // updated_at so subsequent freshest() comparisons see the new mtime.
+const setCharacterAliasesStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET aliases = ?, updated_at = datetime('now') WHERE id = ?`,
+)
 const renameCharacterStmt = db.prepare<[string, number]>(
   `UPDATE characters SET name = ?, updated_at = datetime('now') WHERE id = ?`,
 )
@@ -1113,6 +1126,12 @@ function isResidentialPlace(place: PlaceRow): boolean {
 
 function resolveCharacter(worldId: number, requestedName: string): CharacterRow | undefined {
   const rows = listCharactersForWorldStmt.all(worldId) as CharacterRow[]
+  // Aliases beat fuzzy match: if any row claims this descriptor as an
+  // alias, treat that row as canonical regardless of fuzzy-token rules.
+  // This is what lets the archivist deduplicate descriptor-only figures
+  // ("the man at the gyro van" → existing "Man in the Canvas Vest" row).
+  const aliasHit = findCharacterByNameOrAlias(rows, requestedName)
+  if (aliasHit) return aliasHit
   const matches = rows.filter((row) => charactersMatch(requestedName, row.name))
   if (matches.length === 0) return undefined
 
@@ -1208,8 +1227,19 @@ function mergeCharacters(
     }
     return
   }
+  const finalName = canonicalName ?? target.name
+  // The losing row's display name and any aliases it had become aliases on
+  // the kept row. Skip the name we're keeping as canonical (no self-aliases).
+  const mergedAliasesRaw = mergeLineBlocks(target.aliases, source.aliases)
+  const inferredAlias = source.name && source.name !== finalName ? source.name : null
+  const carriedAlias =
+    target.name && target.name !== finalName ? target.name : null
+  const aliasesWithCarry = [mergedAliasesRaw, inferredAlias, carriedAlias]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    .join('\n')
+  const mergedAliases = filterAliasesAgainstName(aliasesWithCarry, finalName)
   const merged = {
-    name: canonicalName ?? target.name,
+    name: finalName,
     description: chooseLonger(target.description, source.description),
     current_place_id: freshest(target, source, (r) => r.current_place_id),
     memorable_facts: mergeLineBlocks(target.memorable_facts, source.memorable_facts),
@@ -1233,6 +1263,7 @@ function mergeCharacters(
       source.last_agent_tick_turn_id,
     ),
     player_notes: mergeLineBlocks(target.player_notes, source.player_notes),
+    aliases: mergedAliases,
   }
   deleteCharacterStmt.run(source.id)
   mergeCharacterStmt.run(
@@ -1257,6 +1288,7 @@ function mergeCharacters(
     merged.last_seen_turn_id,
     merged.last_agent_tick_turn_id,
     merged.player_notes,
+    merged.aliases,
     target.id,
   )
   Object.assign(target, merged)
@@ -1318,6 +1350,50 @@ function chooseLonger(a: string | null, b: string | null): string | null {
   if (!a) return b
   if (!b) return a
   return b.length > a.length ? b : a
+}
+
+// Aliases are stored as a newline-separated list. This helper drops any line
+// whose canonical key matches the canonical name itself (a row's canonical
+// name is never simultaneously one of its aliases) plus exact duplicate
+// lines, and returns null when the resulting list is empty.
+function filterAliasesAgainstName(raw: string | null, name: string): string | null {
+  if (!raw) return null
+  const nameKey = canonicalCharacterKey(name)
+  const seen = new Set<string>()
+  const kept: string[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const key = canonicalCharacterKey(trimmed)
+    if (!key || key === nameKey) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    kept.push(trimmed)
+  }
+  return kept.length > 0 ? kept.join('\n') : null
+}
+
+// Alias-aware lookup. Returns the existing row whose canonical name matches
+// the requested name, OR whose aliases list contains a line whose canonical
+// key matches. Used by resolveCharacter() so the archivist can record "the
+// man at the gyro van" as an alias on "the man in the canvas vest" and
+// subsequent prose referencing either descriptor lands on the same row.
+function findCharacterByNameOrAlias(
+  rows: CharacterRow[],
+  requestedName: string,
+): CharacterRow | null {
+  const requestedKey = canonicalCharacterKey(requestedName)
+  if (!requestedKey) return null
+  for (const row of rows) {
+    if (canonicalCharacterKey(row.name) === requestedKey) return row
+    if (!row.aliases) continue
+    for (const line of row.aliases.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      if (canonicalCharacterKey(trimmed) === requestedKey) return row
+    }
+  }
+  return null
 }
 
 function mergeLineBlocks(a: string | null, b: string | null): string | null {
@@ -1586,16 +1662,26 @@ export function applyArchivistPatch(
           }
         }
 
-        // player_notes_append + aliases are the v0.6.6 correction-channel
-        // fields. They work uniformly on freshly-inserted and existing rows.
-        // The normal narrator-extraction prompt is forbidden from setting
-        // either; relying on prompt discipline keeps applyArchivistPatch from
-        // needing a per-call source flag.
+        // player_notes_append is correction-channel only and append-only.
         if (c.player_notes_append) {
           const line = c.player_notes_append.trim()
           if (line) appendCharacterPlayerNotesStmt.run(line, line, characterId)
         }
 
+        // Persist aliases on the canonical row so subsequent turns'
+        // resolveCharacter() can match descriptor variants to this same
+        // character. runAliasMerges above has already collapsed any
+        // alias rows that already existed; here we just record the
+        // (possibly new) descriptors as alternate names on the kept row.
+        // Existing aliases are preserved; new ones are appended; the
+        // canonical name itself is filtered out of the list.
+        if (c.aliases && c.aliases.length > 0) {
+          const existingAliases = (existing?.aliases ?? null)
+          const incoming = c.aliases.map((a) => a.trim()).filter((a) => a.length > 0).join('\n')
+          const combined = mergeLineBlocks(existingAliases, incoming.length > 0 ? incoming : null)
+          const filtered = filterAliasesAgainstName(combined, c.name)
+          setCharacterAliasesStmt.run(filtered, characterId)
+        }
       }
     }
 

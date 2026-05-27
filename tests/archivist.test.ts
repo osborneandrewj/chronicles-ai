@@ -731,6 +731,54 @@ describe('applyArchivistPatch', () => {
     expect(everyone.filter((c) => c.is_player === 1)).toHaveLength(1)
     expect(everyone.find((c) => c.name === 'Edith Stranger')).toBeDefined()
   })
+
+  it('persists aliases on the canonical row and resolves new descriptors via them', () => {
+    // First turn: archivist creates an unnamed figure.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'The Man at the Gyro Van',
+          description: 'A short figure with pale grey eyes, behind the service window.',
+        },
+      ],
+    })
+    let everyone = getCharactersForWorld(worldId).filter((c) => c.is_player === 0)
+    expect(everyone).toHaveLength(1)
+
+    // Second turn: archivist refers to the same figure with a new descriptor
+    // and lists the new descriptor as an alias on the existing row. Expect
+    // the canonical row's aliases column to gain the new descriptor and the
+    // total character count to NOT increase.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'The Man at the Gyro Van',
+          aliases: ['The Man in the Canvas Vest'],
+          memorable_facts_append: 'wore a canvas vest with deep pockets',
+        },
+      ],
+    })
+    everyone = getCharactersForWorld(worldId).filter((c) => c.is_player === 0)
+    expect(everyone).toHaveLength(1)
+    const stranger = everyone[0]
+    expect(stranger.aliases?.split('\n')).toContain('The Man in the Canvas Vest')
+
+    // Third turn: archivist references the figure by the alias only. Expect
+    // resolveCharacter() to find the canonical row via its aliases list and
+    // apply the update there — no new row created.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'The Man in the Canvas Vest',
+          memorable_facts_append: 'spoke in an unrecognizable rolling tongue',
+        },
+      ],
+    })
+    everyone = getCharactersForWorld(worldId).filter((c) => c.is_player === 0)
+    expect(everyone).toHaveLength(1)
+    expect(everyone[0].id).toBe(stranger.id)
+    expect(everyone[0].memorable_facts).toContain('rolling tongue')
+  })
 })
 
 describe('extractDeterministicPatch', () => {
