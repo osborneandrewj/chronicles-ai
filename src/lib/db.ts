@@ -230,8 +230,11 @@ const usageTotalsStmt = db.prepare<[number]>(`
 // v0.6.2 adds observations + agentic-NPC fields).
 const CHARACTER_COLS = `id, world_id, name, description, is_player, current_place_id,
         memorable_facts, status, active_goal, current_attitude, observations,
-        agency_level, personal_goals, current_focus, recent_activity, appearance_count,
-        last_seen_turn_id, last_agent_tick_turn_id, player_notes, created_at, updated_at`
+        agency_level, personal_goals, current_focus, recent_activity,
+        private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
+        last_seen_turn_id, last_agent_tick_turn_id, player_notes,
+        in_transit_to_place_id, arrival_world_time, last_known_situation,
+        created_at, updated_at`
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
@@ -241,11 +244,17 @@ const charactersInPlaceStmt = db.prepare<[number, number]>(
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, kind, player_notes, created_at, updated_at FROM places
+  `SELECT id, world_id, name, description, kind, player_notes,
+          osm_display_name, osm_street, osm_neighborhood, osm_lat, osm_lng,
+          geo_status, geo_resolved_at,
+          created_at, updated_at FROM places
    WHERE world_id = ? ORDER BY id ASC`,
 )
 const placeByIdStmt = db.prepare<[number]>(
-  'SELECT id, world_id, name, description, kind, player_notes, created_at, updated_at FROM places WHERE id = ?',
+  `SELECT id, world_id, name, description, kind, player_notes,
+          osm_display_name, osm_street, osm_neighborhood, osm_lat, osm_lng,
+          geo_status, geo_resolved_at,
+          created_at, updated_at FROM places WHERE id = ?`,
 )
 const scenesForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,

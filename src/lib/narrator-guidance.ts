@@ -7,6 +7,7 @@ type GuidanceContext = {
   recentTurns: RecentTurn[]
   presentNpcCount: number
   plannedActionCount: number
+  worldTime?: string | null
   activeObjectiveTitles?: string[]
   openClueTitles?: string[]
 }
@@ -14,6 +15,7 @@ type GuidanceContext = {
 export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
   const attentionOnlyMove = isAttentionOnlyMove(ctx.playerText)
   const investigativeMove = isInvestigativeMove(ctx.playerText)
+  const timeCheckMove = isTimeCheckMove(ctx.playerText)
   const transitionMove = isTransitionMove(ctx.playerText)
   const dangerMove = isDangerMove(ctx.playerText)
   const spokenLanguage = detectMarkedSpokenLanguage(ctx.playerText)
@@ -63,6 +65,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
           .join(' | ')}.`,
       )
     }
+  }
+
+  if (timeCheckMove) {
+    lines.push(
+      `The player is checking an in-world time-bearing device. The device must show the authoritative world clock exactly: ${ctx.worldTime ?? '(unset)'}. Do not invent a different time, date, day, alarm, timestamp, battery clock, notification time, or timezone unless established state already says the device is wrong.`,
+    )
   }
 
   if (transitionMove || dangerMove) {
@@ -121,6 +129,17 @@ function isInvestigativeMove(text: string): boolean {
     ) || hasQuestion
 
   return hasAnalysisVerb && targetsToolOrInquiry
+}
+
+function isTimeCheckMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const hasCheckVerb = /\b(check|look at|look|glance at|read|consult|see|inspect)\b/.test(compact)
+  const hasTimeQuestion = /\bwhat time\b|\btime is it\b|\bcurrent time\b/.test(compact)
+  const hasTimeDevice =
+    /\b(watch|wristwatch|phone|cell|mobile|smartphone|clock|wall clock|alarm clock|dashboard clock|car clock|computer clock|laptop|terminal|display|screen)\b/.test(
+      compact,
+    )
+  return hasTimeQuestion || (hasCheckVerb && hasTimeDevice && /\btime|clock|watch|phone\b/.test(compact))
 }
 
 function isTransitionMove(text: string): boolean {

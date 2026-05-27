@@ -1,10 +1,12 @@
 import { db } from '@/lib/db'
+import { extractSettingRegion } from '@/lib/region-extractor'
 
 export type World = {
   id: number
   name: string
   premise: string
   initial_state_json: string
+  setting_region: string | null
   created_at: string
 }
 
@@ -26,14 +28,14 @@ export type InitialState = {
   playerName?: string
 }
 
-const insertWorldStmt = db.prepare<[string, string, string]>(
-  `INSERT INTO worlds (name, premise, initial_state_json)
-   VALUES (?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, created_at`,
+const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
+  `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
+   VALUES (?, ?, ?, ?)
+   RETURNING id, name, premise, initial_state_json, setting_region, created_at`,
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  'SELECT id, name, premise, initial_state_json, created_at FROM worlds WHERE id = ?',
+  'SELECT id, name, premise, initial_state_json, setting_region, created_at FROM worlds WHERE id = ?',
 )
 
 const listWorldsStmt = db.prepare(`
@@ -84,6 +86,7 @@ export function createWorld(input: CreateWorldInput): World {
         location: initialState.location,
         identity: initialState.identity,
       }),
+      null,
     ) as World
 
     const place = insertPlaceStmt.get(
@@ -102,6 +105,25 @@ export function createWorld(input: CreateWorldInput): World {
 
     return world
   })()
+}
+
+const setSettingRegionStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET setting_region = ? WHERE id = ?',
+)
+
+// One-shot Haiku extraction of a Nominatim-friendly region string from the
+// premise. Called from the new-world server action right after createWorld,
+// before the opening turn — so by the time the first player turn fires, the
+// region is in place to bias real-world geocoding for that world's places.
+// Kept separate from createWorld() so the rest of the codebase (tests, the
+// archivist's auto-place inserts) can use the sync path.
+export async function setSettingRegionForWorld(
+  worldId: number,
+  premise: string,
+  initialLocation: string | null,
+): Promise<void> {
+  const region = await extractSettingRegion(premise, initialLocation)
+  if (region) setSettingRegionStmt.run(region, worldId)
 }
 
 export function getWorld(id: number): World | null {

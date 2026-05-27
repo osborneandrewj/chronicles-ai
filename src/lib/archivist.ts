@@ -604,6 +604,11 @@ type CharacterRow = {
   personal_goals: string | null
   current_focus: string | null
   recent_activity: string | null
+  private_beliefs: string | null
+  reveries: string | null
+  relationship_to_player: string | null
+  long_term_agenda: string | null
+  tool_access: string | null
   appearance_count: number
   last_seen_turn_id: number | null
   last_agent_tick_turn_id: number | null
@@ -650,7 +655,8 @@ const deletePlaceStmt = db.prepare<[number]>('DELETE FROM places WHERE id = ?')
 const listCharactersForWorldStmt = db.prepare<[number]>(
   `SELECT id, name, description, is_player, current_place_id, memorable_facts,
           status, active_goal, current_attitude, observations, agency_level,
-          personal_goals, current_focus, recent_activity, appearance_count,
+          personal_goals, current_focus, recent_activity,
+          private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
           last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
    FROM characters
    WHERE world_id = ?
@@ -663,7 +669,8 @@ const listCharactersForWorldStmt = db.prepare<[number]>(
 const findCharacterByExactLowerNameStmt = db.prepare<[number, string]>(
   `SELECT id, name, description, is_player, current_place_id, memorable_facts,
           status, active_goal, current_attitude, observations, agency_level,
-          personal_goals, current_focus, recent_activity, appearance_count,
+          personal_goals, current_focus, recent_activity,
+          private_beliefs, reveries, relationship_to_player, long_term_agenda, tool_access, appearance_count,
           last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
    FROM characters
    WHERE world_id = ? AND lower(name) = lower(?)`,
@@ -751,6 +758,11 @@ const mergeCharacterStmt = db.prepare<
     string | null,
     string | null,
     string | null,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
     number,
     number | null,
     number | null,
@@ -771,6 +783,11 @@ const mergeCharacterStmt = db.prepare<
      personal_goals          = ?,
      current_focus           = ?,
      recent_activity         = ?,
+     private_beliefs         = ?,
+     reveries                = ?,
+     relationship_to_player  = ?,
+     long_term_agenda        = ?,
+     tool_access             = ?,
      appearance_count        = ?,
      last_seen_turn_id       = ?,
      last_agent_tick_turn_id = ?,
@@ -1204,6 +1221,11 @@ function mergeCharacters(
     personal_goals: mergeLineBlocks(target.personal_goals, source.personal_goals),
     current_focus: freshest(target, source, (r) => r.current_focus),
     recent_activity: mergeLineBlocks(target.recent_activity, source.recent_activity),
+    private_beliefs: mergeLineBlocks(target.private_beliefs, source.private_beliefs),
+    reveries: mergeLineBlocks(target.reveries, source.reveries),
+    relationship_to_player: freshest(target, source, (r) => r.relationship_to_player),
+    long_term_agenda: mergeLineBlocks(target.long_term_agenda, source.long_term_agenda),
+    tool_access: mergeLineBlocks(target.tool_access, source.tool_access),
     appearance_count: Math.max(target.appearance_count, source.appearance_count),
     last_seen_turn_id: maxNullable(target.last_seen_turn_id, source.last_seen_turn_id),
     last_agent_tick_turn_id: maxNullable(
@@ -1226,6 +1248,11 @@ function mergeCharacters(
     merged.personal_goals,
     merged.current_focus,
     merged.recent_activity,
+    merged.private_beliefs,
+    merged.reveries,
+    merged.relationship_to_player,
+    merged.long_term_agenda,
+    merged.tool_access,
     merged.appearance_count,
     merged.last_seen_turn_id,
     merged.last_agent_tick_turn_id,

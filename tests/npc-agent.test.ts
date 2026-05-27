@@ -128,6 +128,32 @@ describe('applyNpcAgentPatch', () => {
     expect(marcus.personal_goals).toBe('Wants to leave by Q4.\nWorried about his father.')
   })
 
+  it('overwrites richer cognition fields when set', () => {
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [
+        {
+          name: 'Marcus',
+          private_beliefs: 'Andrew is hiding why the auth logs changed.',
+          reveries: 'The smell of burnt coffee brings back the night the servers failed.',
+          relationship_to_player: 'Wary of Andrew, but owes him for covering the outage.',
+          long_term_agenda: 'Get out before the audit closes.\nNever implicate Jordana.',
+          tool_access: 'Can query Covenant Security issue trackers and Slack history.',
+        },
+      ],
+    })
+
+    const marcus = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
+    expect(marcus.private_beliefs).toBe('Andrew is hiding why the auth logs changed.')
+    expect(marcus.reveries).toBe(
+      'The smell of burnt coffee brings back the night the servers failed.',
+    )
+    expect(marcus.relationship_to_player).toBe(
+      'Wary of Andrew, but owes him for covering the outage.',
+    )
+    expect(marcus.long_term_agenda).toBe('Get out before the audit closes.\nNever implicate Jordana.')
+    expect(marcus.tool_access).toBe('Can query Covenant Security issue trackers and Slack history.')
+  })
+
   it('empty patch is a no-op', () => {
     const before = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
     applyNpcAgentPatch(worldId, turnId, {})

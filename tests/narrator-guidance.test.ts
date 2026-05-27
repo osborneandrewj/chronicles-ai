@@ -68,6 +68,22 @@ describe('formatNarratorTurnGuidance', () => {
     expect(guidance).toContain('branch the player can pursue')
   })
 
+  it('forces time-bearing devices to match the world clock', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'observe',
+      inputMode: 'in-character',
+      playerText: 'I look at the time on my watch.',
+      recentTurns: [],
+      presentNpcCount: 0,
+      plannedActionCount: 0,
+      worldTime: 'Tuesday, 8:17 AM',
+    })
+
+    expect(guidance).toContain('time-bearing device')
+    expect(guidance).toContain('Tuesday, 8:17 AM')
+    expect(guidance).toContain('Do not invent a different time')
+  })
+
   it('flags recent reaction-only narration loops', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'say',

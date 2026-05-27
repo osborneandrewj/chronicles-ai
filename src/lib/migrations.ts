@@ -503,6 +503,72 @@ export const migrations: Migration[] = [
       `)
     },
   },
+  {
+    // v0.6.7 — richer NPC cognition. These fields are narrator-visible but
+    // not automatically player-visible: they let agent-tier NPCs carry private
+    // beliefs, a relationship anchor to the protagonist, a durable agenda, and
+    // explicit diegetic tools without bloating ordinary memorable facts.
+    version: 15,
+    name: 'npc_cognition',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN private_beliefs TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN relationship_to_player TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN long_term_agenda TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN tool_access TEXT')
+    },
+  },
+  {
+    // v0.6.7 — NPC reveries. A reverie is a charged memory or association
+    // that can flare when the current scene rhymes with it, shaping behavior
+    // without exposing hidden motives as narrator explanation.
+    version: 16,
+    name: 'npc_reveries',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN reveries TEXT')
+    },
+  },
+  {
+    // v0.6.8 — real-world geography anchors. `worlds.setting_region` is a
+    // free-text "City, State/Country" string (e.g. "Hayden, Idaho, USA")
+    // used as a Nominatim viewbox bias when geocoding places, so "Super 1"
+    // resolves to the right town. The places.osm_* columns cache the
+    // resolved anchor so both the narrator and the (tool-less) NPC agent
+    // see the same authoritative street/neighborhood facts. geo_status
+    // tracks resolution outcome so we don't retry on every read.
+    version: 17,
+    name: 'place_geo_anchors',
+    up: (db) => {
+      db.exec('ALTER TABLE worlds ADD COLUMN setting_region TEXT')
+      db.exec('ALTER TABLE places ADD COLUMN osm_display_name TEXT')
+      db.exec('ALTER TABLE places ADD COLUMN osm_street TEXT')
+      db.exec('ALTER TABLE places ADD COLUMN osm_neighborhood TEXT')
+      db.exec('ALTER TABLE places ADD COLUMN osm_lat REAL')
+      db.exec('ALTER TABLE places ADD COLUMN osm_lng REAL')
+      db.exec(
+        `ALTER TABLE places ADD COLUMN geo_status TEXT NOT NULL DEFAULT 'unresolved'`,
+      )
+      db.exec('ALTER TABLE places ADD COLUMN geo_resolved_at TEXT')
+    },
+  },
+  {
+    // v0.6.8 — NPC journey state. Lets off-scene NPCs move in the background
+    // across multiple turns without teleporting. `in_transit_to_place_id` is
+    // the destination they are heading to (null when stationary).
+    // `arrival_world_time` is when they're expected to arrive (free-text
+    // world-clock string, e.g. "11:36 AM"). `last_known_situation` is a
+    // short present-tense snapshot of their physical state — distinct from
+    // `current_focus` (mental) — that the narrator reads when staging
+    // off-scene dialogue (phone calls, messages, references).
+    version: 18,
+    name: 'npc_journey_state',
+    up: (db) => {
+      db.exec(
+        'ALTER TABLE characters ADD COLUMN in_transit_to_place_id INTEGER REFERENCES places(id) ON DELETE SET NULL',
+      )
+      db.exec('ALTER TABLE characters ADD COLUMN arrival_world_time TEXT')
+      db.exec('ALTER TABLE characters ADD COLUMN last_known_situation TEXT')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

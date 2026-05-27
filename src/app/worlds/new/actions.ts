@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
 import { generateOpeningTurn } from '@/lib/opening-turn'
-import { createWorld } from '@/lib/worlds'
+import { createWorld, setSettingRegionForWorld } from '@/lib/worlds'
 
 const CreateWorldSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -44,6 +44,12 @@ export async function createWorldAction(
     premise,
     initialState: { time, location, identity, playerName },
   })
+  // Extract a Nominatim-friendly region string from the premise (e.g.
+  // "Hayden, Idaho, USA") and persist it before the opening turn fires.
+  // This biases real-world geocoding for every place created in this world.
+  // Failures are swallowed inside the helper — a missing region just means
+  // less-biased lookups, not a broken world.
+  await setSettingRegionForWorld(world.id, premise, location)
   // Synthesize the narrator's opening move before redirecting so the player
   // lands on a live fictional moment instead of an empty page. Awaited
   // intentionally: the action stays blocked until both the narrator and the
