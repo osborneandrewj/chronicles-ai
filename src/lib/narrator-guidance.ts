@@ -16,6 +16,7 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
   const investigativeMove = isInvestigativeMove(ctx.playerText)
   const transitionMove = isTransitionMove(ctx.playerText)
   const dangerMove = isDangerMove(ctx.playerText)
+  const spokenLanguage = detectMarkedSpokenLanguage(ctx.playerText)
   const stalled = recentNarrationIsStalled(ctx.recentTurns)
   const repeatedAnchors = repeatedAmbientAnchors(ctx.recentTurns)
   const repeatedStructure = recentNarrationUsesSameShortShape(ctx.recentTurns)
@@ -33,6 +34,11 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
     lines.push(
       'If a present character answers, render their actual spoken words. Do not summarize an answer as "he replies in the same language" or "the words are measured."',
     )
+    if (spokenLanguage) {
+      lines.push(
+        `The player marked their speech as ${spokenLanguage}. Do not write the flat phrase "speak in ${spokenLanguage}" as narration; make the language audible with one or two romanized ${spokenLanguage} words or phrases when natural, then keep the meaning legible in English.`,
+      )
+    }
   }
 
   if (ctx.stance === 'observe' || attentionOnlyMove) {
@@ -129,6 +135,17 @@ function isDangerMove(text: string): boolean {
   return /\b(explosion|blast|crater|blood|corpse|dead|wound|weapon|gun|knife|attack|threat|danger|fire|smoke|scream|alarm|soldier|body)\b/.test(
     compact,
   )
+}
+
+function detectMarkedSpokenLanguage(text: string): string | null {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const match = compact.match(
+    /\b(?:speak|say|ask|answer|reply|call|whisper|shout|tell|murmur|mutter)s?\s+(?:to\s+\w+\s+)?in\s+(russian|spanish|french|german|italian|japanese|mandarin|cantonese|korean|arabic|hindi|latin)\b/,
+  )
+  if (!match) return null
+
+  const language = match[1]
+  return language.charAt(0).toUpperCase() + language.slice(1)
 }
 
 function recentNarrationIsStalled(turns: RecentTurn[]): boolean {

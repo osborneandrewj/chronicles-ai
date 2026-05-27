@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FullWorldState } from "@/lib/world-state";
 
-type InspectorTab = "now" | "story" | "wiki";
+type InspectorTab = "now" | "story" | "wiki" | "archivist";
 
 const TABS: { id: InspectorTab; label: string; description: string }[] = [
   { id: "now", label: "Now", description: "Current scene, place, present characters" },
   { id: "story", label: "Story", description: "Quests, threads, objectives, clues, resources" },
   { id: "wiki", label: "Wiki", description: "All characters, places, scenes" },
+  { id: "archivist", label: "Archivist", description: "Talk to the archivist — corrections and player canon" },
 ];
 
 interface WorldInspectorProps {
@@ -26,6 +27,11 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<InspectorTab>("now");
+  // Local counter the Archivist tab can bump after a correction lands so the
+  // other tabs re-fetch FullWorldState and reflect the change. Stays internal
+  // so the parent doesn't need to know about correction flow.
+  const [localRefreshKey, setLocalRefreshKey] = useState(0);
+  const bumpLocalRefresh = useCallback(() => setLocalRefreshKey((n) => n + 1), []);
 
   // AbortController guards against a slow /api/world-state response landing
   // *after* a newer fetch has already updated state. Without this, rapid
@@ -59,7 +65,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
       }
     })();
     return () => ctrl.abort();
-  }, [open, refreshKey, worldId]);
+  }, [open, refreshKey, worldId, localRefreshKey]);
 
   return (
     <>
@@ -83,7 +89,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
           (open ? "translate-y-0" : "translate-y-full") +
           " " +
           // sm+: slide-over drawer pinned right.
-          "sm:inset-y-0 sm:bottom-auto sm:right-0 sm:left-auto sm:h-auto sm:w-[360px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:shadow-none " +
+          "sm:inset-y-0 sm:right-0 sm:left-auto sm:h-svh sm:w-[360px] sm:max-w-[90vw] sm:rounded-none sm:border-l sm:border-t-0 sm:shadow-none " +
           (open ? "sm:translate-y-0 sm:translate-x-0" : "sm:translate-y-0 sm:translate-x-full")
         }
       >
@@ -111,10 +117,24 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
         {/* Header plus larger tab strip is about 6rem. Subtract that from
             88svh on mobile and 100% on sm+ so the body scrolls within the
             remaining space. */}
-        <div className="h-[calc(88svh-6rem)] overflow-y-auto px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-[13px] text-neutral-300 sm:h-[calc(100%-6rem)] sm:pb-3">
+        <div
+          className={
+            "h-[calc(88svh-6rem)] text-[13px] text-neutral-300 sm:h-[calc(100%-6rem)] " +
+            (tab === "archivist"
+              ? "overflow-hidden"
+              : "overflow-y-auto px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:pb-3")
+          }
+        >
           {loading && !state && <p className="text-neutral-500">Loading…</p>}
           {error && <p className="text-red-400">{error}</p>}
-          {state && <InspectorBody state={state} tab={tab} />}
+          {state && (
+            <InspectorBody
+              state={state}
+              tab={tab}
+              worldId={worldId}
+              onCorrectionApplied={bumpLocalRefresh}
+            />
+          )}
         </div>
       </aside>
     </>
@@ -149,9 +169,21 @@ function TabStrip({ active, onChange }: { active: InspectorTab; onChange: (t: In
   );
 }
 
-function InspectorBody({ state, tab }: { state: FullWorldState; tab: InspectorTab }) {
+function InspectorBody({
+  state,
+  tab,
+  worldId,
+  onCorrectionApplied,
+}: {
+  state: FullWorldState;
+  tab: InspectorTab;
+  worldId: number;
+  onCorrectionApplied: () => void;
+}) {
   if (tab === "now") return <NowView state={state} />;
   if (tab === "story") return <StoryView state={state} />;
+  if (tab === "archivist")
+    return <ArchivistView worldId={worldId} onCorrectionApplied={onCorrectionApplied} />;
   return <WikiView state={state} />;
 }
 
@@ -354,6 +386,21 @@ function WikiView({ state }: { state: FullWorldState }) {
                 <div className="font-medium text-neutral-100">{p.name}</div>
                 <TimestampText label="Updated" value={p.updated_at} />
                 {p.description && <p className="mt-0.5 text-neutral-400">{p.description}</p>}
+                {p.player_notes && (
+                  <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-[12px]">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-400/80">
+                      Player canon
+                    </div>
+                    <ul className="mt-0.5 list-disc pl-4 text-neutral-300">
+                      {p.player_notes
+                        .split("\n")
+                        .filter((l) => l.trim().length > 0)
+                        .map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -427,6 +474,21 @@ function CharacterCard({
       </div>
       <TimestampText label="Updated" value={c.updated_at} />
       {c.description && <p className="mt-0.5 text-neutral-400">{c.description}</p>}
+      {c.player_notes && (
+        <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-[12px]">
+          <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-400/80">
+            Player canon
+          </div>
+          <ul className="mt-0.5 list-disc pl-4 text-neutral-300">
+            {c.player_notes
+              .split("\n")
+              .filter((l) => l.trim().length > 0)
+              .map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+          </ul>
+        </div>
+      )}
       {hasAgencyFields && (
         <dl className="mt-1 space-y-0.5 text-[12px]">
           {c.personal_goals && (
@@ -456,16 +518,12 @@ function CharacterCard({
         </dl>
       )}
       {c.memorable_facts && (
-        <ul className="mt-1 list-disc pl-4 text-neutral-500">
-          {c.memorable_facts
-            .split("\n")
-            .filter((f) => f.trim().length > 0)
-            .map((f, i) => (
-              <li key={i}>
-                <StateEntryLine value={f} turnTimestamps={turnTimestamps} />
-              </li>
-            ))}
-        </ul>
+        <StateEntryList
+          value={c.memorable_facts}
+          turnTimestamps={turnTimestamps}
+          className="mt-1 list-disc pl-4 text-neutral-500"
+          collapsedLabel="updates"
+        />
       )}
     </li>
   );
@@ -549,14 +607,46 @@ function MultiLine({
   if (lines.length === 1) {
     return <StateEntryLine value={lines[0]} turnTimestamps={turnTimestamps} />;
   }
+  return <StateEntryList value={value} turnTimestamps={turnTimestamps} />;
+}
+
+function StateEntryList({
+  value,
+  turnTimestamps,
+  className = "space-y-0.5",
+  collapsedLabel = "entries",
+  initialVisible = 5,
+}: {
+  value: string;
+  turnTimestamps: Record<number, string>;
+  className?: string;
+  collapsedLabel?: string;
+  initialVisible?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = value.split("\n").filter((l) => l.trim().length > 0);
+  const hiddenCount = Math.max(0, lines.length - initialVisible);
+  const visibleLines = expanded || hiddenCount === 0 ? lines : lines.slice(-initialVisible);
+
   return (
-    <ul className="space-y-0.5">
-      {lines.map((l, i) => (
-        <li key={i}>
-          <StateEntryLine value={l} turnTimestamps={turnTimestamps} />
-        </li>
-      ))}
-    </ul>
+    <div>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mb-1 inline-flex min-h-7 items-center rounded-full border border-neutral-800 bg-neutral-950/60 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-500 transition hover:border-neutral-700 hover:text-neutral-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+        >
+          {expanded ? "Show recent only" : `Show ${hiddenCount} older ${collapsedLabel}`}
+        </button>
+      )}
+      <ul className={className}>
+        {visibleLines.map((l, i) => (
+          <li key={`${expanded ? "all" : "recent"}-${i}`}>
+            <StateEntryLine value={l} turnTimestamps={turnTimestamps} />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -639,4 +729,237 @@ function parseTimestamp(value: string): Date | null {
   const normalized = /^\d{4}-\d{2}-\d{2} /.test(value) ? `${value.replace(" ", "T")}Z` : value;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// v0.6.6 — conversational channel between the player and the archivist. Stays
+// inside the inspector so it never appears in the narration chat. Scrollback
+// is server-backed (world_corrections) so it survives reloads. On successful
+// send, calls onCorrectionApplied so the parent re-fetches FullWorldState and
+// the Wiki tab shows the new player_notes.
+type Correction = {
+  id: number;
+  turnId: number | null;
+  playerText: string;
+  archivistReply: string;
+  createdAt: string;
+};
+
+function ArchivistView({
+  worldId,
+  onCorrectionApplied,
+}: {
+  worldId: number;
+  onCorrectionApplied: () => void;
+}) {
+  const [corrections, setCorrections] = useState<Correction[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Fetch the scrollback on mount and on worldId change. No refreshKey
+  // dependency needed — local mutations append directly and successful sends
+  // skip the round-trip.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/world-corrections?worldId=${worldId}`, {
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) return;
+        if (!res.ok) {
+          setError(`Scrollback unavailable (${res.status})`);
+          return;
+        }
+        const data = (await res.json()) as { corrections: Correction[] };
+        if (ctrl.signal.aborted) return;
+        setCorrections(data.corrections);
+      } catch (err) {
+        if (ctrl.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError(String(err));
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => ctrl.abort();
+  }, [worldId]);
+
+  // Auto-scroll to the bottom whenever the scrollback grows, so the newest
+  // exchange is always in view without the user reaching for the scroll.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [corrections.length]);
+
+  const submit = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const res = await fetch("/api/world-correction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ worldId, text: trimmed }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        setSendError(body || `Correction failed (${res.status})`);
+        return;
+      }
+      const data = (await res.json()) as {
+        id: number;
+        reply: string;
+        appliedPatch: unknown;
+        createdAt: string;
+      };
+      setCorrections((prev) => [
+        ...prev,
+        {
+          id: data.id,
+          turnId: null,
+          playerText: trimmed,
+          archivistReply: data.reply,
+          createdAt: data.createdAt,
+        },
+      ]);
+      setText("");
+      onCorrectionApplied();
+    } catch (err) {
+      setSendError(String(err));
+    } finally {
+      setSending(false);
+    }
+  }, [worldId, text, sending, onCorrectionApplied]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // ⌘/Ctrl+Enter submits; plain Enter inserts a newline (default).
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        void submit();
+      }
+    },
+    [submit],
+  );
+
+  const isEmpty = corrections.length === 0 && !loading && !error;
+
+  return (
+    <div className="h-full overflow-y-auto px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:pb-4">
+      <div
+        ref={scrollRef}
+        className={
+          isEmpty
+            ? "pb-6 pt-6 sm:pt-4"
+            : "max-h-[42svh] overflow-y-auto pb-5 pr-1 sm:max-h-[48svh]"
+        }
+      >
+        {loading && <p className="text-neutral-500">Loading scrollback...</p>}
+        {error && <p className="text-red-400">{error}</p>}
+        {isEmpty && (
+          <div className="flex min-h-24 items-center justify-center">
+            <p className="max-w-56 text-center font-serif text-[15px] italic leading-relaxed text-neutral-500">
+              The archive is quiet.
+            </p>
+          </div>
+        )}
+        {corrections.length > 0 && (
+          <ol className="space-y-5">
+            {corrections.map((c) => (
+              <li key={c.id} className="space-y-1">
+                <div className="flex flex-col items-end">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-600">
+                    You
+                  </div>
+                  <div className="max-w-[92%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-[#1f2024] px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-100">
+                    {c.playerText}
+                  </div>
+                </div>
+                <div className="border-l-2 border-emerald-500/40 pl-3">
+                  <div className="mb-1 flex items-baseline justify-between gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-emerald-400/80">
+                      Archivist
+                    </span>
+                    <TimestampText label="At" value={c.createdAt} />
+                  </div>
+                  <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-neutral-200">
+                    {c.archivistReply}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
+      <div>
+        <label htmlFor="archivist-composer" className="sr-only">
+          Message to the archivist
+        </label>
+        <div className="rounded-[1.5rem] border border-neutral-800 bg-neutral-900/90 px-3 py-2 shadow-2xl shadow-black/30 focus-within:border-amber-500/50 focus-within:ring-1 focus-within:ring-amber-500/30">
+          <textarea
+            id="archivist-composer"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={2}
+            maxLength={2000}
+            disabled={sending}
+            placeholder="Message the archivist"
+            className="max-h-32 min-h-12 w-full resize-none bg-transparent text-base leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-60"
+          />
+          <div className="flex min-h-11 items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={sending || !text.trim()}
+              aria-label="Send to archivist"
+              title="Send"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+            >
+              {sending ? <BusyDots /> : <SendArrowIcon />}
+            </button>
+          </div>
+        </div>
+        {sendError && <p className="text-[11px] text-red-400">{sendError}</p>}
+      </div>
+    </div>
+  );
+}
+
+function SendArrowIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 8h10" />
+      <path d="M9 4l4 4-4 4" />
+    </svg>
+  );
+}
+
+function BusyDots() {
+  return (
+    <span className="flex items-center gap-0.5" aria-hidden>
+      <span className="h-1 w-1 animate-pulse rounded-full bg-current" />
+      <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:120ms]" />
+      <span className="h-1 w-1 animate-pulse rounded-full bg-current [animation-delay:240ms]" />
+    </span>
+  );
 }

@@ -1,6 +1,12 @@
 const XAI_TTS_URL = 'https://api.x.ai/v1/tts'
 
 export const DEFAULT_VOICE = process.env.TTS_VOICE ?? 'eve'
+export const TTS_MODEL_KEY = 'xai-tts-mp3-v1'
+
+export function normalizeVoiceId(voice?: string): string {
+  const trimmed = voice?.trim()
+  return (trimmed && trimmed.length > 0 ? trimmed : DEFAULT_VOICE).toLowerCase()
+}
 
 export interface SpeechResult {
   audio: ReadableStream<Uint8Array>
@@ -31,7 +37,7 @@ export async function streamSpeech(text: string, voice?: string): Promise<Speech
     },
     body: JSON.stringify({
       text,
-      voice_id: (voice ?? DEFAULT_VOICE).toLowerCase(),
+      voice_id: normalizeVoiceId(voice),
       language: 'auto',
       output_format: { codec: 'mp3' },
     }),

@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
 const PRIME_AUDIO_SECONDS = 0.05;
+const PROGRESSIVE_AUDIO_MIME = "audio/mpeg";
 
-export type NarratorAudioStatus = "idle" | "speaking";
+export type NarratorAudioStatus = "idle" | "loading" | "speaking";
 
 let sharedAudioContext: AudioContext | null = null;
 let sharedMediaElement: HTMLAudioElement | null = null;
@@ -16,9 +17,11 @@ type AudioClip =
   | { kind: "media-element"; blob: Blob; url: string | null };
 
 interface UseNarratorAudioArgs {
+  worldId: number;
   text: string;
   streaming: boolean;
   turnId: string | undefined;
+  voice?: string;
   onTurnComplete?: (turnId: string, chars: number) => void;
 }
 
@@ -41,10 +44,10 @@ interface JobState {
   pending: Map<number, AudioClip>;
   controllers: Set<AbortController>;
   flushed: boolean;
-  reported: boolean;
   charsSent: number;
   sourceNode: AudioBufferSourceNode | null;
   mediaUrl: string | null;
+  mediaSource: MediaSource | null;
   failed: boolean;
 }
 
@@ -59,10 +62,10 @@ function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): 
     pending: new Map(),
     controllers: new Set(),
     flushed: false,
-    reported: false,
     charsSent: 0,
     sourceNode: null,
     mediaUrl: null,
+    mediaSource: null,
     failed: false,
   };
 }
@@ -74,9 +77,11 @@ interface Override {
 }
 
 export function useNarratorAudio({
+  worldId,
   text,
   streaming,
   turnId,
+  voice,
   onTurnComplete,
 }: UseNarratorAudioArgs): UseNarratorAudioReturn {
   const [muted, setMutedState] = useState<boolean>(false);
@@ -198,6 +203,7 @@ export function useNarratorAudio({
       URL.revokeObjectURL(j.mediaUrl);
       j.mediaUrl = null;
     }
+    j.mediaSource = null;
   }, []);
 
   const resetJob = useCallback(
@@ -235,11 +241,13 @@ export function useNarratorAudio({
 
     const ctx = ensureAudioContext();
     if (!ctx) {
+      setStatus("idle");
       markFailed(j, "[narrator-audio] Web Audio API unavailable");
       return;
     }
     const resumed = await resumeAudioContext(ctx, j);
     if (!resumed || jobRef.current !== j || mutedRef.current) {
+      if (jobRef.current === j && !mutedRef.current) setStatus("idle");
       return;
     }
     const source = ctx.createBufferSource();
@@ -260,6 +268,7 @@ export function useNarratorAudio({
     } catch (err) {
       source.disconnect();
       j.sourceNode = null;
+      setStatus("idle");
       markFailed(j, `[narrator-audio] playback failed: ${String(err)}`);
     }
   }, [ensureAudioContext]);
@@ -270,17 +279,33 @@ export function useNarratorAudio({
       const controller = new AbortController();
       owner.controllers.add(controller);
       try {
+        if (!mutedRef.current) setStatus("loading");
         const res = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunk }),
+          body: JSON.stringify({
+            text: chunk,
+            worldId,
+            turnId: numericTurnId(owner.turnId),
+            voice,
+          }),
           signal: controller.signal,
         });
         if (!res.ok) {
+          setStatus("idle");
           markFailed(owner, `[narrator-audio] /api/tts ${res.status} ${await safeText(res)}`);
           return;
         }
         if (jobRef.current !== owner) return;
+        if (res.headers.get("X-TTS-Cache") !== "HIT") {
+          owner.charsSent += chunk.length;
+          if (owner.turnId) {
+            onTurnCompleteRef.current?.(owner.turnId, chunk.length);
+          }
+        }
+        if (seq === owner.playSeq && await playProgressiveMediaResponse(res, owner, playNext, setStatus)) {
+          return;
+        }
         if (shouldUseMediaElementPlayback()) {
           const blob = await res.blob();
           if (jobRef.current !== owner) return;
@@ -295,6 +320,7 @@ export function useNarratorAudio({
         if (jobRef.current !== owner) return;
         const ctx = ensureAudioContext();
         if (!ctx) {
+          setStatus("idle");
           markFailed(owner, "[narrator-audio] Web Audio API unavailable");
           return;
         }
@@ -302,6 +328,7 @@ export function useNarratorAudio({
         try {
           buffer = await ctx.decodeAudioData(arrayBuffer);
         } catch (err) {
+          setStatus("idle");
           markFailed(owner, `[narrator-audio] decodeAudioData failed: ${String(err)}`);
           return;
         }
@@ -312,12 +339,13 @@ export function useNarratorAudio({
         }
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
+        setStatus("idle");
         markFailed(owner, `[narrator-audio] fetch failed: ${String(err)}`);
       } finally {
         owner.controllers.delete(controller);
       }
     },
-    [ensureAudioContext, playNext],
+    [ensureAudioContext, playNext, voice, worldId],
   );
 
   useEffect(() => {
@@ -347,19 +375,7 @@ export function useNarratorAudio({
       j.cursor = effective.text.length;
       if (fullText && !mutedRef.current && !j.failed) {
         const seq = j.nextSeq++;
-        j.charsSent += fullText.length;
         void fetchChunk(fullText, seq, j);
-      }
-    }
-
-    // Fire on completion for BOTH stream-finish and replay-finish so the
-    // replayed-turn footer gets the additive char-count update via
-    // /api/tts/record. The route uses turnId to target the right row instead
-    // of "latest assistant turn".
-    if (!effective.streaming && j.flushed && !j.reported) {
-      j.reported = true;
-      if (j.charsSent > 0 && j.turnId) {
-        onTurnCompleteRef.current?.(j.turnId, j.charsSent);
       }
     }
 
@@ -412,9 +428,97 @@ export function useNarratorAudio({
     };
   }, [resetJob]);
 
-  const activeTurnId = jobRef.current && status === "speaking" ? jobRef.current.turnId : undefined;
+  const activeTurnId = jobRef.current && status !== "idle" ? jobRef.current.turnId : undefined;
 
   return { muted, setMuted, status, activeTurnId, primeAudio, replay };
+}
+
+async function playProgressiveMediaResponse(
+  res: Response,
+  job: JobState,
+  playNext: () => Promise<void>,
+  setStatus: (status: NarratorAudioStatus) => void,
+): Promise<boolean> {
+  if (!res.body || !shouldUseProgressiveMediaPlayback()) return false;
+
+  const audio = ensureMediaElement();
+  const MediaSourceCtor = getMediaSourceConstructor();
+  if (!audio || !MediaSourceCtor) return false;
+
+  let mediaSource: MediaSource;
+  let url: string;
+  try {
+    mediaSource = new MediaSourceCtor();
+    url = URL.createObjectURL(mediaSource);
+  } catch {
+    return false;
+  }
+
+  job.mediaSource = mediaSource;
+  job.mediaUrl = url;
+  audio.onended = () => {
+    if (job.failed || job.mediaUrl !== url) return;
+    cleanupMediaUrl(job, audio);
+    job.mediaSource = null;
+    job.playSeq += 1;
+    void playNext();
+  };
+  audio.onerror = () => {
+    if (job.failed || job.mediaUrl !== url) return;
+    cleanupMediaUrl(job, audio);
+    job.mediaSource = null;
+    setStatus("idle");
+    markFailed(
+      job,
+      `[narrator-audio] progressive media playback error: ${String(
+        audio.error?.message ?? audio.error?.code ?? "unknown",
+      )}`,
+    );
+  };
+
+  audio.src = url;
+  audio.currentTime = 0;
+  setStatus("loading");
+
+  try {
+    await once(mediaSource, "sourceopen");
+    if (job.mediaUrl !== url || job.failed) return true;
+
+    const sourceBuffer = mediaSource.addSourceBuffer(PROGRESSIVE_AUDIO_MIME);
+    const reader = res.body.getReader();
+    let started = false;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (job.mediaUrl !== url || job.failed) {
+        await reader.cancel().catch(() => undefined);
+        return true;
+      }
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+
+      await appendSourceBuffer(sourceBuffer, toExactArrayBuffer(value));
+      if (!started) {
+        started = true;
+        setStatus("speaking");
+        await audio.play();
+      }
+    }
+
+    if (sourceBuffer.updating) await once(sourceBuffer, "updateend");
+    if (mediaSource.readyState === "open") {
+      mediaSource.endOfStream();
+    }
+    return true;
+  } catch (err) {
+    if (job.mediaUrl === url && !job.failed) {
+      cleanupMediaUrl(job, audio);
+      job.mediaSource = null;
+      setStatus("idle");
+      markFailed(job, `[narrator-audio] progressive playback failed: ${String(err)}`);
+    }
+    return true;
+  }
 }
 
 async function playMediaClip(
@@ -499,6 +603,22 @@ function shouldUseMediaElementPlayback(): boolean {
   return /Safari/i.test(ua) && !/(Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR|Android)/i.test(ua);
 }
 
+function shouldUseProgressiveMediaPlayback(): boolean {
+  if (typeof navigator === "undefined") return false;
+  if (shouldUseMediaElementPlayback()) return false;
+  const MediaSourceCtor = getMediaSourceConstructor();
+  return !!MediaSourceCtor?.isTypeSupported?.(PROGRESSIVE_AUDIO_MIME);
+}
+
+function getMediaSourceConstructor(): typeof MediaSource | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (
+    window.MediaSource ??
+    (window as Window & typeof globalThis & { WebKitMediaSource?: typeof MediaSource })
+      .WebKitMediaSource
+  );
+}
+
 function ensureMediaElement(): HTMLAudioElement | null {
   if (typeof Audio === "undefined") return null;
   if (sharedMediaElement) return sharedMediaElement;
@@ -570,6 +690,56 @@ function getAudioContextConstructor(): typeof AudioContext | undefined {
     (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext })
       .webkitAudioContext
   );
+}
+
+function numericTurnId(turnId: string): number | undefined {
+  const parsed = Number(turnId);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function once(target: EventTarget, eventName: string): Promise<Event> {
+  return new Promise((resolve) => {
+    target.addEventListener(eventName, resolve, { once: true });
+  });
+}
+
+function appendSourceBuffer(sourceBuffer: SourceBuffer, chunk: BufferSource): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+      sourceBuffer.removeEventListener("error", onError);
+    };
+    const onUpdateEnd = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("SourceBuffer append failed"));
+    };
+
+    sourceBuffer.addEventListener("updateend", onUpdateEnd);
+    sourceBuffer.addEventListener("error", onError);
+    try {
+      sourceBuffer.appendBuffer(chunk);
+    } catch (err) {
+      cleanup();
+      reject(err);
+    }
+  });
+}
+
+function toExactArrayBuffer(value: Uint8Array): ArrayBuffer {
+  if (
+    value.buffer instanceof ArrayBuffer &&
+    value.byteOffset === 0 &&
+    value.byteLength === value.buffer.byteLength
+  ) {
+    return value.buffer;
+  }
+  const copy = new Uint8Array(value.byteLength);
+  copy.set(value);
+  return copy.buffer;
 }
 
 async function safeText(res: Response): Promise<string> {

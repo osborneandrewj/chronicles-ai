@@ -30,6 +30,14 @@ const PlacePatchSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   kind: z.string().optional().describe('Free-form, e.g. "harbour", "tavern", "ship\'s deck".'),
+  player_notes_append: z
+    .string()
+    .optional()
+    .describe(
+      'Player-asserted canon about this place — only set from the correction channel, never ' +
+        'from narrator extraction. A single short sentence; appended on its own line to existing ' +
+        'player_notes. Never set from the normal narrator-extraction archivist path.',
+    ),
 })
 
 const CharacterPatchSchema = z.object({
@@ -73,6 +81,26 @@ const CharacterPatchSchema = z.object({
         'observably off-pattern (repeated themselves, agitated, dissociated, ignored what they ' +
         'would normally notice, said something out of character). Append-only. Omit on routine ' +
         'turns; never set for the player.',
+    ),
+  player_notes_append: z
+    .string()
+    .optional()
+    .describe(
+      'Player-asserted canon about this character — only set from the correction channel, never ' +
+        'from narrator extraction. A single short sentence; appended on its own line to existing ' +
+        'player_notes. Use this for facts the player tells the archivist directly (a car, a ' +
+        'family member, a job, a corrected detail). Never set from the normal narrator-extraction ' +
+        'archivist path.',
+    ),
+  aliases: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Other names that refer to the same character — only set from the correction channel. ' +
+        'Each alias is looked up by case-insensitive exact match against existing characters; ' +
+        'each matching row is merged into this one and the alias row deleted. Use this when the ' +
+        'player explicitly tells the archivist that two existing characters are the same person ' +
+        '(e.g. "Bob and Robert are the same"). Never set from narrator extraction.',
     ),
 })
 
@@ -138,7 +166,22 @@ export const ArchivistPatchSchema = z.object({
   timeline_events: z.array(TimelineEventPatchSchema).optional(),
 })
 
+// Correction-channel response: same patch shape plus a short natural-language
+// reply the inspector shows back to the player. Modeled as a superset so the
+// apply path can ignore `reply` and the route handler can render it without
+// touching the patch types.
+export const CorrectionPatchSchema = ArchivistPatchSchema.extend({
+  reply: z
+    .string()
+    .describe(
+      'One or two short sentences describing what was changed, in plain English ' +
+        '("Recorded that you drive a Subaru Outback on your character."). Concrete, ' +
+        'no narration, no promises about future narrator behavior. Required.',
+    ),
+})
+
 export type ArchivistPatch = z.infer<typeof ArchivistPatchSchema>
+export type CorrectionPatchResult = z.infer<typeof CorrectionPatchSchema>
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 type StoryThreadPatch = NonNullable<ArchivistPatch['story_threads']>[number]
 type StoryCluePatch = NonNullable<ArchivistPatch['story_clues']>[number]
@@ -264,6 +307,91 @@ export async function extractPatch(
   return { patch: sanitizeArchivistPatch(prior, recent, object), usage }
 }
 
+// v0.6.6 correction channel. The player is speaking to the archivist directly
+// — not through the narrator. We hand the model: the current world state, the
+// last few narrator turns (so corrections like "the car from the last turn"
+// can ground), and the player's correction text. The model returns a standard
+// ArchivistPatch plus a one-sentence reply. The reply is rendered in the
+// inspector; the patch flows through applyArchivistPatch like any other.
+//
+// Recent turns are included read-only context — the prompt forbids advancing
+// scene/time from this channel, but seeing recent narration helps with
+// pronoun resolution.
+export async function extractCorrectionPatch(
+  prior: NarratorWorldState,
+  playerText: string,
+  recent: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+): Promise<{ patch: ArchivistPatch; reply: string; usage: LanguageModelUsage }> {
+  const trimmed = playerText.trim()
+  if (!trimmed) {
+    throw new Error('extractCorrectionPatch: playerText is required')
+  }
+
+  const transcript =
+    recent.length > 0
+      ? recent
+          .map((t) => `${t.role === 'user' ? 'PLAYER (in narration)' : 'NARRATOR'}: ${t.content}`)
+          .join('\n\n')
+      : '(no prior narration in this session)'
+
+  const priorBlock = JSON.stringify(
+    {
+      world_time: prior.worldTime,
+      current_scene: prior.currentScene
+        ? {
+            title: prior.currentScene.title,
+            scene_number: prior.currentScene.scene_number,
+            place: prior.currentPlace?.name ?? null,
+          }
+        : null,
+      known_characters: prior.knownCharacters.map((c) => ({
+        name: c.name,
+        is_player: c.is_player === 1,
+        status: c.status,
+        description: limit(c.description, 160),
+        player_notes: c.player_notes,
+      })),
+      known_places: prior.knownPlaces.map((p) => ({
+        name: p.name,
+        kind: p.kind,
+        description: limit(p.description, 160),
+        player_notes: p.player_notes,
+      })),
+    },
+    null,
+    2,
+  )
+
+  const { object, usage } = await generateObject({
+    model: anthropic(ARCHIVIST_MODEL),
+    schema: CorrectionPatchSchema,
+    system: loadPrompt('archivist-correction'),
+    prompt: [
+      'PRIOR STATE:',
+      priorBlock,
+      '',
+      'RECENT NARRATION (read-only context — do not advance scene or time):',
+      transcript,
+      '',
+      'PLAYER MESSAGE (this is what the player is telling you directly):',
+      trimmed,
+      '',
+      'Return the patch + reply.',
+    ].join('\n'),
+  })
+
+  const { reply, ...patchWithoutReply } = object
+  // Run the patch through the same sanitizer so the correction channel inherits
+  // existing scene/place safety rules — and so we cannot accidentally advance
+  // the scene through this path even if the model tries.
+  const sanitized = sanitizeArchivistPatch(prior, recent, patchWithoutReply as ArchivistPatch)
+  // Defense in depth: scene action and current_time are never legitimate
+  // outputs from this channel. Strip if present.
+  delete sanitized.scene
+  delete sanitized.current_time
+  return { patch: sanitized, reply: reply.trim(), usage }
+}
+
 export function sanitizeArchivistPatch(
   prior: NarratorWorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -355,7 +483,9 @@ function hasMeaningfulCharacterPatch(c: CharacterPatch): boolean {
     c.status !== undefined ||
     c.active_goal !== undefined ||
     c.current_attitude !== undefined ||
-    c.observations_append !== undefined
+    c.observations_append !== undefined ||
+    c.player_notes_append !== undefined ||
+    (c.aliases !== undefined && c.aliases.length > 0)
   )
 }
 
@@ -456,6 +586,7 @@ type PlaceRow = {
   name: string
   description: string | null
   kind: string | null
+  player_notes: string | null
 }
 
 type CharacterRow = {
@@ -476,13 +607,15 @@ type CharacterRow = {
   appearance_count: number
   last_seen_turn_id: number | null
   last_agent_tick_turn_id: number | null
+  player_notes: string | null
+  updated_at: string
 }
 
 const listPlacesForWorldStmt = db.prepare<[number]>(
-  'SELECT id, name, description, kind FROM places WHERE world_id = ? ORDER BY id ASC',
+  'SELECT id, name, description, kind, player_notes FROM places WHERE world_id = ? ORDER BY id ASC',
 )
 const currentPlaceForWorldStmt = db.prepare<[number]>(
-  `SELECT p.id, p.name, p.description, p.kind
+  `SELECT p.id, p.name, p.description, p.kind, p.player_notes
    FROM worlds w
    JOIN scenes s ON s.id = w.current_scene_id
    JOIN places p ON p.id = s.place_id
@@ -518,10 +651,44 @@ const listCharactersForWorldStmt = db.prepare<[number]>(
   `SELECT id, name, description, is_player, current_place_id, memorable_facts,
           status, active_goal, current_attitude, observations, agency_level,
           personal_goals, current_focus, recent_activity, appearance_count,
-          last_seen_turn_id, last_agent_tick_turn_id
+          last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
    FROM characters
    WHERE world_id = ?
    ORDER BY id ASC`,
+)
+// Exact case-insensitive lookup. Distinct from resolveCharacter()'s soft-match
+// path — used by the correction channel's `aliases` field where the player has
+// explicitly told us two existing rows are the same person and the names
+// would not otherwise overlap (e.g. "Bob" + "Robert").
+const findCharacterByExactLowerNameStmt = db.prepare<[number, string]>(
+  `SELECT id, name, description, is_player, current_place_id, memorable_facts,
+          status, active_goal, current_attitude, observations, agency_level,
+          personal_goals, current_focus, recent_activity, appearance_count,
+          last_seen_turn_id, last_agent_tick_turn_id, player_notes, updated_at
+   FROM characters
+   WHERE world_id = ? AND lower(name) = lower(?)`,
+)
+// player_notes is single-author (the player, via the correction channel) and
+// append-only by spec — a new line is added per correction, separated by
+// newlines, no provenance tag. Lines persist forever in v0.6.6; per-line
+// edit/delete is v0.7+.
+const appendCharacterPlayerNotesStmt = db.prepare<[string, string, number]>(
+  `UPDATE characters
+   SET player_notes = CASE
+       WHEN player_notes IS NULL OR length(trim(player_notes)) = 0 THEN ?
+       ELSE player_notes || char(10) || ?
+     END,
+     updated_at = datetime('now')
+   WHERE id = ?`,
+)
+const appendPlacePlayerNotesStmt = db.prepare<[string, string, number]>(
+  `UPDATE places
+   SET player_notes = CASE
+       WHEN player_notes IS NULL OR length(trim(player_notes)) = 0 THEN ?
+       ELSE player_notes || char(10) || ?
+     END,
+     updated_at = datetime('now')
+   WHERE id = ?`,
 )
 const insertCharacterStmt = db.prepare<
   [
@@ -587,6 +754,7 @@ const mergeCharacterStmt = db.prepare<
     number,
     number | null,
     number | null,
+    string | null,
     number,
   ]
 >(
@@ -606,10 +774,17 @@ const mergeCharacterStmt = db.prepare<
      appearance_count        = ?,
      last_seen_turn_id       = ?,
      last_agent_tick_turn_id = ?,
+     player_notes            = ?,
      updated_at              = datetime('now')
    WHERE id = ?`,
 )
 const deleteCharacterStmt = db.prepare<[number]>('DELETE FROM characters WHERE id = ?')
+// Used by mergeCharacters when the caller passes a canonicalName different
+// from the kept row's existing name (alias-merge canonicalisation). Bumps
+// updated_at so subsequent freshest() comparisons see the new mtime.
+const renameCharacterStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET name = ?, updated_at = datetime('now') WHERE id = ?`,
+)
 const setPlayersPlaceStmt = db.prepare<[number, number]>(
   `UPDATE characters SET current_place_id = ?, updated_at = datetime('now')
    WHERE world_id = ? AND is_player = 1`,
@@ -944,20 +1119,90 @@ function resolveCharacter(worldId: number, requestedName: string): CharacterRow 
   return target
 }
 
-function mergeCharacters(target: CharacterRow, source: CharacterRow): void {
-  if (target.id === source.id) return
+// For scalar single-valued fields, the older "target-first" rule discarded the
+// merge source's value any time the target had one — even a stale one. That
+// silently lost fresh state (active_goal, current_focus, current_attitude,
+// current_place_id) whenever the older row happened to be the merge target.
+// Now: pick whichever input value comes from the more recently updated row;
+// non-null still beats null, ties go to target. Row-level updated_at is a
+// coarse proxy for per-field freshness but matches user intuition (the row the
+// system has been writing to is the live one).
+function freshest<T>(
+  target: CharacterRow,
+  source: CharacterRow,
+  pick: (row: CharacterRow) => T | null,
+): T | null {
+  const t = pick(target)
+  const s = pick(source)
+  if (t === null || t === undefined) return s ?? null
+  if (s === null || s === undefined) return t
+  return source.updated_at > target.updated_at ? s : t
+}
+
+// Run before resolveCharacter so the canonical name from the player's
+// correction wins. Looks up canonical + each alias by exact (lower)case name
+// — never via soft-match, because the player has *explicitly* asserted these
+// rows are the same person and the names may not overlap (Bob / Robert) or
+// may overlap-but-with-different-canonical-name (Jordana / Jordana Osborne).
+// If canonical doesn't exist yet but an alias does, the alias row is renamed
+// and promoted to be the canonical for subsequent iterations — cheaper than
+// inserting a new row and losing the alias's history.
+function runAliasMerges(
+  worldId: number,
+  canonicalName: string,
+  aliases: string[],
+): void {
+  let canonical =
+    (findCharacterByExactLowerNameStmt.get(worldId, canonicalName) as CharacterRow | undefined) ??
+    undefined
+  for (const aliasRaw of aliases) {
+    const alias = aliasRaw.trim()
+    if (!alias) continue
+    if (canonicalCharacterKey(alias) === canonicalCharacterKey(canonicalName)) continue
+    const aliasRow =
+      (findCharacterByExactLowerNameStmt.get(worldId, alias) as CharacterRow | undefined) ??
+      undefined
+    if (!aliasRow) continue
+    if (canonical) {
+      if (canonical.id === aliasRow.id) continue
+      // Never merge across the player/NPC boundary: a player-asserted alias
+      // must not silently rewrite the protagonist row, and the protagonist's
+      // identity is not editable through this channel.
+      if (canonical.is_player !== aliasRow.is_player) continue
+      mergeCharacters(canonical, aliasRow, canonicalName)
+    } else {
+      // No canonical row yet. Promote the alias by renaming it.
+      renameCharacterStmt.run(canonicalName, aliasRow.id)
+      aliasRow.name = canonicalName
+      canonical = aliasRow
+    }
+  }
+}
+
+function mergeCharacters(
+  target: CharacterRow,
+  source: CharacterRow,
+  canonicalName?: string,
+): void {
+  if (target.id === source.id) {
+    if (canonicalName && canonicalName !== target.name) {
+      renameCharacterStmt.run(canonicalName, target.id)
+      target.name = canonicalName
+    }
+    return
+  }
   const merged = {
-    name: target.name,
+    name: canonicalName ?? target.name,
     description: chooseLonger(target.description, source.description),
-    current_place_id: target.current_place_id ?? source.current_place_id,
+    current_place_id: freshest(target, source, (r) => r.current_place_id),
     memorable_facts: mergeLineBlocks(target.memorable_facts, source.memorable_facts),
     status: strongestStatus(target.status, source.status),
-    active_goal: target.active_goal ?? source.active_goal,
-    current_attitude: target.current_attitude ?? source.current_attitude,
+    active_goal: freshest(target, source, (r) => r.active_goal),
+    current_attitude: freshest(target, source, (r) => r.current_attitude),
     observations: mergeLineBlocks(target.observations, source.observations),
     agency_level: strongestAgencyLevel(target.agency_level, source.agency_level),
     personal_goals: mergeLineBlocks(target.personal_goals, source.personal_goals),
-    current_focus: target.current_focus ?? source.current_focus,
+    current_focus: freshest(target, source, (r) => r.current_focus),
     recent_activity: mergeLineBlocks(target.recent_activity, source.recent_activity),
     appearance_count: Math.max(target.appearance_count, source.appearance_count),
     last_seen_turn_id: maxNullable(target.last_seen_turn_id, source.last_seen_turn_id),
@@ -965,6 +1210,7 @@ function mergeCharacters(target: CharacterRow, source: CharacterRow): void {
       target.last_agent_tick_turn_id,
       source.last_agent_tick_turn_id,
     ),
+    player_notes: mergeLineBlocks(target.player_notes, source.player_notes),
   }
   deleteCharacterStmt.run(source.id)
   mergeCharacterStmt.run(
@@ -983,9 +1229,13 @@ function mergeCharacters(target: CharacterRow, source: CharacterRow): void {
     merged.appearance_count,
     merged.last_seen_turn_id,
     merged.last_agent_tick_turn_id,
+    merged.player_notes,
     target.id,
   )
   Object.assign(target, merged)
+  // updated_at is bumped server-side by the merge; refresh the in-memory
+  // copy so subsequent comparisons in this transaction stay correct.
+  target.updated_at = new Date().toISOString().replace('T', ' ').slice(0, 19)
 }
 
 function charactersMatch(requestedName: string, existingName: string): boolean {
@@ -1224,7 +1474,17 @@ export function applyArchivistPatch(
     //    can resolve to ids in the same patch.
     if (patch.places) {
       for (const p of patch.places) {
-        upsertPlace(worldId, p.name, p.description, p.kind)
+        const placeId = upsertPlace(worldId, p.name, p.description, p.kind)
+        // player_notes_append is the correction-channel field: a single short
+        // sentence appended on its own line to existing player_notes. The
+        // narrator-extraction prompt is told never to set this; if it leaks
+        // through anyway, the result is just a player_notes line — not
+        // catastrophic, but worth tightening the prompt rather than gating it
+        // in code (we'd need a per-call flag, which couples concerns).
+        if (p.player_notes_append) {
+          const line = p.player_notes_append.trim()
+          if (line) appendPlacePlayerNotesStmt.run(line, line, placeId)
+        }
       }
     }
 
@@ -1232,11 +1492,38 @@ export function applyArchivistPatch(
     //    omitted field doesn't overwrite an existing value with NULL.
     if (patch.characters) {
       for (const c of patch.characters) {
+        // Alias-driven merges run BEFORE resolveCharacter so the canonical
+        // name from the patch wins. Otherwise resolveCharacter's own soft-
+        // match auto-merges the rows first and keeps the older row's name
+        // (e.g. "Jordana" instead of "Jordana Osborne").
+        if (c.aliases && c.aliases.length > 0) {
+          runAliasMerges(worldId, c.name, c.aliases)
+        }
         const placeId =
           c.current_place_name !== undefined
             ? upsertPlace(worldId, c.current_place_name, undefined, undefined)
             : null
         const existing = resolveCharacter(worldId, c.name)
+        const characterId: number = existing
+          ? existing.id
+          : (() => {
+              const isPlayer = c.is_player ? 1 : 0
+              const row = insertCharacterStmt.get(
+                worldId,
+                c.name,
+                c.description ?? null,
+                isPlayer,
+                placeId,
+                appendFactWithProvenance(null, c.memorable_facts_append, narratorTurnId),
+                c.status ?? 'active',
+                c.active_goal ?? null,
+                c.current_attitude ?? null,
+                isPlayer === 1
+                  ? null
+                  : appendFactWithProvenance(null, c.observations_append, narratorTurnId),
+              ) as { id: number }
+              return row.id
+            })()
         if (existing) {
           const nextFacts = appendFactWithProvenance(
             existing.memorable_facts,
@@ -1270,23 +1557,18 @@ export function applyArchivistPatch(
             )
             setObservationsStmt.run(nextObs, existing.id)
           }
-        } else {
-          const isPlayer = c.is_player ? 1 : 0
-          insertCharacterStmt.run(
-            worldId,
-            c.name,
-            c.description ?? null,
-            isPlayer,
-            placeId,
-            appendFactWithProvenance(null, c.memorable_facts_append, narratorTurnId),
-            c.status ?? 'active',
-            c.active_goal ?? null,
-            c.current_attitude ?? null,
-            isPlayer === 1
-              ? null
-              : appendFactWithProvenance(null, c.observations_append, narratorTurnId),
-          )
         }
+
+        // player_notes_append + aliases are the v0.6.6 correction-channel
+        // fields. They work uniformly on freshly-inserted and existing rows.
+        // The normal narrator-extraction prompt is forbidden from setting
+        // either; relying on prompt discipline keeps applyArchivistPatch from
+        // needing a per-call source flag.
+        if (c.player_notes_append) {
+          const line = c.player_notes_append.trim()
+          if (line) appendCharacterPlayerNotesStmt.run(line, line, characterId)
+        }
+
       }
     }
 
