@@ -1,9 +1,10 @@
 # Chronicles AI — Docs
 
-This directory is the canonical record of how Chronicles AI is built and how it has evolved. Two kinds of doc live here:
+This directory is the canonical record of how Chronicles AI is built and how it has evolved. Three kinds of doc live here:
 
 1. **Design docs** (`01`–`09`) describe the long-term target architecture. They are written ahead of the code and updated when decisions change.
-2. **Milestone docs** (`10` onwards) describe individual versions: what shipped, why, and what was cut. Every release gets one. Patch releases get a short one; majors get a full one. New milestone docs should follow [`_template-milestone.md`](_template-milestone.md).
+2. **Current-state references** document how the current branch actually works when the target docs and code have drifted.
+3. **Milestone docs** (`10` onwards) describe individual versions: what shipped, why, and what was cut. Every release gets one. Patch releases get a short one; majors get a full one. New milestone docs should follow [`_template-milestone.md`](_template-milestone.md).
 
 When working on a feature, read the relevant design doc first and the most recent milestone doc to understand the current state of the world.
 
@@ -20,6 +21,12 @@ When working on a feature, read the relevant design doc first and the most recen
 | 07 | [implementation-roadmap](07-implementation-roadmap.md) | Phased plan; what's in flight |
 | 08 | [development-setup](08-development-setup.md) | Local dev, env vars, Docker, migrations |
 | 09 | [example-chat-narrative](09-example-chat-narrative.md) | Reference narrative used as a fixture/regression target |
+
+## Current-state references
+
+| # | Doc | What it covers |
+|---|---|---|
+| 28 | [current-database-npc-narrator-design](28-current-database-npc-narrator-design.md) | Current SQLite schema and the runtime contract between NPCs, the NPC agent, narrator, and archivist |
 
 ## Milestone docs
 
@@ -44,6 +51,7 @@ Listed in shipping order. Tags on `main` correspond to the row's version unless 
 | 25 | v0.6.4 | [v0.6.4-milestone](25-v0.6.4-milestone.md) | TBD (planning) | Story-dossier memory — active threads, clues, objectives, resources, hidden pressure, and Markdown-shaped narrator digest |
 | 26 | v0.6.5 | [v0.6.5-milestone](26-v0.6.5-milestone.md) | TBD (planning) | Mobile + desktop UI pass + replay-cost-footer bug — shifted after the story-dossier memory work |
 | 27 | v0.6.6 | [v0.6.6-milestone](27-v0.6.6-milestone.md) | TBD (planning) | Archivist character canonicalization — same person referred to by full vs short name no longer creates duplicate rows |
+| 29 | v0.6.9 | [v0.6.9-milestone](29-v0.6.9-milestone.md) | TBD (planning) | NPC/Narrator v2 intent audit — persist agent-tier NPC planned actions and reconcile them against narrator prose |
 
 ## Conventions
 
