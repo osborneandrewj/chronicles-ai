@@ -121,14 +121,22 @@ export function Chat({
   // Auto-scroll: stick to bottom while streaming, but only if the user hasn't
   // intentionally scrolled up. Re-engages once they scroll back near the bottom.
   const scrollRef = useRef<HTMLOListElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({
+      top: el.scrollHeight - el.clientHeight,
+      behavior,
+    });
+  }, []);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setStickToBottom(distanceFromBottom < 80);
+    const distanceFromBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+    setStickToBottom(distanceFromBottom <= 4);
   }, []);
 
   // Prepends an older slice without yanking the user's viewport. Capture the
@@ -179,8 +187,13 @@ export function Chat({
 
   useEffect(() => {
     if (!stickToBottom) return;
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, stickToBottom]);
+    requestAnimationFrame(() => scrollToBottom());
+  }, [messages, scrollToBottom, stickToBottom]);
+
+  const scrollToEnd = useCallback(() => {
+    setStickToBottom(true);
+    scrollToBottom("smooth");
+  }, [scrollToBottom]);
 
   const costByMessageId = useMemo(() => buildCostMap(messages, usage), [messages, usage]);
   const sessionTotal = usage.reduce((s, t) => s + t.total, 0);
@@ -325,62 +338,49 @@ export function Chat({
   }
 
   return (
-    <div className="mx-auto flex h-screen max-w-2xl flex-col">
+    <div className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden bg-black">
       <WorldInspector
         worldId={worldId}
         open={inspectorOpen}
         onClose={toggleInspector}
         refreshKey={inspectorRefreshKey}
       />
-      <header className="flex items-center justify-between border-b border-neutral-900/80 px-5 py-4 backdrop-blur">
-        <div className="flex items-baseline gap-3 min-w-0">
+      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b border-neutral-900 bg-black/90 px-2.5 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-black/75 sm:px-4">
+        <div className="flex min-w-0 items-center gap-1.5">
           <Link
             href="/"
             aria-label="Back to worlds"
-            className="text-sm text-neutral-500 transition hover:text-neutral-300"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
           >
-            ←
+            <BackIcon />
           </Link>
-          <span className="truncate text-base font-semibold tracking-tight text-neutral-100">
+          <span className="truncate text-lg font-semibold tracking-tight text-neutral-100">
             {worldName}
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={toggleInspector}
-            aria-pressed={inspectorOpen}
-            aria-label={inspectorOpen ? "Close world inspector" : "Open world inspector"}
-            title={inspectorOpen ? "Close inspector" : "Open inspector"}
-            className={
-              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 " +
-              (inspectorOpen
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-300/90 hover:bg-amber-500/20"
-                : "border-neutral-800 bg-neutral-900/40 text-neutral-500 hover:text-neutral-300")
-            }
-          >
-            <InspectorIcon />
-            <span>State</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMuted(!muted)}
-            aria-pressed={!muted}
-            aria-label={muted ? "Turn narrator audio on" : "Turn narrator audio off"}
-            title={muted ? "Turn audio on" : "Turn audio off"}
-            className={
-              "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium uppercase tracking-[0.12em] transition focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 " +
-              (muted
-                ? "border-neutral-800 bg-neutral-900/40 text-neutral-500 hover:text-neutral-300"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-300/90 hover:bg-amber-500/20")
-            }
-          >
-            <AudioIcon muted={muted} />
-            <span>{muted ? "Audio off" : "Audio on"}</span>
-          </button>
-          <div className="text-xs tabular-nums text-neutral-500">
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          {/* Session total — hidden when there's not enough room next to the
+              world name. The per-turn footer carries the cost on every turn,
+              so this chip is supplemental. */}
+          <div className="mr-1 hidden text-xs tabular-nums text-neutral-500 md:block">
             {usage.length} turn{usage.length === 1 ? "" : "s"} · ~{formatUsd(sessionTotal)}
           </div>
+          <HeaderIconButton
+            onClick={toggleInspector}
+            pressed={inspectorOpen}
+            label={inspectorOpen ? "Close world inspector" : "Open world inspector"}
+            tone={inspectorOpen ? "amber" : "neutral"}
+          >
+            <InspectorIcon />
+          </HeaderIconButton>
+          <HeaderIconButton
+            onClick={() => setMuted(!muted)}
+            pressed={!muted}
+            label={muted ? "Turn narrator audio on" : "Turn narrator audio off"}
+            tone={muted ? "neutral" : "amber"}
+          >
+            <AudioIcon muted={muted} />
+          </HeaderIconButton>
         </div>
       </header>
 
@@ -388,7 +388,10 @@ export function Chat({
         <ol
           ref={scrollRef}
           onScroll={onScroll}
-          className="h-full space-y-7 overflow-y-auto px-5 py-8"
+          // pb-64 clears the floating composer plus the optional scroll-to-end
+          // button, so bottom content can scroll above the controls instead of
+          // being covered by them.
+          className="h-full space-y-8 overflow-y-auto overscroll-y-contain px-4 pt-6 pb-64 sm:px-8 sm:pt-8"
         >
           {hasOlder && (
             <li className="flex justify-center">
@@ -396,7 +399,7 @@ export function Chat({
                 type="button"
                 onClick={() => void loadOlder()}
                 disabled={loadingOlder}
-                className="rounded-md border border-neutral-800 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-neutral-500 transition hover:border-neutral-700 hover:text-neutral-300 disabled:cursor-wait disabled:opacity-50"
+                className="min-h-11 rounded-full border border-neutral-800 bg-neutral-950/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400 transition hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-200 disabled:cursor-wait disabled:opacity-50"
               >
                 {loadingOlder ? "Loading…" : "Load older"}
               </button>
@@ -448,14 +451,14 @@ export function Chat({
                     setErrorDismissed(true);
                     void regenerate();
                   }}
-                  className="rounded-md border border-red-800 px-2.5 py-1 text-xs transition hover:bg-red-900/40"
+                  className="min-h-10 rounded-full border border-red-800 px-4 py-2 text-xs font-semibold transition hover:bg-red-900/40"
                 >
                   Retry
                 </button>
                 <button
                   type="button"
                   onClick={() => setErrorDismissed(true)}
-                  className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
+                  className="min-h-10 rounded-full border border-neutral-700 px-4 py-2 text-xs font-semibold text-neutral-300 transition hover:bg-neutral-800"
                 >
                   Dismiss
                 </button>
@@ -463,19 +466,42 @@ export function Chat({
             </li>
           )}
 
-          <div ref={bottomRef} aria-hidden className="h-px" />
+          <div aria-hidden className="h-px" />
         </ol>
 
-        {/* edge fades */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-neutral-950 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-neutral-950 to-transparent" />
+        {/* Edge fades: soften the chat-→-composer overlap at every viewport.
+            The bottom fade is sized to match the composer clearance. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-black to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-black via-black/90 to-transparent" />
       </div>
 
       <form
         onSubmit={onSubmit}
-        className="border-t border-neutral-900/80 bg-neutral-950 px-5 py-4"
+        // Floating composer at every viewport. Absolutely positioned over the
+        // scroll area with horizontal margins so the card sits inset from the
+        // edges — the Grok pattern, applied uniformly mobile and desktop so
+        // the chrome stays consistent. Safe-area padding clears the iOS home
+        // indicator on phones; harmless elsewhere.
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:px-6 sm:pb-4"
       >
-        <div className="group relative flex items-end gap-2 rounded-xl border border-neutral-800 bg-neutral-900/60 px-3 py-2 transition focus-within:border-neutral-600 focus-within:bg-neutral-900">
+        {!stickToBottom && (
+          <div className="mx-auto mb-2 flex max-w-2xl justify-end px-2">
+            <button
+              type="button"
+              onClick={scrollToEnd}
+              aria-label="Scroll to end"
+              title="Scroll to end"
+              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-neutral-700/80 bg-[#1b1c1f] text-neutral-200 shadow-xl shadow-black/40 transition hover:border-amber-500/50 hover:bg-neutral-800 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+            >
+              <ScrollEndIcon />
+            </button>
+          </div>
+        )}
+        {/* Grok-style composer card: pill-shaped, two-row, generously
+            padded. The textarea sits on top; an action row sits below with
+            the slash-command button on the left and a round Send affordance
+            on the right. */}
+        <div className="pointer-events-auto group relative mx-auto flex max-w-2xl flex-col gap-2 rounded-[2rem] border border-neutral-700/80 bg-[#1b1c1f] px-4 pt-4 pb-3 shadow-2xl shadow-black/50 backdrop-blur transition focus-within:border-neutral-500 focus-within:bg-[#1f2024]">
           {slashOpen && (
             <SlashCommandMenu
               commands={filteredSlashCommands}
@@ -491,17 +517,38 @@ export function Chat({
             rows={2}
             placeholder="What do you do?"
             disabled={busy}
-            className="flex-1 resize-none bg-transparent px-1 py-1 text-[15px] leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-50"
+            // text-base (16px) at every size — prevents iOS Safari from auto-
+            // zooming on focus, and reads more comfortably on desktop too.
+            className="max-h-40 min-h-14 w-full resize-none bg-transparent text-base leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-50"
           />
-          <button
-            type="submit"
-            disabled={busy || !input.trim()}
-            className="self-end rounded-lg bg-amber-500/90 px-3.5 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
-          >
-            {busy ? "…" : "Send"}
-          </button>
+          <div className="flex min-h-12 items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (input.startsWith("/")) return;
+                  setInput("/");
+                }}
+                aria-label="Slash command"
+                title="Slash command"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              >
+                <SlashIcon />
+              </button>
+            </div>
+            <button
+              type="submit"
+              disabled={busy || !input.trim()}
+              aria-label="Send"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-500 text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+            >
+              {busy ? <BusyDots /> : <SendIcon />}
+            </button>
+          </div>
         </div>
-        <p className="mt-2 px-1 text-[11px] text-neutral-600">
+        {/* Keyboard hint — useful for users with a physical keyboard. Hidden
+            below sm where touch input is the norm. */}
+        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] text-neutral-600 sm:block">
           Enter to send · Shift+Enter for newline
         </p>
       </form>
@@ -524,7 +571,7 @@ function UserTurn({ text, createdAt }: { text: string; createdAt: string | undef
           </time>
         )}
       </div>
-      <div className="mt-1 max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-neutral-800/70 px-4 py-2.5 text-[15px] leading-relaxed text-neutral-100">
+      <div className="mt-1.5 max-w-[90%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-[#1f2024] px-4 py-3 text-base leading-relaxed text-neutral-100 sm:max-w-[85%]">
         {text}
       </div>
     </div>
@@ -561,13 +608,12 @@ function NarratorTurn({
           />
         )}
       </div>
-      <div className="mt-1 whitespace-pre-wrap font-serif text-[16px] leading-[1.75] text-neutral-100">
+      <div className="mt-1.5 whitespace-pre-wrap font-serif text-[17px] leading-[1.8] text-neutral-100">
         {text}
         {streaming && <span className="chronicles-cursor text-amber-500/70" />}
       </div>
       {!streaming && (cost || canReplay) && (
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">{cost && <CostFooter cost={cost} />}</div>
+        <div className="mt-3 flex flex-col items-start gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           {canReplay && (
             <button
               type="button"
@@ -587,23 +633,151 @@ function NarratorTurn({
                     ? "Restart playback"
                     : "Replay"
               }
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-neutral-800 px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.12em] text-neutral-400 transition hover:border-amber-500/40 hover:text-amber-300 focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-400"
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-200 transition hover:border-amber-500/60 hover:bg-neutral-800 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700/80 disabled:hover:bg-neutral-900/80 disabled:hover:text-neutral-200"
             >
               <ReplayIcon />
               <span>Replay</span>
             </button>
           )}
+          {cost && <CostFooter cost={cost} />}
         </div>
       )}
     </div>
   );
 }
 
+function HeaderIconButton({
+  children,
+  onClick,
+  pressed,
+  label,
+  tone,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  pressed: boolean;
+  label: string;
+  tone: "neutral" | "amber";
+}) {
+  // Ghost icon button — same shape at every viewport. Tinted background
+  // shows the "on" state. Used identically on mobile and desktop so the
+  // chrome stays consistent.
+  const base =
+    "inline-flex h-11 w-11 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60";
+  const stateClass =
+    tone === "amber"
+      ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+      : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={pressed}
+      aria-label={label}
+      title={label}
+      className={`${base} ${stateClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SlashIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M11 3L5 13" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg
+      width="21"
+      height="21"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10 3.5L5.5 8l4.5 4.5" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 8h10" />
+      <path d="M9 4l4 4-4 4" />
+    </svg>
+  );
+}
+
+function ScrollEndIcon() {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 3v9" />
+      <path d="M4.5 8.5L8 12l3.5-3.5" />
+      <path d="M4 14h8" />
+    </svg>
+  );
+}
+
+function BusyDots() {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
+        style={{ animationDelay: "150ms" }}
+      />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
+        style={{ animationDelay: "300ms" }}
+      />
+    </span>
+  );
+}
+
 function ReplayIcon() {
   return (
     <svg
-      width="12"
-      height="12"
+      width="16"
+      height="16"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -621,8 +795,8 @@ function ReplayIcon() {
 function InspectorIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="18"
+      height="18"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -641,8 +815,8 @@ function InspectorIcon() {
 function AudioIcon({ muted }: { muted: boolean }) {
   return (
     <svg
-      width="16"
-      height="16"
+      width="19"
+      height="19"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
@@ -674,8 +848,10 @@ function CostFooter({ cost }: { cost: TurnCost }) {
   if (cost.classifier) segments.push(agentSegment("class", cost.classifier));
   if (cost.npcAgent) segments.push(agentSegment("npc", cost.npcAgent));
   if (cost.tts) segments.push(`tts ${fmt(cost.tts.chars)} chars`);
+  // Wraps cleanly at narrow widths; on wider viewports the same flex layout
+  // keeps it on a single line. No viewport-specific clipping.
   return (
-    <div className="truncate font-sans text-[11px] tabular-nums text-neutral-600">
+    <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums text-neutral-500">
       {segments.join(" · ")} · ~{formatUsd(cost.total)}
     </div>
   );
