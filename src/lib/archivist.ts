@@ -76,6 +76,51 @@ const CharacterPatchSchema = z.object({
     ),
 })
 
+const StoryThreadPatchSchema = z.object({
+  title: z.string().describe('Short stable title for an active plotline, mystery, threat, or mission.'),
+  kind: z.enum(['quest', 'mystery', 'threat', 'relationship', 'background']).optional(),
+  status: z.enum(['active', 'resolved', 'failed', 'dormant']).optional(),
+  summary: z.string().optional().describe('One short sentence describing what this thread is about.'),
+  stakes: z.string().optional().describe('What gets worse if this thread is ignored.'),
+  rewards: z.string().optional().describe('What success may gain: reputation, safety, payment, leverage, answers.'),
+  consequences: z.string().optional().describe('What failure or delay may cost.'),
+  hidden: z
+    .string()
+    .optional()
+    .describe('Narrator-visible pressure that should influence events but not be exposed directly.'),
+})
+
+const StoryCluePatchSchema = z.object({
+  title: z.string().describe('Short name for the clue/evidence/lead.'),
+  thread_title: z.string().optional().describe('Existing or new story thread title this clue belongs to.'),
+  detail: z.string().optional().describe('Concrete discovered fact, evidence, or partial result.'),
+  implication: z.string().optional().describe('What this clue points toward, if known.'),
+  status: z.enum(['open', 'interpreted', 'spent', 'false_lead']).optional(),
+})
+
+const StoryObjectivePatchSchema = z.object({
+  title: z.string().describe('Short playable objective or next step.'),
+  thread_title: z.string().optional().describe('Existing or new story thread title this objective belongs to.'),
+  status: z.enum(['active', 'blocked', 'completed', 'failed']).optional(),
+  detail: z.string().optional().describe('What the protagonist can do about it.'),
+  blocker: z.string().optional().describe('Specific obstacle blocking the objective, if any.'),
+})
+
+const StoryResourcePatchSchema = z.object({
+  name: z.string().describe('Tool, companion, authority, asset, wound, corruption, or other play-relevant resource.'),
+  owner_name: z.string().optional().describe('Known character who owns or carries it, if any.'),
+  kind: z.string().optional().describe('Free-form kind, e.g. tool, companion, weapon, authority, injury.'),
+  status: z.string().optional().describe('Current status, e.g. active, damaged, missing, spent.'),
+  detail: z.string().optional().describe('Short play-relevant detail.'),
+})
+
+const TimelineEventPatchSchema = z.object({
+  title: z.string().describe('Short milestone title.'),
+  thread_title: z.string().optional().describe('Existing or new story thread title this event belongs to.'),
+  summary: z.string().describe('One sentence describing the event.'),
+  importance: z.number().int().min(1).max(5).optional().describe('3 is normal notable; 5 is campaign-defining.'),
+})
+
 export const ArchivistPatchSchema = z.object({
   current_time: z
     .string()
@@ -86,10 +131,19 @@ export const ArchivistPatchSchema = z.object({
   ),
   places: z.array(PlacePatchSchema).optional(),
   characters: z.array(CharacterPatchSchema).optional(),
+  story_threads: z.array(StoryThreadPatchSchema).optional(),
+  story_clues: z.array(StoryCluePatchSchema).optional(),
+  story_objectives: z.array(StoryObjectivePatchSchema).optional(),
+  story_resources: z.array(StoryResourcePatchSchema).optional(),
+  timeline_events: z.array(TimelineEventPatchSchema).optional(),
 })
 
 export type ArchivistPatch = z.infer<typeof ArchivistPatchSchema>
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
+type StoryThreadPatch = NonNullable<ArchivistPatch['story_threads']>[number]
+type StoryCluePatch = NonNullable<ArchivistPatch['story_clues']>[number]
+type StoryObjectivePatch = NonNullable<ArchivistPatch['story_objectives']>[number]
+type StoryResourcePatch = NonNullable<ArchivistPatch['story_resources']>[number]
 
 export const ARCHIVIST_MODEL = 'claude-haiku-4-5-20251001'
 
@@ -154,6 +208,39 @@ export async function extractPatch(
         name: p.name,
         kind: p.kind,
       })),
+      dossier: {
+        active_threads: prior.dossier.threads
+          .filter((t) => t.status === 'active')
+          .slice(0, 6)
+          .map((t) => ({
+            title: t.title,
+            kind: t.kind,
+            summary: limit(t.summary, 140),
+            stakes: limit(t.stakes, 120),
+            rewards: limit(t.rewards, 100),
+            consequences: limit(t.consequences, 120),
+          })),
+        open_clues: prior.dossier.clues
+          .filter((c) => c.status === 'open' || c.status === 'interpreted')
+          .slice(0, 8)
+          .map((c) => ({
+            title: c.title,
+            thread: c.thread_title,
+            detail: limit(c.detail, 140),
+            implication: limit(c.implication, 120),
+            status: c.status,
+          })),
+        current_objectives: prior.dossier.objectives
+          .filter((o) => o.status === 'active' || o.status === 'blocked')
+          .slice(0, 8)
+          .map((o) => ({
+            title: o.title,
+            thread: o.thread_title,
+            detail: limit(o.detail, 140),
+            blocker: limit(o.blocker, 120),
+            status: o.status,
+          })),
+      },
     },
     null,
     2,
@@ -553,6 +640,135 @@ const autoCloseSceneStmt = db.prepare<[number, number]>(
    WHERE id = ? AND status = 'active'`,
 )
 
+type StoryThreadRow = {
+  id: number
+  title: string
+  kind: StoryThreadPatch['kind']
+  status: StoryThreadPatch['status']
+  summary: string | null
+  stakes: string | null
+  rewards: string | null
+  consequences: string | null
+  hidden: string | null
+}
+
+const storyThreadByTitleStmt = db.prepare<[number, string]>(
+  `SELECT id, title, kind, status, summary, stakes, rewards, consequences, hidden
+   FROM story_threads
+   WHERE world_id = ? AND lower(title) = lower(?)`,
+)
+const insertStoryThreadStmt = db.prepare<
+  [
+    number,
+    string,
+    string,
+    string,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
+    number | null,
+  ]
+>(
+  `INSERT INTO story_threads
+     (world_id, title, kind, status, summary, stakes, rewards, consequences, hidden, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+   RETURNING id`,
+)
+const updateStoryThreadStmt = db.prepare<
+  [
+    string,
+    string,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
+    string | null,
+    number | null,
+    number,
+  ]
+>(
+  `UPDATE story_threads SET
+     kind             = ?,
+     status           = ?,
+     summary          = COALESCE(?, summary),
+     stakes           = COALESCE(?, stakes),
+     rewards          = COALESCE(?, rewards),
+     consequences     = COALESCE(?, consequences),
+     hidden           = COALESCE(?, hidden),
+     resolved_turn_id = COALESCE(?, resolved_turn_id),
+     updated_at       = datetime('now')
+   WHERE id = ?`,
+)
+const storyClueByTitleStmt = db.prepare<[number, string]>(
+  `SELECT id FROM story_clues WHERE world_id = ? AND lower(title) = lower(?)`,
+)
+const insertStoryClueStmt = db.prepare<
+  [number, number | null, string, string | null, string | null, string, number | null]
+>(
+  `INSERT INTO story_clues (world_id, thread_id, title, detail, implication, status, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+)
+const updateStoryClueStmt = db.prepare<
+  [number | null, string | null, string | null, string, number]
+>(
+  `UPDATE story_clues SET
+     thread_id   = COALESCE(?, thread_id),
+     detail      = COALESCE(?, detail),
+     implication = COALESCE(?, implication),
+     status      = ?,
+     updated_at  = datetime('now')
+   WHERE id = ?`,
+)
+const storyObjectiveByTitleStmt = db.prepare<[number, string]>(
+  `SELECT id FROM story_objectives WHERE world_id = ? AND lower(title) = lower(?)`,
+)
+const insertStoryObjectiveStmt = db.prepare<
+  [number, number | null, string, string, string | null, string | null, number | null]
+>(
+  `INSERT INTO story_objectives (world_id, thread_id, title, status, detail, blocker, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+)
+const updateStoryObjectiveStmt = db.prepare<
+  [number | null, string, string | null, string | null, number | null, number]
+>(
+  `UPDATE story_objectives SET
+     thread_id          = COALESCE(?, thread_id),
+     status             = ?,
+     detail             = COALESCE(?, detail),
+     blocker            = COALESCE(?, blocker),
+     completed_turn_id  = COALESCE(?, completed_turn_id),
+     updated_at         = datetime('now')
+   WHERE id = ?`,
+)
+const storyResourceByNameStmt = db.prepare<[number, string]>(
+  `SELECT id FROM story_resources WHERE world_id = ? AND lower(name) = lower(?)`,
+)
+const insertStoryResourceStmt = db.prepare<
+  [number, number | null, string, string | null, string | null, string | null, number | null]
+>(
+  `INSERT INTO story_resources (world_id, owner_character_id, name, kind, status, detail, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+)
+const updateStoryResourceStmt = db.prepare<
+  [number | null, string | null, string | null, string | null, number]
+>(
+  `UPDATE story_resources SET
+     owner_character_id = COALESCE(?, owner_character_id),
+     kind               = COALESCE(?, kind),
+     status             = COALESCE(?, status),
+     detail             = COALESCE(?, detail),
+     updated_at         = datetime('now')
+   WHERE id = ?`,
+)
+const insertTimelineEventStmt = db.prepare<
+  [number, number, number | null, string | null, string, string, number]
+>(
+  `INSERT INTO timeline_events (world_id, turn_id, thread_id, world_time, title, summary, importance)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+)
+
 const CHARACTER_TITLE_WORDS = new Set([
   'captain',
   'capt',
@@ -854,6 +1070,145 @@ function maxNullable(a: number | null, b: number | null): number | null {
   return Math.max(a, b)
 }
 
+function upsertStoryThread(
+  worldId: number,
+  narratorTurnId: number,
+  patch: StoryThreadPatch,
+): number {
+  const existing = storyThreadByTitleStmt.get(worldId, patch.title) as StoryThreadRow | undefined
+  const kind = patch.kind ?? existing?.kind ?? 'mystery'
+  const status = patch.status ?? existing?.status ?? 'active'
+  const resolvedTurnId =
+    status === 'resolved' || status === 'failed' ? narratorTurnId : null
+
+  if (existing) {
+    updateStoryThreadStmt.run(
+      kind,
+      status,
+      patch.summary ?? null,
+      patch.stakes ?? null,
+      patch.rewards ?? null,
+      patch.consequences ?? null,
+      patch.hidden ?? null,
+      resolvedTurnId,
+      existing.id,
+    )
+    return existing.id
+  }
+
+  const row = insertStoryThreadStmt.get(
+    worldId,
+    patch.title,
+    kind,
+    status,
+    patch.summary ?? null,
+    patch.stakes ?? null,
+    patch.rewards ?? null,
+    patch.consequences ?? null,
+    patch.hidden ?? null,
+    narratorTurnId,
+  ) as { id: number }
+  return row.id
+}
+
+function resolveStoryThreadId(
+  worldId: number,
+  narratorTurnId: number,
+  threadTitle: string | undefined,
+): number | null {
+  if (!threadTitle) return null
+  return upsertStoryThread(worldId, narratorTurnId, { title: threadTitle, status: 'active' })
+}
+
+function upsertStoryClue(
+  worldId: number,
+  narratorTurnId: number,
+  patch: StoryCluePatch,
+): void {
+  const threadId = resolveStoryThreadId(worldId, narratorTurnId, patch.thread_title)
+  const existing = storyClueByTitleStmt.get(worldId, patch.title) as { id: number } | undefined
+  const status = patch.status ?? 'open'
+  if (existing) {
+    updateStoryClueStmt.run(
+      threadId,
+      patch.detail ?? null,
+      patch.implication ?? null,
+      status,
+      existing.id,
+    )
+    return
+  }
+  insertStoryClueStmt.run(
+    worldId,
+    threadId,
+    patch.title,
+    patch.detail ?? null,
+    patch.implication ?? null,
+    status,
+    narratorTurnId,
+  )
+}
+
+function upsertStoryObjective(
+  worldId: number,
+  narratorTurnId: number,
+  patch: StoryObjectivePatch,
+): void {
+  const threadId = resolveStoryThreadId(worldId, narratorTurnId, patch.thread_title)
+  const existing = storyObjectiveByTitleStmt.get(worldId, patch.title) as { id: number } | undefined
+  const status = patch.status ?? 'active'
+  const completedTurnId =
+    status === 'completed' || status === 'failed' ? narratorTurnId : null
+  if (existing) {
+    updateStoryObjectiveStmt.run(
+      threadId,
+      status,
+      patch.detail ?? null,
+      patch.blocker ?? null,
+      completedTurnId,
+      existing.id,
+    )
+    return
+  }
+  insertStoryObjectiveStmt.run(
+    worldId,
+    threadId,
+    patch.title,
+    status,
+    patch.detail ?? null,
+    patch.blocker ?? null,
+    narratorTurnId,
+  )
+}
+
+function upsertStoryResource(
+  worldId: number,
+  narratorTurnId: number,
+  patch: StoryResourcePatch,
+): void {
+  const ownerId = patch.owner_name ? resolveCharacter(worldId, patch.owner_name)?.id ?? null : null
+  const existing = storyResourceByNameStmt.get(worldId, patch.name) as { id: number } | undefined
+  if (existing) {
+    updateStoryResourceStmt.run(
+      ownerId,
+      patch.kind ?? null,
+      patch.status ?? null,
+      patch.detail ?? null,
+      existing.id,
+    )
+    return
+  }
+  insertStoryResourceStmt.run(
+    worldId,
+    ownerId,
+    patch.name,
+    patch.kind ?? null,
+    patch.status ?? null,
+    patch.detail ?? null,
+    narratorTurnId,
+  )
+}
+
 
 // Apply a validated patch to the world. Wrapped in a single transaction so a
 // partial failure leaves no half-applied state (e.g. a new place row with no
@@ -968,6 +1323,48 @@ export function applyArchivistPatch(
     // 4. World clock.
     if (patch.current_time) {
       setWorldTimeStmt.run(patch.current_time, worldId)
+    }
+
+    // 5. Story dossier. These are story-shaped memory rows: playable
+    //    pressure, clues, objectives, resources, and concise timeline beats.
+    if (patch.story_threads) {
+      for (const thread of patch.story_threads) {
+        upsertStoryThread(worldId, narratorTurnId, thread)
+      }
+    }
+    if (patch.story_clues) {
+      for (const clue of patch.story_clues) {
+        upsertStoryClue(worldId, narratorTurnId, clue)
+      }
+    }
+    if (patch.story_objectives) {
+      for (const objective of patch.story_objectives) {
+        upsertStoryObjective(worldId, narratorTurnId, objective)
+      }
+    }
+    if (patch.story_resources) {
+      for (const resource of patch.story_resources) {
+        upsertStoryResource(worldId, narratorTurnId, resource)
+      }
+    }
+    if (patch.timeline_events) {
+      const worldTime =
+        patch.current_time ??
+        ((db.prepare('SELECT world_time FROM worlds WHERE id = ?').get(worldId) as
+          | { world_time: string | null }
+          | undefined)?.world_time ?? null)
+      for (const event of patch.timeline_events) {
+        const threadId = resolveStoryThreadId(worldId, narratorTurnId, event.thread_title)
+        insertTimelineEventStmt.run(
+          worldId,
+          narratorTurnId,
+          threadId,
+          worldTime,
+          event.title,
+          event.summary,
+          event.importance ?? 3,
+        )
+      }
     }
   })
   tx()

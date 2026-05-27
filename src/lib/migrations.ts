@@ -341,6 +341,112 @@ export const migrations: Migration[] = [
       db.exec('UPDATE scenes SET updated_at = created_at WHERE updated_at IS NULL')
     },
   },
+  {
+    // v0.6.4 — story dossier memory. Entity rows tell the narrator who and
+    // where; these tables tell it what is currently playable: active threads,
+    // objectives, clues, resources, and concise timeline beats.
+    version: 11,
+    name: 'story_dossier',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE story_threads (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id         INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          title            TEXT    NOT NULL,
+          status           TEXT    NOT NULL DEFAULT 'active'
+                           CHECK (status IN ('active','resolved','failed','dormant')),
+          summary          TEXT,
+          stakes           TEXT,
+          hidden           TEXT,
+          source_turn_id   INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          resolved_turn_id INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX story_threads_world_id ON story_threads(world_id);
+        CREATE UNIQUE INDEX story_threads_world_title ON story_threads(world_id, lower(title));
+
+        CREATE TABLE story_clues (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id       INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          thread_id      INTEGER REFERENCES story_threads(id) ON DELETE SET NULL,
+          title          TEXT    NOT NULL,
+          detail         TEXT,
+          implication    TEXT,
+          status         TEXT    NOT NULL DEFAULT 'open'
+                         CHECK (status IN ('open','interpreted','spent','false_lead')),
+          source_turn_id INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX story_clues_world_id ON story_clues(world_id);
+        CREATE UNIQUE INDEX story_clues_world_title ON story_clues(world_id, lower(title));
+
+        CREATE TABLE story_objectives (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id          INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          thread_id         INTEGER REFERENCES story_threads(id) ON DELETE SET NULL,
+          title             TEXT    NOT NULL,
+          status            TEXT    NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('active','blocked','completed','failed')),
+          detail            TEXT,
+          blocker           TEXT,
+          source_turn_id    INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          completed_turn_id INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX story_objectives_world_id ON story_objectives(world_id);
+        CREATE UNIQUE INDEX story_objectives_world_title ON story_objectives(world_id, lower(title));
+
+        CREATE TABLE story_resources (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id           INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          owner_character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+          name               TEXT    NOT NULL,
+          kind               TEXT,
+          status             TEXT,
+          detail             TEXT,
+          source_turn_id     INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX story_resources_world_id ON story_resources(world_id);
+        CREATE UNIQUE INDEX story_resources_world_name ON story_resources(world_id, lower(name));
+
+        CREATE TABLE timeline_events (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id    INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          turn_id     INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          world_time  TEXT,
+          title       TEXT    NOT NULL,
+          summary     TEXT    NOT NULL,
+          importance  INTEGER NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
+          created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX timeline_events_world_id ON timeline_events(world_id);
+        CREATE INDEX timeline_events_world_importance ON timeline_events(world_id, importance, id);
+      `)
+    },
+  },
+  {
+    // v0.6.4 — quest/timeline refinement for the story dossier. Threads can
+    // now identify their story function (quest, mystery, threat, relationship,
+    // background), carry explicit rewards/consequences, and timeline events
+    // can point back to the relevant thread.
+    version: 12,
+    name: 'story_dossier_quests_timeline',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE story_threads ADD COLUMN kind TEXT NOT NULL DEFAULT 'mystery'
+          CHECK (kind IN ('quest','mystery','threat','relationship','background'));
+        ALTER TABLE story_threads ADD COLUMN rewards TEXT;
+        ALTER TABLE story_threads ADD COLUMN consequences TEXT;
+        ALTER TABLE timeline_events ADD COLUMN thread_id INTEGER REFERENCES story_threads(id) ON DELETE SET NULL;
+        CREATE INDEX timeline_events_thread_id ON timeline_events(thread_id);
+      `)
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

@@ -5,8 +5,10 @@ import {
   getPlace,
   getPlacesForWorld,
   getScenesForWorld,
+  getStoryDossierForWorld,
   getTurnTimestampsForWorld,
   getWorldCursor,
+  type StoryDossier,
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 
@@ -69,6 +71,7 @@ export type NarratorWorldState = {
   presentCharacters: Character[]
   knownCharacters: Character[]
   knownPlaces: Place[]
+  dossier: StoryDossier
 }
 
 export type FullWorldState = {
@@ -77,6 +80,7 @@ export type FullWorldState = {
   characters: Character[]
   places: Place[]
   scenes: Scene[]
+  dossier: StoryDossier
   turnTimestamps: Record<number, string>
 }
 
@@ -99,6 +103,7 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     presentCharacters: [...player, ...npcsInPlace],
     knownCharacters,
     knownPlaces,
+    dossier: getStoryDossierForWorld(worldId),
   }
 }
 
@@ -113,6 +118,7 @@ export function getFullWorldState(worldId: number): FullWorldState {
     characters: getCharactersForWorld(worldId),
     places: getPlacesForWorld(worldId),
     scenes: getScenesForWorld(worldId),
+    dossier: getStoryDossierForWorld(worldId),
     turnTimestamps,
   }
 }
@@ -214,6 +220,115 @@ export function formatStateBlock(
     lines.push('', '### PLANNED MOVES THIS TURN (agent NPCs)')
     for (const p of plannedActions) {
       lines.push(`- **${p.npc_name}** — ${p.intent}`)
+    }
+  }
+
+  const dossierBlock = formatDossierBlock(state.dossier)
+  if (dossierBlock) {
+    lines.push('', dossierBlock)
+  }
+
+  return lines.join('\n')
+}
+
+export function formatDossierBlock(dossier: StoryDossier): string {
+  const lines: string[] = []
+  const activeQuests = dossier.threads
+    .filter((t) => t.status === 'active' && t.kind === 'quest')
+    .slice(0, 4)
+  const activeThreads = dossier.threads
+    .filter((t) => t.status === 'active' && t.kind !== 'quest')
+    .slice(0, 4)
+  const activeObjectives = dossier.objectives
+    .filter((o) => o.status === 'active' || o.status === 'blocked')
+    .slice(0, 5)
+  const openClues = dossier.clues
+    .filter((c) => c.status === 'open' || c.status === 'interpreted')
+    .slice(0, 6)
+  const resources = dossier.resources.slice(0, 6)
+  const timeline = dossier.timeline.filter((e) => e.importance >= 3).slice(0, 5)
+
+  if (
+    activeQuests.length === 0 &&
+    activeThreads.length === 0 &&
+    activeObjectives.length === 0 &&
+    openClues.length === 0 &&
+    resources.length === 0 &&
+    timeline.length === 0
+  ) {
+    return ''
+  }
+
+  lines.push('## STORY DOSSIER')
+  lines.push('Use this as playable pressure, not exposition. Hidden pressure can move the world but must not be blurted out.')
+
+  if (activeQuests.length > 0) {
+    lines.push('', '### ACTIVE QUESTS')
+    for (const q of activeQuests) {
+      const details = [
+        q.summary,
+        q.stakes ? `stakes: ${q.stakes}` : null,
+        q.rewards ? `rewards: ${q.rewards}` : null,
+        q.consequences ? `consequences: ${q.consequences}` : null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+      lines.push(`- ${q.title}${details ? ` — ${limit(details, 260)}` : ''}`)
+      if (q.hidden) lines.push(`  - hidden pressure: ${limit(q.hidden, 180)}`)
+    }
+  }
+
+  if (activeThreads.length > 0) {
+    lines.push('', '### ACTIVE THREADS')
+    for (const t of activeThreads) {
+      const details = [
+        `${t.kind}:`,
+        t.summary,
+        t.stakes ? `stakes: ${t.stakes}` : null,
+        t.consequences ? `consequences: ${t.consequences}` : null,
+      ]
+        .filter(Boolean)
+        .join(' ')
+      lines.push(`- ${t.title}${details ? ` — ${limit(details, 220)}` : ''}`)
+      if (t.hidden) lines.push(`  - hidden pressure: ${limit(t.hidden, 180)}`)
+    }
+  }
+
+  if (activeObjectives.length > 0) {
+    lines.push('', '### CURRENT OBJECTIVES')
+    for (const o of activeObjectives) {
+      const detail = [o.detail, o.blocker ? `blocker: ${o.blocker}` : null]
+        .filter(Boolean)
+        .join(' ')
+      lines.push(`- ${o.title}${o.status === 'blocked' ? ' (blocked)' : ''}${detail ? ` — ${limit(detail, 200)}` : ''}`)
+    }
+  }
+
+  if (openClues.length > 0) {
+    lines.push('', '### CLUES')
+    for (const c of openClues) {
+      const detail = [c.detail, c.implication ? `implies: ${c.implication}` : null]
+        .filter(Boolean)
+        .join(' ')
+      lines.push(`- ${c.title}${c.thread_title ? ` [${c.thread_title}]` : ''}${detail ? ` — ${limit(detail, 220)}` : ''}`)
+    }
+  }
+
+  if (resources.length > 0) {
+    lines.push('', '### RESOURCES')
+    for (const r of resources) {
+      const owner = r.owner_name ? `${r.owner_name}: ` : ''
+      const detail = [r.kind, r.status, r.detail].filter(Boolean).join('; ')
+      lines.push(`- ${owner}${r.name}${detail ? ` — ${limit(detail, 180)}` : ''}`)
+    }
+  }
+
+  if (timeline.length > 0) {
+    lines.push('', '### RECENT TIMELINE')
+    for (const e of timeline) {
+      lines.push(
+        `- ${e.thread_title ? `[${e.thread_title}] ` : ''}${e.world_time ? `${e.world_time}: ` : ''}${e.title} — ${limit(e.summary, 180)}`,
+      )
     }
   }
 

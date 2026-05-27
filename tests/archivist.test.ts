@@ -12,6 +12,7 @@ import {
   getCharactersForWorld,
   getPlacesForWorld,
   getScenesForWorld,
+  getStoryDossierForWorld,
   getWorldCursor,
   insertTurn,
 } from '@/lib/db'
@@ -82,6 +83,84 @@ describe('applyArchivistPatch', () => {
   it('current_time updates the world clock', () => {
     applyArchivistPatch(worldId, turnId, { current_time: 'Dusk, lamps lit' })
     expect(getWorldCursor(worldId).world_time).toBe('Dusk, lamps lit')
+  })
+
+  it('applies story dossier threads, clues, objectives, resources, and timeline events', () => {
+    applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'Identify the relay fragment',
+          kind: 'quest',
+          summary: 'A fresh Imperial fragment was found in the field.',
+          stakes: 'Whoever planted it may still be nearby.',
+          rewards: 'Finding the source establishes Voss as competent.',
+          consequences: 'Delay lets the saboteur erase the signal trail.',
+          hidden: 'The fragment is part of an off-book relay network.',
+        },
+      ],
+      story_clues: [
+        {
+          title: 'Mark VIIc casing',
+          thread_title: 'Identify the relay fragment',
+          detail: 'Vox matched the fragment to a Mark VIIc vox-relay array.',
+          implication: 'The nearby spire may be transmitting.',
+        },
+      ],
+      story_objectives: [
+        {
+          title: 'Check the spire',
+          thread_title: 'Identify the relay fragment',
+          detail: 'Reach the spire and test for relay traffic.',
+        },
+      ],
+      story_resources: [
+        {
+          name: 'Vox',
+          kind: 'companion scanner',
+          status: 'active',
+          detail: 'Can run technical pattern matches.',
+        },
+      ],
+      timeline_events: [
+        {
+          title: 'Relay fragment identified',
+          thread_title: 'Identify the relay fragment',
+          summary: 'Vox matched the field fragment to Imperial relay hardware.',
+          importance: 4,
+        },
+      ],
+    })
+
+    const dossier = getStoryDossierForWorld(worldId)
+    expect(dossier.threads).toHaveLength(1)
+    expect(dossier.threads[0]).toMatchObject({
+      title: 'Identify the relay fragment',
+      kind: 'quest',
+      status: 'active',
+      rewards: 'Finding the source establishes Voss as competent.',
+      consequences: 'Delay lets the saboteur erase the signal trail.',
+      hidden: 'The fragment is part of an off-book relay network.',
+    })
+    expect(dossier.clues[0]).toMatchObject({
+      title: 'Mark VIIc casing',
+      thread_title: 'Identify the relay fragment',
+      status: 'open',
+    })
+    expect(dossier.objectives[0]).toMatchObject({
+      title: 'Check the spire',
+      thread_title: 'Identify the relay fragment',
+      status: 'active',
+    })
+    expect(dossier.resources[0]).toMatchObject({
+      name: 'Vox',
+      kind: 'companion scanner',
+      status: 'active',
+    })
+    expect(dossier.timeline[0]).toMatchObject({
+      title: 'Relay fragment identified',
+      thread_title: 'Identify the relay fragment',
+      importance: 4,
+    })
   })
 
   it('inserts a new character with description and place', () => {
