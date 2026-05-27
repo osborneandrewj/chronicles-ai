@@ -173,6 +173,42 @@ const addTtsCharsStmt = db.prepare<[number, number, number]>(
    )
    WHERE id = ? AND world_id = ? AND role = 'assistant'`,
 )
+const getTtsAudioCacheStmt = db.prepare<[number, number, string, string, string]>(
+  `SELECT id, content_type, audio, byte_length
+   FROM tts_audio_cache
+   WHERE world_id = ? AND turn_id = ? AND model_key = ? AND voice_id = ? AND text_hash = ?
+   ORDER BY id DESC
+   LIMIT 1`,
+)
+const touchTtsAudioCacheStmt = db.prepare<[number]>(
+  `UPDATE tts_audio_cache SET accessed_at = datetime('now') WHERE id = ?`,
+)
+const upsertTtsAudioCacheStmt = db.prepare<
+  [number, string, string, string, string, Buffer, number, number, number]
+>(
+  `INSERT INTO tts_audio_cache (
+     world_id, turn_id, model_key, voice_id, text_hash, content_type, audio, byte_length,
+     created_at, accessed_at
+   )
+   SELECT ?, t.id, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')
+   FROM turns t
+   WHERE t.id = ? AND t.world_id = ? AND t.role = 'assistant'
+   ON CONFLICT (world_id, turn_id, model_key, voice_id, text_hash) DO UPDATE SET
+     content_type = excluded.content_type,
+     audio = excluded.audio,
+     byte_length = excluded.byte_length,
+     accessed_at = datetime('now')`,
+)
+const pruneTtsAudioCacheStmt = db.prepare<[number, number, number]>(
+  `DELETE FROM tts_audio_cache
+   WHERE world_id = ?
+     AND id NOT IN (
+       SELECT id FROM tts_audio_cache
+       WHERE world_id = ?
+       ORDER BY accessed_at DESC, id DESC
+       LIMIT ?
+     )`,
+)
 // Includes both the old `extractor` key (pre-v0.5) and the new `archivist` key
 // in the sum so cost totals stay continuous across the v5 cutover.
 const usageTotalsStmt = db.prepare<[number]>(`
@@ -195,7 +231,7 @@ const usageTotalsStmt = db.prepare<[number]>(`
 const CHARACTER_COLS = `id, world_id, name, description, is_player, current_place_id,
         memorable_facts, status, active_goal, current_attitude, observations,
         agency_level, personal_goals, current_focus, recent_activity, appearance_count,
-        last_seen_turn_id, last_agent_tick_turn_id, created_at, updated_at`
+        last_seen_turn_id, last_agent_tick_turn_id, player_notes, created_at, updated_at`
 const charactersForWorldStmt = db.prepare<[number]>(
   `SELECT ${CHARACTER_COLS}
    FROM characters WHERE world_id = ? ORDER BY is_player DESC, id ASC`,
@@ -205,11 +241,11 @@ const charactersInPlaceStmt = db.prepare<[number, number]>(
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, kind, created_at, updated_at FROM places
+  `SELECT id, world_id, name, description, kind, player_notes, created_at, updated_at FROM places
    WHERE world_id = ? ORDER BY id ASC`,
 )
 const placeByIdStmt = db.prepare<[number]>(
-  'SELECT id, world_id, name, description, kind, created_at, updated_at FROM places WHERE id = ?',
+  'SELECT id, world_id, name, description, kind, player_notes, created_at, updated_at FROM places WHERE id = ?',
 )
 const scenesForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,
@@ -310,6 +346,25 @@ const timelineEventsForWorldStmt = db.prepare<[number]>(
    WHERE e.world_id = ?
    ORDER BY e.id DESC
    LIMIT 12`,
+)
+
+const insertWorldCorrectionStmt = db.prepare<
+  [number, number | null, string, string, string]
+>(
+  `INSERT INTO world_corrections (world_id, turn_id, player_text, archivist_reply, applied_patch)
+   VALUES (?, ?, ?, ?, ?)
+   RETURNING id, world_id, turn_id, player_text, archivist_reply, applied_patch, created_at`,
+)
+// Scrollback for the inspector's Archivist tab. DESC by id so the newest row
+// is first; the UI reverses for chronological rendering. Bounded to keep
+// payloads small — older corrections are still in the table, just not
+// surfaced.
+const worldCorrectionsForWorldStmt = db.prepare<[number, number]>(
+  `SELECT id, world_id, turn_id, player_text, archivist_reply, applied_patch, created_at
+   FROM world_corrections
+   WHERE world_id = ?
+   ORDER BY id DESC
+   LIMIT ?`,
 )
 
 export function insertTurn(
@@ -416,6 +471,62 @@ export function addTtsChars(worldId: number, turnId: number, chars: number): voi
   addTtsCharsStmt.run(Math.max(0, Math.round(chars)), turnId, worldId)
 }
 
+export type CachedTtsAudio = {
+  contentType: string
+  audio: Buffer
+  byteLength: number
+}
+
+export function getCachedTtsAudio(
+  worldId: number,
+  turnId: number,
+  modelKey: string,
+  voiceId: string,
+  textHash: string,
+): CachedTtsAudio | null {
+  const row = getTtsAudioCacheStmt.get(worldId, turnId, modelKey, voiceId, textHash) as
+    | { id: number; content_type: string; audio: Buffer; byte_length: number }
+    | undefined
+  if (!row) return null
+  touchTtsAudioCacheStmt.run(row.id)
+  return { contentType: row.content_type, audio: row.audio, byteLength: row.byte_length }
+}
+
+export function storeCachedTtsAudio({
+  worldId,
+  turnId,
+  modelKey,
+  voiceId,
+  textHash,
+  contentType,
+  audio,
+  maxPerWorld = 3,
+}: {
+  worldId: number
+  turnId: number
+  modelKey: string
+  voiceId: string
+  textHash: string
+  contentType: string
+  audio: Buffer
+  maxPerWorld?: number
+}): void {
+  db.transaction(() => {
+    upsertTtsAudioCacheStmt.run(
+      worldId,
+      modelKey,
+      voiceId,
+      textHash,
+      contentType,
+      audio,
+      audio.byteLength,
+      turnId,
+      worldId,
+    )
+    pruneTtsAudioCacheStmt.run(worldId, worldId, maxPerWorld)
+  })()
+}
+
 export type UsageTotals = {
   turns: number
   narratorInput: number
@@ -503,4 +614,42 @@ export function getStoryDossierForWorld(worldId: number): StoryDossier {
     resources: storyResourcesForWorldStmt.all(worldId) as StoryResource[],
     timeline: timelineEventsForWorldStmt.all(worldId) as TimelineEvent[],
   }
+}
+
+// v0.6.6 — player→archivist correction scrollback. Rows are inserted by the
+// /api/world-correction route after the patch has been applied; read back by
+// the inspector's Archivist tab for the in-tab scrollback. `applied_patch` is
+// the serialized ArchivistPatch JSON so a row is self-describing without
+// joining against the entity tables.
+export type WorldCorrectionRow = {
+  id: number
+  world_id: number
+  turn_id: number | null
+  player_text: string
+  archivist_reply: string
+  applied_patch: string
+  created_at: string
+}
+
+export function insertWorldCorrection(
+  worldId: number,
+  turnId: number | null,
+  playerText: string,
+  archivistReply: string,
+  appliedPatch: unknown,
+): WorldCorrectionRow {
+  return insertWorldCorrectionStmt.get(
+    worldId,
+    turnId,
+    playerText,
+    archivistReply,
+    JSON.stringify(appliedPatch),
+  ) as WorldCorrectionRow
+}
+
+export function getWorldCorrectionsForWorld(
+  worldId: number,
+  limit = 50,
+): WorldCorrectionRow[] {
+  return worldCorrectionsForWorldStmt.all(worldId, Math.max(1, Math.min(200, limit))) as WorldCorrectionRow[]
 }

@@ -568,6 +568,169 @@ describe('applyArchivistPatch', () => {
     expect(tom.memorable_facts).toBe(`gave the player a silver locket [t:${turnId}]`)
     expect(tom.active_goal).toBe('recover the locket')
   })
+
+  // v0.6.6 — player canon channel
+  it('player_notes_append on the player adds a single line', () => {
+    const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: player.name, player_notes_append: 'Drives a Subaru Outback' }],
+    })
+    const after = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    expect(after.player_notes).toBe('Drives a Subaru Outback')
+  })
+
+  it('player_notes_append accumulates lines across calls', () => {
+    const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: player.name, player_notes_append: 'Drives a Subaru Outback' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: player.name, player_notes_append: 'Has a sister Maeve in Boston' }],
+    })
+    const after = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    expect(after.player_notes).toBe('Drives a Subaru Outback\nHas a sister Maeve in Boston')
+  })
+
+  it('player_notes_append on a new character creates the row and writes the note', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Maeve',
+          description: 'Player\'s sister.',
+          player_notes_append: 'Lives in Boston',
+        },
+      ],
+    })
+    const maeve = getCharactersForWorld(worldId).find((c) => c.name === 'Maeve')!
+    expect(maeve.player_notes).toBe('Lives in Boston')
+    expect(maeve.description).toBe("Player's sister.")
+  })
+
+  it('place player_notes_append accumulates lines', () => {
+    applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Mevagissey harbour', player_notes_append: 'Where my grandfather worked' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Mevagissey harbour', player_notes_append: 'Mooring 14 is the family slip' }],
+    })
+    const place = getPlacesForWorld(worldId).find((p) =>
+      /harbour/i.test(p.name),
+    )!
+    expect(place.player_notes).toBe(
+      'Where my grandfather worked\nMooring 14 is the family slip',
+    )
+  })
+
+  it('aliases merges two existing NPC rows whose names do not overlap', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Bob', description: 'A drinker at the back of the pub.' },
+        { name: 'Robert', description: 'Former lighthouse keeper.' },
+      ],
+    })
+    expect(getCharactersForWorld(worldId).filter((c) => /^(?:bob|robert)$/i.test(c.name))).toHaveLength(2)
+
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Robert', aliases: ['Bob'], player_notes_append: 'Bob is short for Robert' },
+      ],
+    })
+
+    const remaining = getCharactersForWorld(worldId).filter((c) =>
+      /^(?:bob|robert)$/i.test(c.name),
+    )
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].name).toBe('Robert')
+    // mergeCharacters' chooseLonger collapses the two descriptions into the
+    // longer one of the pair; either prior value is acceptable as long as no
+    // data was dropped.
+    expect(remaining[0].description?.length ?? 0).toBeGreaterThan(0)
+    expect(remaining[0].player_notes).toBe('Bob is short for Robert')
+  })
+
+  it('aliases is a no-op when the named alias does not exist', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Robert', description: 'Former lighthouse keeper.' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Robert', aliases: ['Bob'] }],
+    })
+    const remaining = getCharactersForWorld(worldId).filter((c) => c.name === 'Robert')
+    expect(remaining).toHaveLength(1)
+  })
+
+  it('aliases merge preserves fresh scalar fields from the more recently updated row', async () => {
+    // Create "Jordana" first, with stale scalar state.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Jordana',
+          description: 'A clerk at the records office.',
+          active_goal: 'finish the morning ledger',
+          current_attitude: 'curt',
+        },
+      ],
+    })
+    // Force a measurable updated_at gap so the freshness preference is
+    // unambiguous — SQLite's datetime('now') is per-second granularity, so a
+    // sub-second second patch would otherwise tie.
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    // Then "Jordana Osborne" with the *current* state.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Jordana Osborne',
+          description: 'Clerk turned investigator, deep in a wartime archive.',
+          active_goal: 'identify the unmarked fragment',
+          current_attitude: 'guarded but engaged',
+        },
+      ],
+    })
+
+    // Player merges them via alias.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Jordana Osborne', aliases: ['Jordana'] }],
+    })
+
+    const remaining = getCharactersForWorld(worldId).filter((c) =>
+      /jordana/i.test(c.name),
+    )
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].name).toBe('Jordana Osborne')
+    // Fresh state from the newer row survives even though "Jordana" (the
+    // older row by id) was the merge target. Pre-fix this returned the stale
+    // 'finish the morning ledger' / 'curt' pair.
+    expect(remaining[0].active_goal).toBe('identify the unmarked fragment')
+    expect(remaining[0].current_attitude).toBe('guarded but engaged')
+  })
+
+  it('alias merge uses the patch-supplied name as the canonical even when target was older', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Jordana', description: 'A clerk.' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Jordana Osborne', description: 'A clerk turned investigator.' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Jordana Osborne', aliases: ['Jordana'] }],
+    })
+    const remaining = getCharactersForWorld(worldId).filter((c) => /jordana/i.test(c.name))
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].name).toBe('Jordana Osborne')
+  })
+
+  it('aliases will not merge across the player/NPC boundary', () => {
+    const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'Edith Stranger', description: 'A drifter said to share my name.' }],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: player.name, aliases: ['Edith Stranger'] }],
+    })
+    const everyone = getCharactersForWorld(worldId)
+    expect(everyone.filter((c) => c.is_player === 1)).toHaveLength(1)
+    expect(everyone.find((c) => c.name === 'Edith Stranger')).toBeDefined()
+  })
 })
 
 describe('extractDeterministicPatch', () => {

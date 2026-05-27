@@ -447,6 +447,62 @@ export const migrations: Migration[] = [
       `)
     },
   },
+  {
+    // v0.6.6 — player-asserted canon and correction scrollback. `player_notes`
+    // on characters and places is the home for things the player tells the
+    // archivist directly ("I drive a Subaru", "Maeve is my sister"). The
+    // normal narrator-extraction archivist path is forbidden from writing it
+    // — only the correction path may. `world_corrections` is the audit log /
+    // scrollback the inspector's Archivist tab reads from.
+    version: 13,
+    name: 'player_canon_and_corrections',
+    up: (db) => {
+      db.exec('ALTER TABLE characters ADD COLUMN player_notes TEXT')
+      db.exec('ALTER TABLE places ADD COLUMN player_notes TEXT')
+      db.exec(`
+        CREATE TABLE world_corrections (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id        INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          turn_id         INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          player_text     TEXT    NOT NULL,
+          archivist_reply TEXT    NOT NULL,
+          applied_patch   TEXT    NOT NULL,
+          created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX world_corrections_world_created
+          ON world_corrections (world_id, created_at DESC);
+      `)
+    },
+  },
+  {
+    // v0.6.6 — tiny per-world TTS replay cache. Keeps the most recent few
+    // generated narration audio files so Replay can reuse them without another
+    // TTS call. The cache key includes model_key + voice_id + text_hash so a
+    // future voice/model picker naturally regenerates when the selection
+    // changes.
+    version: 14,
+    name: 'tts_audio_cache',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE tts_audio_cache (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id     INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          turn_id      INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+          model_key    TEXT    NOT NULL,
+          voice_id     TEXT    NOT NULL,
+          text_hash    TEXT    NOT NULL,
+          content_type TEXT    NOT NULL,
+          audio        BLOB    NOT NULL,
+          byte_length  INTEGER NOT NULL,
+          created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+          accessed_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (world_id, turn_id, model_key, voice_id, text_hash)
+        );
+        CREATE INDEX tts_audio_cache_world_accessed
+          ON tts_audio_cache (world_id, accessed_at DESC, id DESC);
+      `)
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

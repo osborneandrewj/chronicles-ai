@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -91,6 +91,7 @@ describe('v5 migration', () => {
         'story_resources',
         'story_threads',
         'timeline_events',
+        'tts_audio_cache',
         'turns',
         'worlds',
       ]),
@@ -225,7 +226,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -265,7 +266,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -373,7 +374,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -413,7 +414,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -447,5 +448,75 @@ describe('v8 migration (agentic_npcs)', () => {
       .get() as { agency_level: string; appearance_count: number }
     expect(player.agency_level).toBe('npc')
     expect(player.appearance_count).toBe(0)
+  })
+})
+
+describe('v13 migration (player_canon_and_corrections)', () => {
+  it('adds nullable player_notes to characters and places, and a world_corrections table', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Test World',
+      'p',
+      JSON.stringify({
+        time: 'Late afternoon',
+        location: 'Mevagissey harbour',
+        identity: 'Travel-worn letter-writer.',
+      }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const charPlayerNotes = charCols.find((c) => c.name === 'player_notes')
+    expect(charPlayerNotes?.type.toUpperCase()).toBe('TEXT')
+    expect(charPlayerNotes?.notnull).toBe(0)
+    expect(charPlayerNotes?.dflt_value).toBeNull()
+
+    const placeCols = db.prepare("PRAGMA table_info('places')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+      dflt_value: string | null
+    }>
+    const placePlayerNotes = placeCols.find((c) => c.name === 'player_notes')
+    expect(placePlayerNotes?.type.toUpperCase()).toBe('TEXT')
+    expect(placePlayerNotes?.notnull).toBe(0)
+    expect(placePlayerNotes?.dflt_value).toBeNull()
+
+    const correctionCols = db.prepare("PRAGMA table_info('world_corrections')").all() as Array<{
+      name: string
+      type: string
+      notnull: number
+    }>
+    const byName = new Map(correctionCols.map((c) => [c.name, c]))
+    expect(byName.get('player_text')?.notnull).toBe(1)
+    expect(byName.get('archivist_reply')?.notnull).toBe(1)
+    expect(byName.get('applied_patch')?.notnull).toBe(1)
+    expect(byName.get('world_id')?.notnull).toBe(1)
+    expect(byName.get('turn_id')?.notnull).toBe(0)
+
+    // Round-trip insert proves FK and DEFAULT created_at both work.
+    db.prepare(
+      `INSERT INTO world_corrections (world_id, player_text, archivist_reply, applied_patch)
+       VALUES (?, ?, ?, ?)`,
+    ).run(1, 'I drive a Subaru', 'Updated.', '{}')
+    const row = db
+      .prepare(`SELECT world_id, player_text, archivist_reply, created_at FROM world_corrections WHERE world_id = 1`)
+      .get() as { world_id: number; player_text: string; archivist_reply: string; created_at: string }
+    expect(row.world_id).toBe(1)
+    expect(row.player_text).toBe('I drive a Subaru')
+    expect(row.archivist_reply).toBe('Updated.')
+    expect(typeof row.created_at).toBe('string')
   })
 })

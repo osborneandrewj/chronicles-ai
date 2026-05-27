@@ -18,6 +18,22 @@ describe('formatNarratorTurnGuidance', () => {
     expect(guidance).toContain('branch the player can pursue')
   })
 
+  it('nudges marked foreign-language dialogue toward romanized texture', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'say',
+      inputMode: 'in-character',
+      playerText:
+        'I look at Alexei and speak in Russian, "Alexei, my friend. Your father fought honorably in Chechnya."',
+      recentTurns: [],
+      presentNpcCount: 2,
+      plannedActionCount: 0,
+    })
+
+    expect(guidance).toContain('marked their speech as Russian')
+    expect(guidance).toContain('one or two romanized Russian words or phrases')
+    expect(guidance).toContain('Do not write the flat phrase "speak in Russian"')
+  })
+
   it('detects observe-only moves and asks for new scene information', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'observe',

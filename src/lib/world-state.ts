@@ -33,6 +33,7 @@ export type Character = {
   appearance_count: number
   last_seen_turn_id: number | null
   last_agent_tick_turn_id: number | null
+  player_notes: string | null
   created_at: string
   updated_at: string
 }
@@ -43,6 +44,7 @@ export type Place = {
   name: string
   description: string | null
   kind: string | null
+  player_notes: string | null
   created_at: string
   updated_at: string
 }
@@ -223,9 +225,53 @@ export function formatStateBlock(
     }
   }
 
+  const canonBlock = formatPlayerCanonBlock(state.knownCharacters, state.knownPlaces)
+  if (canonBlock) {
+    lines.push('', canonBlock)
+  }
+
   const dossierBlock = formatDossierBlock(state.dossier)
   if (dossierBlock) {
     lines.push('', dossierBlock)
+  }
+
+  return lines.join('\n')
+}
+
+// Player-asserted canon. Written only via the v0.6.6 archivist correction
+// channel — never by the narrator-extraction archivist. Treat these as ground
+// truth: if prior narration contradicts a line here, retcon gracefully or
+// quietly move forward with the corrected version. Never call attention to a
+// retcon ("you were never driving a Suburban after all") — fix the word and
+// keep going.
+function formatPlayerCanonBlock(
+  knownCharacters: Character[],
+  knownPlaces: Place[],
+): string {
+  const charactersWithNotes = knownCharacters.filter((c) => c.player_notes?.trim())
+  const placesWithNotes = knownPlaces.filter((p) => p.player_notes?.trim())
+  if (charactersWithNotes.length === 0 && placesWithNotes.length === 0) return ''
+
+  const lines: string[] = ['## PLAYER CANON', 'Player-asserted ground truth. Respect these without restating them as discoveries.']
+
+  if (charactersWithNotes.length > 0) {
+    const sorted = [...charactersWithNotes].sort((a, b) => {
+      if (a.is_player !== b.is_player) return a.is_player === 1 ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    for (const c of sorted) {
+      for (const line of (c.player_notes ?? '').split('\n').filter((l) => l.trim().length > 0)) {
+        lines.push(`- ${c.name}: ${limit(line, 200)}`)
+      }
+    }
+  }
+
+  if (placesWithNotes.length > 0) {
+    for (const p of [...placesWithNotes].sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const line of (p.player_notes ?? '').split('\n').filter((l) => l.trim().length > 0)) {
+        lines.push(`- ${p.name}: ${limit(line, 200)}`)
+      }
+    }
   }
 
   return lines.join('\n')

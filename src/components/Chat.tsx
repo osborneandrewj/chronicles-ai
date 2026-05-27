@@ -243,10 +243,12 @@ export function Chat({
   const {
     muted,
     setMuted,
-    activeTurnId: speakingTurnId,
+    status: audioStatus,
+    activeTurnId: audioTurnId,
     primeAudio,
     replay,
   } = useNarratorAudio({
+    worldId,
     text: narratableTurn.text,
     streaming: narratableTurn.id === streamingAssistantId,
     turnId: narratableTurn.id,
@@ -415,7 +417,7 @@ export function Chat({
           {messages.map((m, idx) => {
             const cost = m.role === "assistant" ? costByMessageId.get(m.id) : undefined;
             const isStreamingThis = m.id === streamingAssistantId;
-            const isSpeakingThis = m.role === "assistant" && m.id === speakingTurnId;
+            const turnAudioStatus = m.role === "assistant" && m.id === audioTurnId ? audioStatus : "idle";
             const text = messageText(m);
             const createdAt = m.metadata?.createdAt;
             const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
@@ -430,7 +432,7 @@ export function Chat({
                   <NarratorTurn
                     text={text}
                     streaming={isStreamingThis}
-                    speaking={isSpeakingThis}
+                    audioStatus={turnAudioStatus}
                     cost={cost}
                     canReplay={canReplay}
                     replayDisabled={muted}
@@ -581,7 +583,7 @@ function UserTurn({ text, createdAt }: { text: string; createdAt: string | undef
 function NarratorTurn({
   text,
   streaming,
-  speaking,
+  audioStatus,
   cost,
   canReplay,
   replayDisabled,
@@ -589,7 +591,7 @@ function NarratorTurn({
 }: {
   text: string;
   streaming: boolean;
-  speaking: boolean;
+  audioStatus: "idle" | "loading" | "speaking";
   cost: TurnCost | undefined;
   canReplay: boolean;
   replayDisabled: boolean;
@@ -601,11 +603,16 @@ function NarratorTurn({
         <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/70">
           Narrator
         </span>
-        {speaking && (
+        {audioStatus !== "idle" && (
           <span
-            aria-label="Narrator speaking"
+            aria-label={audioStatus === "loading" ? "Narrator audio loading" : "Narrator speaking"}
             className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500/80"
           />
+        )}
+        {audioStatus === "loading" && (
+          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-neutral-500">
+            Preparing audio
+          </span>
         )}
       </div>
       <div className="mt-1.5 whitespace-pre-wrap font-serif text-[17px] leading-[1.8] text-neutral-100">
@@ -622,14 +629,14 @@ function NarratorTurn({
               aria-label={
                 replayDisabled
                   ? "Replay unavailable while audio is off"
-                  : speaking
+                  : audioStatus === "speaking"
                     ? "Replay this narration from the start"
                     : "Replay this narration"
               }
               title={
                 replayDisabled
                   ? "Turn audio on to replay"
-                  : speaking
+                  : audioStatus === "speaking"
                     ? "Restart playback"
                     : "Replay"
               }
