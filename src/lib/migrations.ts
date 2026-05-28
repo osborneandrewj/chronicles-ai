@@ -583,6 +583,74 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE characters ADD COLUMN aliases TEXT')
     },
   },
+  {
+    // v0.6.9 — npc intent ledger. The NPC agent already plans actions before
+    // the narrator runs, but until now those plans only existed as prompt text
+    // and per-turn metadata. This table makes each plan a durable row that the
+    // post-narrator reconciliation step can label as staged/modified/ignored/
+    // contradicted. The next NPC agent tick reads recent outcomes so an agent
+    // whose plans the narrator keeps ignoring can react to that friction.
+    //
+    // The schema also installs `expected_visibility` as cheap groundwork for a
+    // future narrator-blind memory model. v0.6.9 itself does not enforce full
+    // visibility semantics — every intent defaults to `narrator`-visible.
+    version: 20,
+    name: 'npc_intents',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE npc_intents (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id              INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          character_id          INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          player_turn_id        INTEGER NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+          narrator_turn_id      INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          agency_level          TEXT NOT NULL,
+          intent_text           TEXT NOT NULL,
+          planned_action        TEXT NOT NULL,
+          intent_type           TEXT,
+          target_character_id   INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+          target_place_id       INTEGER REFERENCES places(id) ON DELETE SET NULL,
+          private_rationale     TEXT,
+          expected_visibility   TEXT NOT NULL DEFAULT 'narrator'
+                                CHECK (expected_visibility IN ('public','narrator','npc_private','narrator_blind')),
+          narrator_disposition  TEXT
+                                CHECK (narrator_disposition IN ('staged','modified','ignored','contradicted')),
+          narrator_interpretation TEXT,
+          outcome_summary       TEXT,
+          resolved_outcome      TEXT,
+          reconciliation_confidence REAL
+                                CHECK (reconciliation_confidence IS NULL OR
+                                       (reconciliation_confidence >= 0 AND reconciliation_confidence <= 1)),
+          archived_patch        TEXT,
+          created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX npc_intents_world_turn ON npc_intents(world_id, player_turn_id);
+        CREATE INDEX npc_intents_character ON npc_intents(character_id, id);
+        CREATE INDEX npc_intents_pending ON npc_intents(world_id, narrator_turn_id)
+          WHERE narrator_turn_id IS NULL;
+      `)
+    },
+  },
+  {
+    // v0.6.10 — scene prose pacing. The Archivist records a compact
+    // scene-level read on mood, pace, and focus after each narrator turn.
+    // The Narrator sees these as a dial for prose length/rhythm: slower and
+    // atmospheric scenes can breathe, while violent/dialogue beats contract.
+    version: 21,
+    name: 'scene_pacing_context',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE scenes ADD COLUMN scene_mood TEXT
+          CHECK (scene_mood IN ('atmospheric','tense','violent','intimate','wondrous'));
+        ALTER TABLE scenes ADD COLUMN pace TEXT
+          CHECK (pace IN ('slow','medium','fast'));
+        ALTER TABLE scenes ADD COLUMN focus TEXT
+          CHECK (focus IN ('environment','characters','action','internal'));
+      `)
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

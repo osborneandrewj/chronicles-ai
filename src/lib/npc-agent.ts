@@ -4,6 +4,11 @@ import { z } from 'zod'
 
 import { db } from '@/lib/db'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
+import {
+  getRecentIntentOutcomesForCharacter,
+  insertNpcIntent,
+  type IntentVisibility,
+} from '@/lib/npc-intents'
 import { loadPrompt } from '@/lib/prompt-files'
 
 // Per-NPC update emitted by the NPC agent. Each field is independently
@@ -112,9 +117,44 @@ const PlannedActionSchema = z.object({
   intent: z
     .string()
     .describe(
-      'One short present-tense sentence describing what this NPC will actually do or say this turn ' +
+      'One short present-tense compact statement of intent — what this NPC wants to happen ' +
+        '(e.g. "find out what Andrew did last night", "deflect Marcus until Jordana arrives"). ' +
+        'Pair with planned_action for the concrete move.',
+    ),
+  planned_action: z
+    .string()
+    .describe(
+      'One short present-tense sentence describing the concrete action the NPC takes this turn ' +
         '(e.g. "picks up the phone, dials Jordana", "stays at his monitor, headphones on, doesn\'t look up"). ' +
         'The narrator stages this as the actual scene.',
+    ),
+  intent_type: z
+    .string()
+    .optional()
+    .describe(
+      'Optional short tag for this kind of intent (e.g. "confront", "evade", "support", "withhold", ' +
+        '"investigate", "leave", "phone"). Used for later audit, not narration.',
+    ),
+  target_npc_name: z
+    .string()
+    .optional()
+    .describe(
+      'Optional name of the NPC this plan targets (case-insensitive match against known characters). ' +
+        'Use when the action is aimed at a specific person — calling, confronting, comforting, lying to.',
+    ),
+  target_place_name: z
+    .string()
+    .optional()
+    .describe(
+      'Optional known place the plan targets (case-insensitive). Use when the move heads toward a ' +
+        'specific location. Unknown names are silently dropped.',
+    ),
+  private_rationale: z
+    .string()
+    .optional()
+    .describe(
+      'Optional compact one-sentence private reason for the plan, stored for developer audit only. ' +
+        'Do NOT use this as a hidden chain-of-thought transcript — keep it to motive or constraint.',
     ),
 })
 
@@ -208,6 +248,11 @@ const setLastAgentTickStmt = db.prepare<[number, number]>(
   `UPDATE characters SET last_agent_tick_turn_id = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 
+export type PlannedActionWithIntent = PlannedAction & {
+  intent_id: number
+  character_id: number
+}
+
 // Runs BEFORE the narrator each turn. Reflects on what just happened (the
 // prior narration) to update each agent NPC's state, and plans what each
 // present agent NPC will do *this* turn. The narrator stages the plans.
@@ -221,7 +266,7 @@ export async function runNpcAgentTick(
   recentTurns: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<{
   patch: NpcAgentPatch
-  plans: PlannedAction[]
+  plans: PlannedActionWithIntent[]
   usage: LanguageModelUsage
 } | null> {
   const agents = agentNpcsStmt.all(worldId, tickTurnId, tickTurnId, tickTurnId) as AgentNpcRow[]
@@ -278,6 +323,16 @@ export async function runNpcAgentTick(
     in_transit_to: a.in_transit_to_name,
     arrival_world_time: a.arrival_world_time,
     last_known_situation: a.last_known_situation,
+    // v0.6.9 — recent intent outcomes. The post-narrator reconciler labels
+    // each plan staged/modified/ignored/contradicted. Surfacing the last
+    // three lets the agent react to friction with the narrator (e.g. stop
+    // planning a move the narrator keeps overriding) rather than pretending
+    // every plan landed cleanly.
+    recent_plan_outcomes: getRecentIntentOutcomesForCharacter(a.id, 3).map((row) => ({
+      planned_action: row.planned_action,
+      narrator_disposition: row.narrator_disposition,
+      narrator_interpretation: row.narrator_interpretation,
+    })),
   }))
 
   const priorNarration = recentTurns
@@ -289,31 +344,84 @@ export async function runNpcAgentTick(
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
     schema: NpcAgentPatchSchema,
-    system: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
-    prompt: [
-      `WORLD TIME: ${worldTime ?? '(unset)'}`,
-      `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
-      `PROTAGONIST IS AT: ${player?.current_place_name ?? '(unknown)'}`,
-      '',
-      'AGENT NPCs:',
-      JSON.stringify(npcContext, null, 2),
-      '',
-      'KNOWN PLACES (real-world street/neighborhood facts are authoritative — do not contradict them):',
-      knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
-      '',
-      priorNarration ? `PRIOR NARRATION (what just happened — base your updates on this):\n${priorNarration}` : 'PRIOR NARRATION: (none — this is the first turn)',
-      '',
-      `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
-      '',
-      'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
-    ].join('\n'),
+    messages: [
+      {
+        role: 'system',
+        content: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral' } },
+        },
+      },
+      {
+        role: 'user',
+        content: [
+          `WORLD TIME: ${worldTime ?? '(unset)'}`,
+          `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
+          `PROTAGONIST IS AT: ${player?.current_place_name ?? '(unknown)'}`,
+          '',
+          'AGENT NPCs:',
+          JSON.stringify(npcContext, null, 2),
+          '',
+          'KNOWN PLACES (real-world street/neighborhood facts are authoritative — do not contradict them):',
+          knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
+          '',
+          priorNarration ? `PRIOR NARRATION (what just happened — base your updates on this):\n${priorNarration}` : 'PRIOR NARRATION: (none — this is the first turn)',
+          '',
+          `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
+          '',
+          'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
+        ].join('\n'),
+      },
+    ],
   })
 
   applyNpcAgentPatch(worldId, tickTurnId, object)
   for (const agent of agents) {
     setLastAgentTickStmt.run(tickTurnId, agent.id)
   }
-  return { patch: object, plans: object.planned_actions ?? [], usage }
+
+  // Persist each planned action as an npc_intents row. Plans targeting NPCs
+  // outside the agent-tier roster are dropped (the schema needs a real
+  // character_id, and an unrecognized name should never be reified). The
+  // narrator turn id is filled in post-stream by the reconciler.
+  const agentsByLower = new Map(agents.map((a) => [a.name.toLowerCase(), a]))
+  const allCharsForResolve = db
+    .prepare<[number]>(
+      'SELECT id, name FROM characters WHERE world_id = ?',
+    )
+    .all(worldId) as Array<{ id: number; name: string }>
+  const charsByLower = new Map(allCharsForResolve.map((c) => [c.name.toLowerCase(), c.id]))
+  const placesByLower = new Map(
+    knownPlaces.map((p) => [p.name.toLowerCase(), p.id]),
+  )
+
+  const plansOut: PlannedActionWithIntent[] = []
+  for (const plan of object.planned_actions ?? []) {
+    const agent = agentsByLower.get(plan.npc_name.toLowerCase())
+    if (!agent) continue
+    const targetCharacterId = plan.target_npc_name
+      ? charsByLower.get(plan.target_npc_name.toLowerCase()) ?? null
+      : null
+    const targetPlaceId = plan.target_place_name
+      ? placesByLower.get(plan.target_place_name.toLowerCase()) ?? null
+      : null
+    const intentId = insertNpcIntent({
+      worldId,
+      characterId: agent.id,
+      playerTurnId: tickTurnId,
+      agencyLevel: agent.agency_level,
+      intentText: plan.intent,
+      plannedAction: plan.planned_action,
+      intentType: plan.intent_type ?? null,
+      targetCharacterId,
+      targetPlaceId,
+      privateRationale: plan.private_rationale ?? null,
+      expectedVisibility: 'narrator' satisfies IntentVisibility,
+    })
+    plansOut.push({ ...plan, intent_id: intentId, character_id: agent.id })
+  }
+
+  return { patch: object, plans: plansOut, usage }
 }
 
 // ---- Patch application ------------------------------------------------------

@@ -24,6 +24,8 @@
 - Weak true hidden secrets (`narrator_blind`)
 - Free-text time system
 - No tracking of Agent overrides
+- Narrator prompt can become over-defensive if craft guidance turns into long
+  failure-mode checklists
 
 **Overall**: Strong foundation. Ready for targeted improvements.
 
@@ -82,23 +84,70 @@ Respond in strict JSON:
 
 ### Narrator System Prompt (Key Excerpt)
 
-```markdown
-You are the immersive Narrator of a rich, reactive Westworld-style story.
+The system prompt opens with positive craft direction (novelist framing, named
+author anchors, sensory density, varied rhythm), followed by short positive-led
+sections for Key Techniques, Dynamic Pacing, three Prose Exemplars (atmospheric,
+kinetic, domestic-with-weight), and only then the hard-edged rules (State
+Authority, Camera, NPC Behavior, Real-World Grounding, Player Move legibility,
+Plain Prose, Repetition, Player Additions, Opening, Classification).
 
-**Rules**
-- Second person present tense.
-- Respect world state.
-- Dramatize NPC planned actions naturally (you may modify or subvert them).
-- You do NOT know narrator_blind secrets — allow yourself to be surprised.
-- Prioritize character-driven drama and emotional truth.
+```markdown
+You are a novelist writing a living, immersive interactive book in second-person
+present tense. Each turn becomes prose that could stand in a printed novel:
+vivid, continuous, emotionally alive, and playable.
+
+**Voice and Tone**
+- Borrow craft energy from Mieville, Erikson, McCarthy, Jemisin, King — never
+  imitate any one voice. Premise sets the dial.
+- Vivid, multi-sensory prose. Strong specific verbs. Concrete over abstract.
+- Vary sentence rhythm deliberately.
+- Voice has weight and personality appropriate to the genre.
+
+**Key Techniques**
+- Show through specific telling detail. State the action and the sensation;
+  let motive be inferable. The protagonist's own motives are the player's
+  territory — render what was done and felt, not why.
+- Vary scene architecture. Action → reaction → ambient closer is the failure
+  mode, not a template.
+- The world has momentum. End on a living beat — never "what do you do?"
+
+**Dynamic Pacing**
+Trust the fiction. 3–6 paragraphs when the moment is atmospheric, charged,
+or irreversible. Short kinetic sentences for action and rapid dialogue.
+Most turns 180–450 words; contract for routine continuations.
+
+[+ three pinned prose exemplars showing register]
+
+**State, Camera, NPCs**
+Current STATE is canonical for place, time, present characters, KNOWN PLACES.
+Camera stays bound to the protagonist — no off-scene cuts, no both-ends-of-a-
+phone-call. NPC private fields inform behavior, never appear as narrator
+explanation. Planned moves are strong character intent, not text to recite.
+Real routes and places require tool grounding before exact claims.
 
 {{world_state_block}}
 
 NPC Planned Actions:
 {{planned_actions}}
-
-Write vivid, atmospheric prose. Never mention mechanics.
 ```
+
+### Turn Guidance Layer
+
+Per-turn guidance emits **at most 3–5 short positive-direction lines**, never a
+concatenation of every detector hit:
+
+1. Always-on novelist directive (weight, rhythm, vary the shape).
+2. One beat-type cue picked by priority (recognition > spectacle > confrontation
+   > danger/transition > media feed > investigative > observe > say).
+3. World-clock injection only when a time-check is detected; dossier hints only
+   when an investigative move is detected and the dossier has entries.
+4. One continuity nudge if recent narration is stalled, structurally repeating,
+   or leaning on the same ambient closer.
+5. One "leave a branch" line on active beats (say, observe, investigation,
+   movement, danger, spectacle, confrontation).
+
+The dispatcher picks the strongest cue rather than stacking all matches —
+fewer rules per turn, less paralysis, more room for the model to write.
 
 ---
 
