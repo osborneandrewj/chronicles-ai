@@ -90,8 +90,16 @@ export async function classifyAction(
     const { object, usage } = await generateObject({
       model: anthropic(CLASSIFIER_MODEL),
       schema: ClassificationSchema,
-      system: CLASSIFIER_SYSTEM,
-      prompt: promptParts.join('\n'),
+      messages: [
+        {
+          role: 'system',
+          content: CLASSIFIER_SYSTEM,
+          providerOptions: {
+            anthropic: { cacheControl: { type: 'ephemeral' } },
+          },
+        },
+        { role: 'user', content: promptParts.join('\n') },
+      ],
       maxOutputTokens: 200,
     })
     return { ...object, model: CLASSIFIER_MODEL, method: 'llm', usage }

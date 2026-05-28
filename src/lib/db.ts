@@ -259,11 +259,13 @@ const placeByIdStmt = db.prepare<[number]>(
 )
 const scenesForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,
+          scene_mood, pace, focus,
           opened_at_turn, closed_at_turn, created_at, updated_at
    FROM scenes WHERE world_id = ? ORDER BY scene_number ASC`,
 )
 const activeSceneStmt = db.prepare<[number]>(
   `SELECT id, world_id, place_id, title, summary, scene_number, status,
+          scene_mood, pace, focus,
           opened_at_turn, closed_at_turn, created_at, updated_at
    FROM scenes WHERE world_id = ? AND status = 'active'
    ORDER BY scene_number DESC LIMIT 1`,

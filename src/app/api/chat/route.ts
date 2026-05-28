@@ -15,6 +15,7 @@ import {
   extractPatch,
 } from '@/lib/archivist'
 import { classifyAction } from '@/lib/classifier'
+import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
 import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
@@ -261,7 +262,7 @@ export async function POST(req: Request) {
     messages: modelMessages,
     tools: narratorMapTools,
     stopWhen: stepCountIs(2),
-    onFinish: ({ text, usage: narratorUsage, toolResults }) => {
+    onFinish: async ({ text, usage: narratorUsage, toolResults }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
       const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
@@ -304,6 +305,34 @@ export async function POST(req: Request) {
         upfrontMeta.npc_promotion = { promoted: [], tiers: promotion.tiers }
       }
       updateTurnMetadata(narratorTurn.id, upfrontMeta)
+
+      // v0.6.9 — reconcile NPC plans against the narrator's prose. Records
+      // staged/modified/ignored/contradicted on each npc_intents row so the
+      // next agent tick can see whether its plans actually landed. Runs
+      // before the archivist so a turn's metadata gathers both labels.
+      if (plans.length > 0) {
+        try {
+          const reconciliation = await reconcileNpcIntentsForTurn({
+            playerTurnId,
+            narratorTurnId: narratorTurn.id,
+            narratorText: trimmed,
+          })
+          updateTurnMetadata(narratorTurn.id, {
+            npc_intent_reconciler: {
+              model: reconciliation.model,
+              usage: reconciliation.usage,
+              results: reconciliation.results,
+              error: reconciliation.error,
+              skipped: reconciliation.skipped,
+            },
+          })
+        } catch (err) {
+          updateTurnMetadata(narratorTurn.id, {
+            npc_intent_reconciler: { model: RECONCILER_MODEL, error: String(err) },
+          })
+          console.error('[intent reconciler failed]', err)
+        }
+      }
 
       const deterministicPatch = extractDeterministicPatch(priorState, playerText, trimmed)
       const runArchivistLlm = shouldRunArchivistLlm(playerText, trimmed, !!deterministicPatch)

@@ -13,8 +13,8 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('render their actual spoken words')
-    expect(guidance).toContain('answer specifically')
+    expect(guidance).toContain('Let audible dialogue be audible')
+    expect(guidance).toContain('answer')
     expect(guidance).toContain('branch the player can pursue')
   })
 
@@ -30,8 +30,8 @@ describe('formatNarratorTurnGuidance', () => {
     })
 
     expect(guidance).toContain('marked their speech as Russian')
-    expect(guidance).toContain('one or two romanized Russian words or phrases')
-    expect(guidance).toContain('Do not write the flat phrase "speak in Russian"')
+    expect(guidance).toContain('light romanized touch')
+    expect(guidance).toContain('meaning stays clear in English')
   })
 
   it('detects observe-only moves and asks for new scene information', () => {
@@ -44,8 +44,8 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('reveal something new')
-    expect(guidance).toContain('Do not only list who looks back')
+    expect(guidance).toContain('Observation should reveal a new handle')
+    expect(guidance).toContain('detail, offer, threat')
   })
 
   it('pushes investigative tool commands toward results instead of processing beats', () => {
@@ -62,7 +62,7 @@ describe('formatNarratorTurnGuidance', () => {
 
     expect(guidance).toContain('trying to learn something')
     expect(guidance).toContain('concrete result')
-    expect(guidance).toContain('do not spend the turn only showing scanning')
+    expect(guidance).toContain('new lead')
     expect(guidance).toContain('Identify the relay fragment')
     expect(guidance).toContain('Stygies VIII batch mark')
     expect(guidance).toContain('branch the player can pursue')
@@ -81,7 +81,7 @@ describe('formatNarratorTurnGuidance', () => {
 
     expect(guidance).toContain('time-bearing device')
     expect(guidance).toContain('Tuesday, 8:17 AM')
-    expect(guidance).toContain('Do not invent a different time')
+    expect(guidance).toContain('authoritative world clock exactly')
   })
 
   it('treats public feeds and screens as wider-world surfaces', () => {
@@ -95,9 +95,8 @@ describe('formatNarratorTurnGuidance', () => {
     })
 
     expect(guidance).toContain('public information surface')
-    expect(guidance).toContain('not just "headlines and noise."')
-    expect(guidance).toContain('wider world feel alive')
-    expect(guidance).toContain('concrete enough to recur')
+    expect(guidance).toContain('specific diegetic content')
+    expect(guidance).toContain('could recur')
   })
 
   it('flags recent reaction-only narration loops', () => {
@@ -125,8 +124,8 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('repeated short architecture')
-    expect(guidance).toContain('Break the shape')
+    expect(guidance).toContain('repeating its architecture')
+    expect(guidance).toContain('Change the shape')
   })
 
   it('flags repeated short tool-response structure on movement beats', () => {
@@ -154,8 +153,8 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('movement, transition, danger')
-    expect(guidance).toContain('repeated short architecture')
+    expect(guidance).toContain('Let the beat breathe')
+    expect(guidance).toContain('repeating its architecture')
     expect(guidance).toContain('arrival')
   })
 
@@ -186,7 +185,54 @@ describe('formatNarratorTurnGuidance', () => {
 
     expect(guidance).toContain('ambient closer')
     expect(guidance).toContain('wheat')
-    expect(guidance).toContain('materially changes')
+    expect(guidance).toContain('only if it changes')
+  })
+
+  it('expands charged interior recognition beats instead of summarizing them', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'think',
+      inputMode: 'in-character',
+      playerText:
+        "I listen for the sounds of approaching officers and take stock of my situation. I don't feel alarmed or stressed which is strange. I feel great actually. I look around for the gun, but then stop realizing that I don't need it. I am a weapon.",
+      recentTurns: [],
+      presentNpcCount: 2,
+      plannedActionCount: 0,
+    })
+
+    expect(guidance).toContain('charged recognition beat')
+    expect(guidance).toContain('novelistic weight')
+    expect(guidance).toContain('object losing meaning')
+  })
+
+  it('expands cinematic spectacle and repeated power actions', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'do',
+      inputMode: 'in-character',
+      playerText: 'I do the same to the other squad cars and watch them crumple and burn.',
+      recentTurns: [],
+      presentNpcCount: 3,
+      plannedActionCount: 0,
+    })
+
+    expect(guidance).toContain('This is spectacle')
+    expect(guidance).toContain('unfold as a sequence')
+    expect(guidance).toContain('vary or escalate')
+  })
+
+  it('expands charged confrontations beyond line-reaction-closer shape', () => {
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'say',
+      inputMode: 'in-character',
+      playerText:
+        '"Kyle!" I smile and approach him. "Something tells me you are not being honest with me."',
+      recentTurns: [],
+      presentNpcCount: 2,
+      plannedActionCount: 0,
+    })
+
+    expect(guidance).toContain('charged confrontation')
+    expect(guidance).toContain('spacing, witnesses, silence')
+    expect(guidance).toContain('carry the pressure')
   })
 
   it('keeps meta guidance from advancing fiction', () => {
@@ -199,7 +245,7 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('do not advance the fiction')
+    expect(guidance).toContain('keep the fiction in place')
     expect(guidance).not.toContain('branch the player can pursue')
   })
 })

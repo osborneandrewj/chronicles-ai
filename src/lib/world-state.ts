@@ -73,6 +73,9 @@ export type Scene = {
   summary: string | null
   scene_number: number
   status: 'active' | 'completed'
+  scene_mood: 'atmospheric' | 'tense' | 'violent' | 'intimate' | 'wondrous' | null
+  pace: 'slow' | 'medium' | 'fast' | null
+  focus: 'environment' | 'characters' | 'action' | 'internal' | null
   opened_at_turn: number | null
   closed_at_turn: number | null
   created_at: string
@@ -161,7 +164,16 @@ export function formatSceneDigestForClassifier(state: NarratorWorldState): strin
   return lines.join('\n')
 }
 
-export type NpcPlannedAction = { npc_name: string; intent: string }
+// v0.6.9 — plans carry an `intent_id` so the post-narrator reconciler can
+// match the narrator prose back to the durable npc_intents row. The narrator
+// prompt is forbidden from putting intent IDs on the page (mechanics talk);
+// they exist only as a routing key.
+export type NpcPlannedAction = {
+  npc_name: string
+  intent: string
+  planned_action?: string
+  intent_id?: number
+}
 
 export function formatStateBlock(
   state: NarratorWorldState,
@@ -177,6 +189,8 @@ export function formatStateBlock(
 
   if (state.currentScene) {
     lines.push(`- Scene: ${state.currentScene.title} (scene ${state.currentScene.scene_number})`)
+    const pacing = formatScenePacing(state.currentScene)
+    if (pacing) lines.push(`  - pacing: ${pacing}`)
   }
   if (state.currentPlace) {
     lines.push(`- Place: ${state.currentPlace.name}`)
@@ -339,10 +353,19 @@ export function formatStateBlock(
   // the narrator runs; the narrator stages them as the actual scene rather
   // than improvising those characters' choices. Omitted when there are no
   // present agent NPCs or the agent returned no plans.
+  //
+  // The concrete planned_action is what the narrator stages; the upstream
+  // intent_text is shown alongside so the narrator can pick a faithful
+  // realization. Intent IDs are deliberately NOT printed — narration must
+  // never mention mechanics.
   if (plannedActions.length > 0) {
     lines.push('', '### PLANNED MOVES THIS TURN (agent NPCs)')
     for (const p of plannedActions) {
-      lines.push(`- **${p.npc_name}** — ${p.intent}`)
+      const action = p.planned_action ?? p.intent
+      lines.push(`- **${p.npc_name}** — ${action}`)
+      if (p.planned_action && p.intent && p.intent !== p.planned_action) {
+        lines.push(`  - intent: ${limit(p.intent, 180)}`)
+      }
     }
   }
 
@@ -357,6 +380,15 @@ export function formatStateBlock(
   }
 
   return lines.join('\n')
+}
+
+function formatScenePacing(scene: Scene): string | null {
+  const parts = [
+    scene.scene_mood ? `mood ${scene.scene_mood}` : null,
+    scene.pace ? `pace ${scene.pace}` : null,
+    scene.focus ? `focus ${scene.focus}` : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join('; ') : null
 }
 
 // Player-asserted canon. Written only via the v0.6.6 archivist correction

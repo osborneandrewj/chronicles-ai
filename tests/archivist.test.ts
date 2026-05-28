@@ -465,6 +465,23 @@ describe('applyArchivistPatch', () => {
     expect(getScenesForWorld(worldId).map((s) => ({ id: s.id, status: s.status }))).toEqual(before)
   })
 
+  it('updates active scene pacing context without changing scene identity', () => {
+    const before = getActiveSceneForWorld(worldId)!
+    applyArchivistPatch(worldId, turnId, {
+      scene_context: {
+        scene_mood: 'tense',
+        pace: 'medium',
+        focus: 'action',
+      },
+    })
+
+    const after = getActiveSceneForWorld(worldId)!
+    expect(after.id).toBe(before.id)
+    expect(after.scene_mood).toBe('tense')
+    expect(after.pace).toBe('medium')
+    expect(after.focus).toBe('action')
+  })
+
   it('resolves character current_place_name against places listed earlier in the same patch', () => {
     applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'Lighthouse Cliff' }],

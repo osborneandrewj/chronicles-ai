@@ -130,6 +130,22 @@ describe('story dossier state', () => {
     expect(block).toContain('carries a concealed bolt pistol')
   })
 
+  it('renders scene pacing context into the narrator state block', () => {
+    const { worldId, turnId } = seedWorld()
+    applyArchivistPatch(worldId, turnId, {
+      scene_context: {
+        scene_mood: 'tense',
+        pace: 'medium',
+        focus: 'action',
+      },
+    })
+
+    const state = getNarratorWorldState(worldId)
+    const block = formatStateBlock(state)
+
+    expect(block).toContain('pacing: mood tense; pace medium; focus action')
+  })
+
   it('renders NPC observations as behavior cues instead of prose-ready observations', () => {
     const { worldId, turnId } = seedWorld()
     applyArchivistPatch(worldId, turnId, {

@@ -26,6 +26,21 @@ const SceneActionSchema = z.discriminatedUnion('action', [
   }),
 ])
 
+const SceneContextSchema = z.object({
+  scene_mood: z
+    .enum(['atmospheric', 'tense', 'violent', 'intimate', 'wondrous'])
+    .optional()
+    .describe('Current prose mood for the active scene. Omit if unchanged.'),
+  pace: z
+    .enum(['slow', 'medium', 'fast'])
+    .optional()
+    .describe('Current rhythm of the active scene. Omit if unchanged.'),
+  focus: z
+    .enum(['environment', 'characters', 'action', 'internal'])
+    .optional()
+    .describe('What the active scene is primarily attending to. Omit if unchanged.'),
+})
+
 const PlacePatchSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
@@ -164,6 +179,9 @@ export const ArchivistPatchSchema = z.object({
   scene: SceneActionSchema.optional().describe(
     'Default to omitting (equivalent to keep_open). Use close/open only when a scene clearly ends or starts.',
   ),
+  scene_context: SceneContextSchema.optional().describe(
+    'Compact mood/pace/focus read for narrator prose control. Update when the latest turn clearly changes the scene\'s rhythm or attention.',
+  ),
   places: z.array(PlacePatchSchema).optional(),
   characters: z.array(CharacterPatchSchema).optional(),
   story_threads: z.array(StoryThreadPatchSchema).optional(),
@@ -240,6 +258,9 @@ export async function extractPatch(
             title: prior.currentScene.title,
             scene_number: prior.currentScene.scene_number,
             place: prior.currentPlace?.name ?? null,
+            scene_mood: prior.currentScene.scene_mood,
+            pace: prior.currentScene.pace,
+            focus: prior.currentScene.focus,
           }
         : null,
       present_characters: prior.presentCharacters.map((c) => ({
@@ -307,16 +328,27 @@ export async function extractPatch(
   const { object, usage } = await generateObject({
     model: anthropic(ARCHIVIST_MODEL),
     schema: ArchivistPatchSchema,
-    system: `${loadPrompt('archivist-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
-    prompt: [
-      'PRIOR STATE:',
-      priorBlock,
-      '',
-      'RECENT TURNS:',
-      transcript,
-      '',
-      'Return the patch.',
-    ].join('\n'),
+    messages: [
+      {
+        role: 'system',
+        content: `${loadPrompt('archivist-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral' } },
+        },
+      },
+      {
+        role: 'user',
+        content: [
+          'PRIOR STATE:',
+          priorBlock,
+          '',
+          'RECENT TURNS:',
+          transcript,
+          '',
+          'Return the patch.',
+        ].join('\n'),
+      },
+    ],
   })
 
   return { patch: sanitizeArchivistPatch(prior, recent, object), usage }
@@ -380,19 +412,30 @@ export async function extractCorrectionPatch(
   const { object, usage } = await generateObject({
     model: anthropic(ARCHIVIST_MODEL),
     schema: CorrectionPatchSchema,
-    system: loadPrompt('archivist-correction'),
-    prompt: [
-      'PRIOR STATE:',
-      priorBlock,
-      '',
-      'RECENT NARRATION (read-only context — do not advance scene or time):',
-      transcript,
-      '',
-      'PLAYER MESSAGE (this is what the player is telling you directly):',
-      trimmed,
-      '',
-      'Return the patch + reply.',
-    ].join('\n'),
+    messages: [
+      {
+        role: 'system',
+        content: loadPrompt('archivist-correction'),
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral' } },
+        },
+      },
+      {
+        role: 'user',
+        content: [
+          'PRIOR STATE:',
+          priorBlock,
+          '',
+          'RECENT NARRATION (read-only context — do not advance scene or time):',
+          transcript,
+          '',
+          'PLAYER MESSAGE (this is what the player is telling you directly):',
+          trimmed,
+          '',
+          'Return the patch + reply.',
+        ].join('\n'),
+      },
+    ],
   })
 
   const { reply, ...patchWithoutReply } = object
@@ -885,6 +928,16 @@ const insertSceneStmt = db.prepare<[number, number, string, number, number]>(
 )
 const setCurrentSceneStmt = db.prepare<[number, number]>(
   'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
+)
+const updateSceneContextStmt = db.prepare<
+  [string | null, string | null, string | null, number]
+>(
+  `UPDATE scenes SET
+     scene_mood = COALESCE(?, scene_mood),
+     pace       = COALESCE(?, pace),
+     focus      = COALESCE(?, focus),
+     updated_at = datetime('now')
+   WHERE id = ?`,
 )
 const setWorldTimeStmt = db.prepare<[string, number]>(
   'UPDATE worlds SET world_time = ? WHERE id = ?',
@@ -1767,12 +1820,28 @@ export function applyArchivistPatch(
       }
     }
 
-    // 4. World clock.
+    // 4. Scene pacing context. Applied after scene open/close so an opening
+    //    scene receives the latest mood/pace/focus dial.
+    if (patch.scene_context) {
+      const cursor = currentSceneIdStmt.get(worldId) as
+        | { current_scene_id: number | null }
+        | undefined
+      if (cursor?.current_scene_id) {
+        updateSceneContextStmt.run(
+          patch.scene_context.scene_mood ?? null,
+          patch.scene_context.pace ?? null,
+          patch.scene_context.focus ?? null,
+          cursor.current_scene_id,
+        )
+      }
+    }
+
+    // 5. World clock.
     if (patch.current_time) {
       setWorldTimeStmt.run(patch.current_time, worldId)
     }
 
-    // 5. Story dossier. These are story-shaped memory rows: playable
+    // 6. Story dossier. These are story-shaped memory rows: playable
     //    pressure, clues, objectives, resources, and concise timeline beats.
     if (patch.story_threads) {
       for (const thread of patch.story_threads) {

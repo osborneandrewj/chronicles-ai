@@ -13,116 +13,107 @@ type GuidanceContext = {
 }
 
 export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
-  const attentionOnlyMove = isAttentionOnlyMove(ctx.playerText)
-  const investigativeMove = isInvestigativeMove(ctx.playerText)
-  const timeCheckMove = isTimeCheckMove(ctx.playerText)
-  const mediaFeedMove = isMediaFeedMove(ctx.playerText)
-  const transitionMove = isTransitionMove(ctx.playerText)
-  const dangerMove = isDangerMove(ctx.playerText)
-  const spokenLanguage = detectMarkedSpokenLanguage(ctx.playerText)
-  const stalled = recentNarrationIsStalled(ctx.recentTurns)
-  const repeatedAnchors = repeatedAmbientAnchors(ctx.recentTurns)
-  const repeatedStructure = recentNarrationUsesSameShortShape(ctx.recentTurns)
-  const lines = [
-    '## TURN GUIDANCE',
-    'Make the player move legible without copying the input shape. Stage direction becomes prose; dialogue may remain dialogue.',
-  ]
+  const lines: string[] = ['## TURN GUIDANCE']
 
   if (ctx.inputMode !== 'in-character' || ctx.stance === 'meta') {
-    lines.push('This is not an in-character scene beat; keep it brief and do not advance the fiction.')
+    lines.push(
+      'Brief reply in the narrator voice — keep the fiction in place; do not advance the scene.',
+    )
     return lines.join('\n')
   }
 
-  if (ctx.stance === 'say') {
-    lines.push(
-      'If a present character answers, render their actual spoken words. Do not summarize an answer as "he replies in the same language" or "the words are measured."',
-    )
-    if (spokenLanguage) {
-      lines.push(
-        `The player marked their speech as ${spokenLanguage}. Do not write the flat phrase "speak in ${spokenLanguage}" as narration; make the language audible with one or two romanized ${spokenLanguage} words or phrases when natural, then keep the meaning legible in English.`,
-      )
-    }
-  }
+  lines.push(
+    'Write the next beat with novelistic weight. Trust the fiction to set length and rhythm; vary the shape from recent turns.',
+  )
 
-  if (ctx.stance === 'observe' || attentionOnlyMove) {
+  const beat = pickBeatCue(ctx)
+  if (beat) lines.push(beat)
+
+  if (isTimeCheckMove(ctx.playerText)) {
     lines.push(
-      'Observation is a chance for the world to reveal something new. Do not only list who looks back; add a concrete detail, choice, offer, threat, interruption, or lead.',
+      `The time-bearing device shows the authoritative world clock exactly: ${ctx.worldTime ?? '(unset)'}.`,
     )
   }
 
-  if (investigativeMove) {
-    const objectiveHint = ctx.activeObjectiveTitles?.slice(0, 2).join('; ')
+  if (isInvestigativeMove(ctx.playerText)) {
+    const objHint = ctx.activeObjectiveTitles?.slice(0, 2).join('; ')
     const clueHint = ctx.openClueTitles?.slice(0, 3).join('; ')
-    lines.push(
-      'The player is trying to learn something. Resolve the attempt with a concrete result, partial match, contradiction, or named obstacle; do not spend the turn only showing scanning, processing, tones, lights, or waiting.',
-    )
-    if (objectiveHint || clueHint) {
-      lines.push(
-        `Use dossier pressure for the result when it fits: ${[
-          objectiveHint ? `objectives: ${objectiveHint}` : null,
-          clueHint ? `clues: ${clueHint}` : null,
-        ]
-          .filter(Boolean)
-          .join(' | ')}.`,
-      )
+    if (objHint || clueHint) {
+      const parts: string[] = []
+      if (objHint) parts.push(`objectives: ${objHint}`)
+      if (clueHint) parts.push(`clues: ${clueHint}`)
+      lines.push(`Dossier pressure if it fits — ${parts.join(' | ')}.`)
     }
   }
 
-  if (mediaFeedMove) {
-    lines.push(
-      'The player is opening or checking an in-world public information surface: feed, social app, TV, radio, news, browser, notification stream, email, or waiting-room screen. Show specific content on it, not just "headlines and noise." Include at least one concrete background item that makes the wider world feel alive: a public incident, local dispute, celebrity/business scandal, weather emergency, transit disruption, missing person, market shock, sports result, or viral argument. It may be unrelated to the main quest now, but leave it concrete enough to recur if the player follows it.',
-    )
-  }
+  const continuity = pickContinuityNudge(ctx.recentTurns)
+  if (continuity) lines.push(continuity)
 
-  if (timeCheckMove) {
-    lines.push(
-      `The player is checking an in-world time-bearing device. The device must show the authoritative world clock exactly: ${ctx.worldTime ?? '(unset)'}. Do not invent a different time, date, day, alarm, timestamp, battery clock, notification time, or timezone unless established state already says the device is wrong.`,
-    )
-  }
-
-  if (transitionMove || dangerMove) {
-    lines.push(
-      'This is a movement, transition, danger, or consequence beat. Let it breathe if the fiction warrants it: arrival can reveal a new layout, obstacle, witness, cost, or immediate choice.',
-    )
-  }
-
-  const socialBeatNeedsPressure =
-    ctx.stance === 'say' ||
-    ctx.stance === 'observe' ||
-    attentionOnlyMove ||
-    investigativeMove ||
-    mediaFeedMove ||
-    transitionMove ||
-    dangerMove ||
-    stalled
-
-  if (ctx.presentNpcCount > 0 && ctx.plannedActionCount === 0 && socialBeatNeedsPressure) {
-    lines.push(
-      'At least one present NPC should behave like a person with a day of their own: answer specifically, ask a loaded counter-question, make an offer, withhold something, leave, arrive, call someone, or reveal pressure from outside the room.',
-    )
-  }
-
-  if (stalled || repeatedStructure) {
-    lines.push(
-      'Recent narration has fallen into a repeated short architecture. Break the shape this turn: start in motion, compress the obvious move into a clause, let the consequence lead, add dialogue, advance time, or end on a concrete new choice.',
-    )
-  }
-
-  if (repeatedAnchors.length > 0) {
-    lines.push(
-      `Recent narration has leaned on ${joinList(repeatedAnchors)} as an ambient closer. Do not mention ${joinList(
-        repeatedAnchors,
-      )} again unless it materially changes, becomes evidence, or the protagonist actively interacts with it.`,
-    )
-  }
-
-  if (socialBeatNeedsPressure) {
-    lines.push(
-      'A good quiet turn leaves at least one branch the player can pursue: a named person, a concrete place, a rumor, a demand, a debt, a danger, a contradiction, or a door that just opened.',
-    )
+  if (needsBranch(ctx)) {
+    lines.push('Leave at least one branch the player can pursue.')
   }
 
   return lines.join('\n')
+}
+
+function pickBeatCue(ctx: GuidanceContext): string | null {
+  const text = ctx.playerText
+
+  if (isChargedRecognitionMove(text)) {
+    return 'This is a charged recognition beat — give it novelistic weight: body, room, the old object losing meaning, the choice that opens.'
+  }
+  if (isSpectacleMove(text)) {
+    return 'This is spectacle — let it unfold as a sequence: anticipation, physical change, witnesses, aftermath. Repeated power should vary or escalate.'
+  }
+  if (isChargedConfrontationMove(text)) {
+    return 'This is a charged confrontation — let spacing, witnesses, silence, and reply carry the pressure.'
+  }
+  if (isDangerMove(text) || isTransitionMove(text)) {
+    return 'Let the beat breathe — arrival, danger, or consequence can reveal layout, cost, witness, texture, or choice.'
+  }
+  if (isMediaFeedMove(text)) {
+    return 'This is a public information surface — put specific diegetic content on it; at least one concrete wider-world item that could recur.'
+  }
+  if (isInvestigativeMove(text)) {
+    return 'The player is trying to learn something — return a concrete result, partial match, contradiction, named obstacle, or new lead.'
+  }
+  if (ctx.stance === 'observe' || isAttentionOnlyMove(text)) {
+    return 'Observation should reveal a new handle: a detail, offer, threat, contradiction, interruption, or lead.'
+  }
+  if (ctx.stance === 'say') {
+    const language = detectMarkedSpokenLanguage(text)
+    if (language) {
+      return `Let audible dialogue be audible — write the words someone answers with, not a summary. The player marked their speech as ${language}; a light romanized touch keeps it audible while the meaning stays clear in English.`
+    }
+    return 'Let audible dialogue be audible — write the words someone answers with, not a summary.'
+  }
+  return null
+}
+
+function pickContinuityNudge(turns: RecentTurn[]): string | null {
+  const anchors = repeatedAmbientAnchors(turns)
+  if (anchors.length > 0) {
+    const list = joinList(anchors)
+    return `Recent narration has leaned on ${list} as an ambient closer — return to ${list} only if it changes, becomes evidence, or the protagonist interacts with it.`
+  }
+  if (recentNarrationIsStalled(turns) || recentNarrationUsesSameShortShape(turns)) {
+    return 'Recent narration is repeating its architecture. Change the shape — start in motion, lead with consequence, add dialogue, advance time, or land on a concrete new choice.'
+  }
+  return null
+}
+
+function needsBranch(ctx: GuidanceContext): boolean {
+  if (ctx.stance === 'say' || ctx.stance === 'observe') return true
+  const text = ctx.playerText
+  return (
+    isAttentionOnlyMove(text) ||
+    isInvestigativeMove(text) ||
+    isMediaFeedMove(text) ||
+    isTransitionMove(text) ||
+    isDangerMove(text) ||
+    isSpectacleMove(text) ||
+    isChargedConfrontationMove(text)
+  )
 }
 
 function isAttentionOnlyMove(text: string): boolean {
@@ -182,6 +173,44 @@ function isDangerMove(text: string): boolean {
   return /\b(explosion|blast|crater|blood|corpse|dead|wound|weapon|gun|knife|attack|threat|danger|fire|smoke|scream|alarm|soldier|body)\b/.test(
     compact,
   )
+}
+
+function isSpectacleMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const hasPowerVerb =
+    /\b(crush|crumple|fold|tear|rip|burst|explode|ignite|burn|shatter|collapse|detonate|blast|throw|hurl|levitate|lift|split|peel|melt)\b/.test(
+      compact,
+    )
+  const hasSpectacleObject =
+    /\b(car|cars|cruiser|cruisers|squad car|truck|building|wall|door|bulkhead|ship|tower|bridge|body|bodies|dragon|spell|ward|reactor|engine|weapon|blade|gun|flame|fire|lightning|vacuum)\b/.test(
+      compact,
+    )
+  const repeatsSpectacle = /\b(do the same|same thing|again|one by one)\b/.test(compact)
+  return (hasPowerVerb && hasSpectacleObject) || (repeatsSpectacle && hasSpectacleObject)
+}
+
+function isChargedRecognitionMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const takesStock = /\b(take stock|listen for|look around|situation)\b/.test(compact)
+  const alteredCalm =
+    /\b(don'?t feel|do not feel|feel great|feel calm|not alarmed|not stressed|strange|almost pleasant)\b/.test(
+      compact,
+    )
+  const identityShift =
+    /\b(i am|i'm|ive become|i have become|i don'?t need|do not need|no longer need).{0,80}\b(weapon|monster|god|blade|storm|fire|power|magic|gun|sword|tool)\b/.test(
+      compact,
+    ) || /\b(i am|i'm) a weapon\b/.test(compact)
+  return (takesStock && alteredCalm) || identityShift
+}
+
+function isChargedConfrontationMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const hasDialogue = /["“][^"”]{2,}["”]/.test(text)
+  const hasPressureVerb =
+    /\b(command|threaten|warn|demand|interrogate|accuse|confront|approach|smile|bring me|if you value your life|not being honest|lie|lying|answer me)\b/.test(
+      compact,
+    )
+  return hasDialogue && hasPressureVerb
 }
 
 function detectMarkedSpokenLanguage(text: string): string | null {
