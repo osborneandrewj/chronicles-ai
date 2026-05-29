@@ -1,4 +1,13 @@
 import type { PopulationTemplateRow, StoryThread } from '@/lib/db'
+import {
+  getActiveSceneForWorld,
+  getLatestOccupancySnapshotRow,
+  getPlace,
+  getPopulationTemplatesForKind,
+  getStoryDossierForWorld,
+  getWorldCursor,
+  insertOccupancySnapshot,
+} from '@/lib/db'
 
 // ---------------------------------------------------------------------------
 // Public types. occupancy is persisted as JSON and fed (compactly) to the
@@ -391,5 +400,72 @@ export function buildHooks(
   }
 
   return hooks.slice(0, MAX_HOOKS)
+}
+
+function trafficBlock(profile: InferredProfile, density: OccupancyDensity): OccupancyTraffic | null {
+  if (!profile.hasTraffic) return null
+  const map: Record<OccupancyDensity, OccupancyTraffic> = {
+    empty: { vehicles: 'none', pedestrians: 'none', notable_motion: null },
+    sparse: { vehicles: 'occasional', pedestrians: 'light', notable_motion: null },
+    moderate: { vehicles: 'steady', pedestrians: 'light', notable_motion: null },
+    busy: { vehicles: 'steady', pedestrians: 'moderate', notable_motion: 'a horn somewhere up the block' },
+    packed: { vehicles: 'heavy', pedestrians: 'thick', notable_motion: 'gridlock and idling engines' },
+  }
+  return map[density]
+}
+
+// Deterministic occupancy builder. Reuses the latest snapshot while the player
+// stays in the same scene; otherwise infers/loads a profile, resolves templates
+// (DB rows override built-in defaults), builds a seeded room + hooks, persists,
+// and returns. Returns null when there is no resolvable active place.
+export function buildPlaceOccupancySnapshot(
+  worldId: number,
+  sourceTurnId: number | null,
+): PlaceOccupancy | null {
+  const scene = getActiveSceneForWorld(worldId)
+  const place = scene?.place_id ? getPlace(scene.place_id) : null
+  if (!place) return null
+
+  // Reuse: while in the same scene, keep the latest snapshot (don't re-roll).
+  const latest = getLatestOccupancySnapshotRow(worldId, place.id)
+  if (latest && latest.scene_id === (scene?.id ?? null)) {
+    try {
+      return JSON.parse(latest.occupancy_json) as PlaceOccupancy
+    } catch {
+      // fall through and rebuild on corrupt JSON
+    }
+  }
+
+  const cursor = getWorldCursor(worldId)
+  const profile = inferPlaceProfile({ name: place.name, kind: place.kind })
+  const templateRows = getPopulationTemplatesForKind(worldId, profile.profileKind)
+  const templates = resolveTemplates(templateRows, profile.profileKind)
+
+  const seedKey = `w:${worldId}|p:${place.id}|s:${scene?.id ?? 0}`
+  const rng = mulberry32(hashSeed(seedKey))
+
+  const { groups, sources, total } = buildGroups(profile, templates, rng)
+  const density = densityForCount(total, profile.capacityMax)
+  const activeThreads = getStoryDossierForWorld(worldId).threads.filter((t) => t.status === 'active')
+  const encounterHooks = buildHooks(profile, groups, sources, activeThreads, rng)
+
+  const occupancy: PlaceOccupancy = {
+    density,
+    seed: seedKey,
+    groups,
+    traffic: trafficBlock(profile, density),
+    encounter_hooks: encounterHooks,
+  }
+
+  insertOccupancySnapshot({
+    worldId,
+    placeId: place.id,
+    sceneId: scene?.id ?? null,
+    sourceTurnId,
+    worldTime: cursor.world_time,
+    occupancyJson: JSON.stringify(occupancy),
+  })
+
+  return occupancy
 }
 

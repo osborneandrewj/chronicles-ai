@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { buildGroups, buildHooks, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import { buildGroups, buildHooks, buildPlaceOccupancySnapshot, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
 import type { StoryThread } from '@/lib/db'
 import {
   db,
@@ -240,5 +240,43 @@ describe('hook matching', () => {
       strongRng,
     )
     expect(strongHooks.find((h) => h.kind === 'continuation')!.strength).toBe('strong')
+  })
+})
+
+function seedScene(worldId: number, placeName: string, kind: string): { placeId: number } {
+  const placeId = (db.prepare(
+    'INSERT INTO places (world_id, name, kind) VALUES (?, ?, ?) RETURNING id',
+  ).get(worldId, placeName, kind) as { id: number }).id
+  const sceneId = (db.prepare(
+    "INSERT INTO scenes (world_id, place_id, title, scene_number, status) VALUES (?, ?, 'Scene', 2, 'active') RETURNING id",
+  ).get(worldId, placeId) as { id: number }).id
+  db.prepare('UPDATE worlds SET current_scene_id = ?, world_time = ? WHERE id = ?').run(
+    sceneId, 'Day 1, 20:00', worldId,
+  )
+  return { placeId }
+}
+
+describe('buildPlaceOccupancySnapshot', () => {
+  it('builds, persists, and returns occupancy for the active place', () => {
+    const worldId = freshWorld()
+    const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
+    const occ = buildPlaceOccupancySnapshot(worldId, null)
+    expect(occ).not.toBeNull()
+    expect(occ!.groups.length).toBeGreaterThan(0)
+    expect(getLatestOccupancySnapshotRow(worldId, placeId)).not.toBeNull()
+  })
+
+  it('reuses the snapshot while in the same scene rather than re-rolling', () => {
+    const worldId = freshWorld()
+    seedScene(worldId, 'The Lantern Room', 'bar')
+    const first = buildPlaceOccupancySnapshot(worldId, null)
+    const second = buildPlaceOccupancySnapshot(worldId, null)
+    expect(second).toEqual(first)
+  })
+
+  it('returns null when there is no active scene/place', () => {
+    const worldId = freshWorld()
+    db.prepare("UPDATE scenes SET status = 'completed' WHERE world_id = ?").run(worldId)
+    expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
   })
 })
