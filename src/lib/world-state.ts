@@ -9,6 +9,7 @@ import {
   getStoryDossierForWorld,
   getTurnTimestampsForWorld,
   getWorldCursor,
+  type OccupancySnapshotRow,
   type StoryDossier,
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
@@ -121,15 +122,7 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     : []
 
   const occupancy = currentPlace
-    ? (() => {
-        const row = getLatestOccupancySnapshotRow(worldId, currentPlace.id)
-        if (!row) return null
-        try {
-          return JSON.parse(row.occupancy_json) as PlaceOccupancy
-        } catch {
-          return null
-        }
-      })()
+    ? parseOccupancyRow(getLatestOccupancySnapshotRow(worldId, currentPlace.id))
     : null
 
   return {
@@ -491,6 +484,15 @@ function formatPlayerCanonBlock(
   return lines.join('\n')
 }
 
+function parseOccupancyRow(row: OccupancySnapshotRow | null): PlaceOccupancy | null {
+  if (!row) return null
+  try {
+    return JSON.parse(row.occupancy_json) as PlaceOccupancy
+  } catch {
+    return null
+  }
+}
+
 export function formatOccupancyBlock(occupancy: PlaceOccupancy | null): string {
   if (!occupancy || (occupancy.groups.length === 0 && !occupancy.traffic)) return ''
   const lines: string[] = []
@@ -501,7 +503,7 @@ export function formatOccupancyBlock(occupancy: PlaceOccupancy | null): string {
   lines.push(`- density: ${occupancy.density}`)
   for (const g of occupancy.groups) {
     const avail = g.promotable ? ' (could become someone)' : ''
-    lines.push(`- ${g.label} — ${g.behavior}${avail}`)
+    lines.push(`- ${limit(g.label, 80)} — ${limit(g.behavior, 80)}${avail}`)
   }
   if (occupancy.traffic) {
     const t = occupancy.traffic
@@ -511,7 +513,7 @@ export function formatOccupancyBlock(occupancy: PlaceOccupancy | null): string {
   if (occupancy.encounter_hooks.length > 0) {
     lines.push('- possible encounters (latent — surface only if the protagonist engages; never as a quest marker):')
     for (const h of occupancy.encounter_hooks) {
-      lines.push(`  - ${h.narrator_cue}`)
+      lines.push(`  - ${limit(h.narrator_cue, 160)}`)
     }
   }
   return lines.join('\n')

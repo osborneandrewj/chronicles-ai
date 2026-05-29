@@ -312,7 +312,7 @@ describe('occupancy in the narrator state block', () => {
 
     expect(block).toContain('### NEARBY (ambient — not durable characters)')
     expect(block).toContain('density:')
-    expect(block).toContain('possible encounters')
+    expect(block).toContain('possible encounters (latent')
   })
 
   it('omits the occupancy section when there is no snapshot', () => {
