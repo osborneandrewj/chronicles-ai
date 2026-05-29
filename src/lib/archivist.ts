@@ -142,7 +142,7 @@ const StoryThreadPatchSchema = z.object({
   relevance_tags: z
     .array(z.string())
     .optional()
-    .describe('Lowercase topic + place-kind tags (e.g. "bar","docks","medical","courier") used to surface this thread where it is relevant. Tag the place kinds and subjects the protagonist would pursue it at.'),
+    .describe('Lowercase topic + place-kind tags (e.g. "bar","docks","medical","courier") used to surface this thread where it is relevant. Tag the place kinds and subjects the protagonist would pursue it at. Emit 2-5 tags.'),
 })
 
 const StoryCluePatchSchema = z.object({
@@ -274,6 +274,8 @@ export async function extractPatch(
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
     .join('\n\n')
 
+  const occupancyBlock = formatOccupancyForArchivist(occupancy)
+
   const priorBlock = JSON.stringify(
     {
       world_time: prior.worldTime,
@@ -368,9 +370,7 @@ export async function extractPatch(
           '',
           'RECENT TURNS:',
           transcript,
-          ...(formatOccupancyForArchivist(occupancy)
-            ? ['', formatOccupancyForArchivist(occupancy)]
-            : []),
+          ...(occupancyBlock ? ['', occupancyBlock] : []),
           '',
           'Return the patch.',
         ].join('\n'),
@@ -1025,6 +1025,10 @@ const insertStoryThreadStmt = db.prepare<
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
    RETURNING id`,
 )
+// relevance_tags_json uses a plain assignment (not COALESCE like the
+// nullable fields above): the caller computes relevanceTagsJson to a
+// non-null value — new tags when the patch supplies them, else the
+// existing row's tags — so the JS layer owns the preserve-merge.
 const updateStoryThreadStmt = db.prepare<
   [
     string,
