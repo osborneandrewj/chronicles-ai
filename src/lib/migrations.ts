@@ -707,8 +707,7 @@ export const migrations: Migration[] = [
           created_at            TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
-        CREATE INDEX place_profiles_world_place ON place_profiles(world_id, place_id);
-        CREATE INDEX population_templates_world_role ON population_templates(world_id, role);
+        CREATE INDEX population_templates_world_kind ON population_templates(world_id, place_profile_kind);
         CREATE INDEX occupancy_world_place_scene ON place_occupancy_snapshots(world_id, place_id, scene_id, id);
       `)
       // SQLite permits ALTER TABLE ADD COLUMN with a non-NULL default only when
