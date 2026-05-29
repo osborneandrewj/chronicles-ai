@@ -736,7 +736,7 @@ export function insertPlaceProfile(input: {
   capacityMax: number
   typicalRolesJson: string
   matchTagsJson: string
-  trafficLevel: string
+  trafficLevel: 'none' | 'low' | 'medium' | 'high' | 'surge'
 }): void {
   insertPlaceProfileStmt.run(
     input.worldId,

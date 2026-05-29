@@ -69,7 +69,7 @@ describe('occupancy snapshot persistence', () => {
     expect(JSON.parse(row!.occupancy_json).density).toBe('busy')
   })
 
-  it('returns built-in count 0 templates for an unknown world (DB empty)', () => {
+  it('returns empty array when no population_templates exist for the world', () => {
     const worldId = freshWorld()
     expect(getPopulationTemplatesForKind(worldId, 'bar')).toEqual([])
   })
