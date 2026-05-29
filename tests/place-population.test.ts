@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
+import { hashSeed, inferPlaceProfile, mulberry32 } from '@/lib/place-population'
 import {
   db,
   getLatestOccupancySnapshotRow,
@@ -72,5 +73,39 @@ describe('occupancy snapshot persistence', () => {
   it('returns empty array when no population_templates exist for the world', () => {
     const worldId = freshWorld()
     expect(getPopulationTemplatesForKind(worldId, 'bar')).toEqual([])
+  })
+})
+
+describe('deterministic PRNG', () => {
+  it('produces the same sequence for the same seed', () => {
+    const a = mulberry32(hashSeed('world:1|place:2|scene:3'))
+    const b = mulberry32(hashSeed('world:1|place:2|scene:3'))
+    expect([a(), a(), a()]).toEqual([b(), b(), b()])
+  })
+
+  it('produces a different sequence for a different seed', () => {
+    const a = mulberry32(hashSeed('world:1|place:2|scene:3'))
+    const b = mulberry32(hashSeed('world:1|place:2|scene:4'))
+    expect(a()).not.toEqual(b())
+  })
+})
+
+describe('profile inference', () => {
+  it('infers a bar profile from kind', () => {
+    const p = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    expect(p.profileKind).toBe('bar')
+    expect(p.matchTags).toContain('bar')
+    expect(p.capacityMax).toBeGreaterThan(p.capacityMin)
+  })
+
+  it('infers a road profile from name keywords when kind is null', () => {
+    const p = inferPlaceProfile({ name: 'Highway 7 shoulder', kind: null })
+    expect(p.profileKind).toBe('road')
+    expect(p.trafficLevel).not.toBe('none')
+  })
+
+  it('falls back to generic for unrecognized places', () => {
+    const p = inferPlaceProfile({ name: 'A featureless void', kind: null })
+    expect(p.profileKind).toBe('generic')
   })
 })
