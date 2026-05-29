@@ -199,14 +199,23 @@ const upsertTtsAudioCacheStmt = db.prepare<
      byte_length = excluded.byte_length,
      accessed_at = datetime('now')`,
 )
+// Turn-based retention (v0.6.11): keep every cache row whose turn_id is among
+// the newest N distinct turn_ids for the world, evict the rest. "Newest" is by
+// turn_id (higher id = later turn), not accessed_at — so replaying an evicted
+// old turn re-synthesizes and is immediately re-pruned rather than displacing a
+// recent turn. Robust to v0.6.12's multi-chunk-per-turn caching: a turn with
+// several entries never evicts its own earlier chunk, because retention counts
+// distinct turns, not rows.
 const pruneTtsAudioCacheStmt = db.prepare<[number, number, number]>(
   `DELETE FROM tts_audio_cache
    WHERE world_id = ?
-     AND id NOT IN (
-       SELECT id FROM tts_audio_cache
-       WHERE world_id = ?
-       ORDER BY accessed_at DESC, id DESC
-       LIMIT ?
+     AND turn_id NOT IN (
+       SELECT turn_id FROM (
+         SELECT DISTINCT turn_id FROM tts_audio_cache
+         WHERE world_id = ?
+         ORDER BY turn_id DESC
+         LIMIT ?
+       )
      )`,
 )
 // Includes both the old `extractor` key (pre-v0.5) and the new `archivist` key
@@ -512,7 +521,7 @@ export function storeCachedTtsAudio({
   textHash,
   contentType,
   audio,
-  maxPerWorld = 3,
+  turnsPerWorld = 2,
 }: {
   worldId: number
   turnId: number
@@ -521,7 +530,7 @@ export function storeCachedTtsAudio({
   textHash: string
   contentType: string
   audio: Buffer
-  maxPerWorld?: number
+  turnsPerWorld?: number
 }): void {
   db.transaction(() => {
     upsertTtsAudioCacheStmt.run(
@@ -535,7 +544,7 @@ export function storeCachedTtsAudio({
       turnId,
       worldId,
     )
-    pruneTtsAudioCacheStmt.run(worldId, worldId, maxPerWorld)
+    pruneTtsAudioCacheStmt.run(worldId, worldId, turnsPerWorld)
   })()
 }
 

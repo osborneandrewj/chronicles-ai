@@ -10,12 +10,21 @@ import { useNarratorAudio } from "@/components/useNarratorAudio";
 import { WorldInspector } from "@/components/WorldInspector";
 import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
+import {
+  buildCostMap,
+  effectiveDbTurnId,
+  findPrevUser,
+  messageText,
+} from "@/lib/turn-cost-map";
 import type { AgentCost, TurnCost } from "@/lib/turn-cost";
 
 const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
 
 type MessageMetadata = {
   createdAt?: string;
+  // The real DB turn id, attached by /api/chat once a streamed turn is
+  // persisted. History-loaded turns instead encode the id in the message id.
+  dbTurnId?: number;
 };
 
 export type ChroniclesMessage = UIMessage<MessageMetadata>;
@@ -200,27 +209,35 @@ export function Chat({
   const latestMessage = messages[messages.length - 1];
   const streamingAssistantId =
     streaming && latestMessage?.role === "assistant" ? latestMessage.id : undefined;
-  const lastAssistantId = useMemo(() => {
+  const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "assistant") return messages[i].id;
+      if (messages[i].role === "assistant") return messages[i];
     }
     return undefined;
   }, [messages]);
 
-  // Meta-command responses (preceding user message starts with "/") are
-  // pre-canned strings, not narrator prose — skip TTS for them so /pause etc.
-  // don't get spoken. Passing undefined turnId tears down any in-flight audio,
-  // matching the "new turn supersedes" semantics of real narrator turns.
+  // Drives auto-narration of the newest assistant turn. While it's still
+  // streaming we key audio off the AI SDK message id (the DB id doesn't exist
+  // yet, and this keeps streaming detection / replay supersession stable). Once
+  // it's persisted we switch to the DB turn id so /api/tts can cache the audio
+  // and the cost recorder can credit the right turn. Meta-command responses
+  // (preceding user message starts with "/") are pre-canned strings, not
+  // narrator prose — an undefined id tears down any in-flight audio, matching
+  // the "new turn supersedes" semantics of real narrator turns.
   const narratableTurn = useMemo(() => {
-    if (!lastAssistantId) return { id: undefined, text: "" };
-    const idx = messages.findIndex((msg) => msg.id === lastAssistantId);
-    if (idx < 0) return { id: undefined, text: "" };
+    const idle = { id: undefined as string | undefined, text: "", streaming: false };
+    if (!lastAssistant) return idle;
+    const idx = messages.findIndex((m) => m.id === lastAssistant.id);
+    if (idx < 0) return idle;
     const prevUser = findPrevUser(messages, idx);
     if (prevUser && messageText(prevUser).trim().startsWith("/")) {
-      return { id: undefined, text: "" };
+      return idle;
     }
-    return { id: lastAssistantId, text: messageText(messages[idx]) };
-  }, [messages, lastAssistantId]);
+    const isStreaming = streaming && lastAssistant.id === latestMessage?.id;
+    const dbId = effectiveDbTurnId(lastAssistant);
+    const id = isStreaming ? lastAssistant.id : dbId !== undefined ? String(dbId) : undefined;
+    return { id, text: messageText(lastAssistant), streaming: isStreaming };
+  }, [messages, lastAssistant, streaming, latestMessage]);
 
   const reportTtsChars = useCallback(
     async (turnIdStr: string, chars: number) => {
@@ -250,7 +267,7 @@ export function Chat({
   } = useNarratorAudio({
     worldId,
     text: narratableTurn.text,
-    streaming: narratableTurn.id === streamingAssistantId,
+    streaming: narratableTurn.streaming,
     turnId: narratableTurn.id,
     onTurnComplete: reportTtsChars,
   });
@@ -417,7 +434,15 @@ export function Chat({
           {messages.map((m, idx) => {
             const cost = m.role === "assistant" ? costByMessageId.get(m.id) : undefined;
             const isStreamingThis = m.id === streamingAssistantId;
-            const turnAudioStatus = m.role === "assistant" && m.id === audioTurnId ? audioStatus : "idle";
+            // Audio is keyed by DB turn id (metadata.dbTurnId for live turns,
+            // numeric message id for history), so match the indicator/replay on
+            // that resolved id rather than the AI SDK `msg-…` id.
+            const dbId = m.role === "assistant" ? effectiveDbTurnId(m) : undefined;
+            const dbIdStr = dbId !== undefined ? String(dbId) : undefined;
+            const turnAudioStatus =
+              m.role === "assistant" && dbIdStr !== undefined && dbIdStr === audioTurnId
+                ? audioStatus
+                : "idle";
             const text = messageText(m);
             const createdAt = m.metadata?.createdAt;
             const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
@@ -436,7 +461,7 @@ export function Chat({
                     cost={cost}
                     canReplay={canReplay}
                     replayDisabled={muted}
-                    onReplay={() => replay(m.id, text)}
+                    onReplay={() => replay(dbIdStr ?? m.id, text)}
                   />
                 )}
               </li>
@@ -849,19 +874,38 @@ function AudioIcon({ muted }: { muted: boolean }) {
 }
 
 function CostFooter({ cost }: { cost: TurnCost }) {
-  const segments: string[] = [];
-  if (cost.narrator) segments.push(agentSegment("narrator", cost.narrator));
-  if (cost.archivist) segments.push(agentSegment("archivist", cost.archivist));
-  if (cost.classifier) segments.push(agentSegment("class", cost.classifier));
-  if (cost.npcAgent) segments.push(agentSegment("npc", cost.npcAgent));
-  if (cost.tts) segments.push(`tts ${fmt(cost.tts.chars)} chars`);
+  // Text (all LLM agents) and voice (TTS) shown as separate dollar figures so
+  // the two spend lines are directly comparable at a glance. The per-agent
+  // token breakdown moves to the text segment's hover title; the synthesized
+  // char count moves to the voice segment's title.
+  const textCost =
+    (cost.narrator?.cost ?? 0) +
+    (cost.archivist?.cost ?? 0) +
+    (cost.classifier?.cost ?? 0) +
+    (cost.npcAgent?.cost ?? 0);
   // Wraps cleanly at narrow widths; on wider viewports the same flex layout
   // keeps it on a single line. No viewport-specific clipping.
   return (
     <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums text-neutral-500">
-      {segments.join(" · ")} · ~{formatUsd(cost.total)}
+      <span title={agentBreakdown(cost)}>text ~{formatUsd(textCost)}</span>
+      {cost.tts && (
+        <span title={`${fmt(cost.tts.chars)} chars synthesized`}>
+          {" · "}voice ~{formatUsd(cost.tts.cost)}
+        </span>
+      )}
+      {" · ~"}
+      {formatUsd(cost.total)}
     </div>
   );
+}
+
+function agentBreakdown(cost: TurnCost): string {
+  const parts: string[] = [];
+  if (cost.narrator) parts.push(agentSegment("narrator", cost.narrator));
+  if (cost.archivist) parts.push(agentSegment("archivist", cost.archivist));
+  if (cost.classifier) parts.push(agentSegment("class", cost.classifier));
+  if (cost.npcAgent) parts.push(agentSegment("npc", cost.npcAgent));
+  return parts.join(" · ");
 }
 
 function agentSegment(label: string, a: AgentCost): string {
@@ -906,56 +950,3 @@ function parseTimestamp(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function messageText(m: UIMessage): string {
-  return m.parts
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
-    .map((p) => p.text)
-    .join("");
-}
-
-function buildCostMap(messages: UIMessage[], usage: TurnCost[]): Map<string, TurnCost> {
-  const map = new Map<string, TurnCost>();
-  const usageById = new Map<number, TurnCost>(usage.map((t) => [t.id, t]));
-
-  // First pass: match by DB id when the message id is a numeric DB id.
-  const unmatchedAssistants: UIMessage[] = [];
-  const usedTurnIds = new Set<number>();
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (m.role !== "assistant") continue;
-
-    // Skip meta-command responses (their preceding user message starts with "/")
-    const prevUser = findPrevUser(messages, i);
-    if (prevUser && messageText(prevUser).trim().startsWith("/")) continue;
-
-    const dbId = Number(m.id);
-    if (Number.isInteger(dbId) && dbId > 0 && usageById.has(dbId)) {
-      const cost = usageById.get(dbId)!;
-      map.set(m.id, cost);
-      usedTurnIds.add(dbId);
-    } else {
-      unmatchedAssistants.push(m);
-    }
-  }
-
-  // Second pass: end-align unmatched assistants with remaining usage and pair
-  // from the tail backwards. Guarantees the newest streamed turn always gets
-  // the newest cost — robust to retry transients where usage may be one entry
-  // ahead of messages (or vice versa) on the render after a stream finishes.
-  const remaining = usage.filter((t) => !usedTurnIds.has(t.id));
-  const pairCount = Math.min(unmatchedAssistants.length, remaining.length);
-  for (let i = 0; i < pairCount; i++) {
-    const msg = unmatchedAssistants[unmatchedAssistants.length - 1 - i];
-    const cost = remaining[remaining.length - 1 - i];
-    map.set(msg.id, cost);
-  }
-
-  return map;
-}
-
-function findPrevUser(messages: UIMessage[], beforeIdx: number): UIMessage | undefined {
-  for (let i = beforeIdx - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return messages[i];
-  }
-  return undefined;
-}

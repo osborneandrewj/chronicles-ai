@@ -5,6 +5,7 @@ import {
   stepCountIs,
   streamText,
   type ModelMessage,
+  type UIMessageChunk,
 } from 'ai'
 import { z } from 'zod'
 
@@ -262,6 +263,14 @@ export async function POST(req: Request) {
     trailingUser,
   ]
 
+  // Captured in onFinish (after the narrator turn is persisted) and read by the
+  // passthrough flush below, which appends it as message metadata once the UI
+  // stream has fully drained. Draining only completes after onFinish has run,
+  // so by flush time this is set — deterministic, unlike a messageMetadata
+  // callback on the `finish` part, which the SDK forwards to the client before
+  // onFinish executes.
+  let narratorTurnId: number | undefined
+
   const result = streamText({
     model: xai(NARRATOR_MODEL),
     messages: modelMessages,
@@ -271,6 +280,7 @@ export async function POST(req: Request) {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
       const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
+      narratorTurnId = narratorTurn.id
       const narratorMeta = {
         model: NARRATOR_MODEL,
         usage: narratorUsage,
@@ -386,7 +396,32 @@ export async function POST(req: Request) {
     },
   })
 
-  return result.toUIMessageStreamResponse()
+  // Forward the narrator's UI message stream verbatim, then append a trailing
+  // message-metadata part carrying the real DB turn id. The flush fires only
+  // after the source stream closes — which happens after streamText's onFinish
+  // has persisted the turn and set narratorTurnId — so the id is always present
+  // here. The client (Chat.tsx) reads metadata.dbTurnId to key TTS caching and
+  // cost recording for the freshly-streamed turn. Falls back gracefully: if a
+  // turn streamed empty text, onFinish returns early and no dbTurnId is sent.
+  const dbTurnIdStream = result
+    .toUIMessageStream()
+    .pipeThrough(
+      new TransformStream<UIMessageChunk, UIMessageChunk>({
+        transform(chunk, controller) {
+          controller.enqueue(chunk)
+        },
+        flush(controller) {
+          if (narratorTurnId != null) {
+            controller.enqueue({
+              type: 'message-metadata',
+              messageMetadata: { dbTurnId: narratorTurnId },
+            })
+          }
+        },
+      }),
+    )
+
+  return createUIMessageStreamResponse({ stream: dbTurnIdStream })
 }
 
 function compactHistory(history: Array<{ role: 'user' | 'assistant'; content: string }>): ModelMessage[] {
