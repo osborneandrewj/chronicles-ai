@@ -272,12 +272,14 @@ export function buildGroups(
   while (placed < target && groups.length < 6 && templates.length > 0) {
     const template = weightedPick(templates, rng)
     const remaining = target - placed
-    const count = Math.max(1, Math.min(remaining, 1 + Math.floor(rng() * 3)))
+    const rawCount = Math.max(1, Math.min(remaining, 1 + Math.floor(rng() * 3)))
+    const isSingular = /^(a|an|the)\s/i.test(template.label)
+    const count = isSingular ? 1 : rawCount
     const groupId = `occ_${i + 1}`
     const visibility: OccupantVisibility = template.promotable ? 'available' : 'background'
     groups.push({
       id: groupId,
-      label: count > 1 ? pluralizeLabel(template.label, count) : template.label,
+      label: template.label,
       role: template.role,
       count,
       visibility,
@@ -292,9 +294,3 @@ export function buildGroups(
   return { groups, sources, total: placed }
 }
 
-function pluralizeLabel(label: string, count: number): string {
-  // Templates whose labels already read as plural ("patrons", "shoppers")
-  // pass through; singular labels get a leading count for crowds.
-  if (/^(a|an|the)\s/i.test(label)) return `${count} ${label.replace(/^(a|an|the)\s/i, '')}`
-  return label
-}

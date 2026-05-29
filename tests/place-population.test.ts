@@ -137,6 +137,17 @@ describe('group selection', () => {
 
   it('maps counts to a density band', () => {
     expect(densityForCount(0, 12)).toBe('empty')
+    expect(densityForCount(1, 12)).toBe('sparse')
+    expect(densityForCount(3, 12)).toBe('moderate')
+    expect(densityForCount(7, 12)).toBe('busy')
     expect(densityForCount(11, 12)).toBe('packed')
+  })
+
+  it('returns empty groups when traffic target is 0', () => {
+    const base = inferPlaceProfile({ name: 'Desolate Road', kind: 'road' })
+    const profile = { ...base, trafficLevel: 'none' as const }
+    const { groups, total } = buildGroups(profile, resolveTemplates([], 'road'), mulberry32(hashSeed('x')))
+    expect(groups).toEqual([])
+    expect(total).toBe(0)
   })
 })
