@@ -1,12 +1,14 @@
-import type { PopulationTemplateRow, StoryThread } from '@/lib/db'
+import type { PlaceProfileRow, PopulationTemplateRow, StoryThread } from '@/lib/db'
 import {
   getActiveSceneForWorld,
   getLatestOccupancySnapshotRow,
   getPlace,
+  getPlaceProfileRow,
   getPopulationTemplatesForKind,
   getStoryDossierForWorld,
   getWorldCursor,
   insertOccupancySnapshot,
+  insertPlaceProfile,
 } from '@/lib/db'
 
 // ---------------------------------------------------------------------------
@@ -204,6 +206,18 @@ function parseTags(json: string): string[] {
     return Array.isArray(v) ? v.map(String) : []
   } catch {
     return []
+  }
+}
+
+function profileFromRow(row: PlaceProfileRow): InferredProfile {
+  return {
+    profileKind: row.profile_kind,
+    capacityMin: row.capacity_min,
+    capacityMax: row.capacity_max,
+    typicalRoles: parseTags(row.typical_roles_json),
+    trafficLevel: row.traffic_level,
+    matchTags: parseTags(row.match_tags_json),
+    hasTraffic: PROFILE_DEFS[row.profile_kind]?.hasTraffic ?? false,
   }
 }
 
@@ -438,7 +452,22 @@ export function buildPlaceOccupancySnapshot(
   }
 
   const cursor = getWorldCursor(worldId)
-  const profile = inferPlaceProfile({ name: place.name, kind: place.kind })
+  const storedProfile = getPlaceProfileRow(worldId, place.id)
+  const profile = storedProfile
+    ? profileFromRow(storedProfile)
+    : inferPlaceProfile({ name: place.name, kind: place.kind })
+  if (!storedProfile) {
+    insertPlaceProfile({
+      worldId,
+      placeId: place.id,
+      profileKind: profile.profileKind,
+      capacityMin: profile.capacityMin,
+      capacityMax: profile.capacityMax,
+      typicalRolesJson: JSON.stringify(profile.typicalRoles),
+      matchTagsJson: JSON.stringify(profile.matchTags),
+      trafficLevel: profile.trafficLevel,
+    })
+  }
   const templateRows = getPopulationTemplatesForKind(worldId, profile.profileKind)
   const templates = resolveTemplates(templateRows, profile.profileKind)
 

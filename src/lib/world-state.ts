@@ -121,9 +121,11 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     ? getCharactersInPlace(worldId, currentPlace.id).filter((c) => c.is_player === 0)
     : []
 
-  const occupancy = currentPlace
-    ? parseOccupancyRow(getLatestOccupancySnapshotRow(worldId, currentPlace.id))
-    : null
+  const occupancyRow = currentPlace ? getLatestOccupancySnapshotRow(worldId, currentPlace.id) : null
+  const occupancy =
+    occupancyRow && occupancyRow.scene_id === (activeScene?.id ?? null)
+      ? parseOccupancyRow(occupancyRow)
+      : null
 
   return {
     worldTime: cursor.world_time,

@@ -7,6 +7,7 @@ import type { StoryThread } from '@/lib/db'
 import {
   db,
   getLatestOccupancySnapshotRow,
+  getPlaceProfileRow,
   getPopulationTemplatesForKind,
   getStoryDossierForWorld,
   insertOccupancySnapshot,
@@ -297,6 +298,29 @@ describe('buildPlaceOccupancySnapshot', () => {
     const worldId = freshWorld()
     db.prepare("UPDATE scenes SET status = 'completed' WHERE world_id = ?").run(worldId)
     expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
+  })
+
+  it('persists an inferred place profile on first build', () => {
+    const worldId = freshWorld()
+    const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
+    buildPlaceOccupancySnapshot(worldId, null)
+    const row = getPlaceProfileRow(worldId, placeId)
+    expect(row).not.toBeNull()
+    expect(row!.profile_kind).toBe('bar')
+  })
+
+  it('respects a pre-existing stored profile over inference', () => {
+    const worldId = freshWorld()
+    const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
+    // Pre-store a profile that yields an empty room (traffic none, capacity 0),
+    // which inference for a bar would never produce.
+    db.prepare(
+      `INSERT INTO place_profiles (world_id, place_id, profile_kind, capacity_min, capacity_max, traffic_level, match_tags_json, typical_roles_json)
+       VALUES (?, ?, 'bar', 0, 0, 'none', '[]', '[]')`,
+    ).run(worldId, placeId)
+    const occ = buildPlaceOccupancySnapshot(worldId, null)
+    expect(occ).not.toBeNull()
+    expect(occ!.groups.length).toBe(0)
   })
 })
 
