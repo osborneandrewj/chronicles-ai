@@ -423,12 +423,13 @@ export function buildPlaceOccupancySnapshot(
   sourceTurnId: number | null,
 ): PlaceOccupancy | null {
   const scene = getActiveSceneForWorld(worldId)
-  const place = scene?.place_id ? getPlace(scene.place_id) : null
+  if (!scene || !scene.place_id) return null
+  const place = getPlace(scene.place_id)
   if (!place) return null
 
   // Reuse: while in the same scene, keep the latest snapshot (don't re-roll).
   const latest = getLatestOccupancySnapshotRow(worldId, place.id)
-  if (latest && latest.scene_id === (scene?.id ?? null)) {
+  if (latest && latest.scene_id === scene.id) {
     try {
       return JSON.parse(latest.occupancy_json) as PlaceOccupancy
     } catch {
@@ -441,7 +442,7 @@ export function buildPlaceOccupancySnapshot(
   const templateRows = getPopulationTemplatesForKind(worldId, profile.profileKind)
   const templates = resolveTemplates(templateRows, profile.profileKind)
 
-  const seedKey = `w:${worldId}|p:${place.id}|s:${scene?.id ?? 0}`
+  const seedKey = `w:${worldId}|p:${place.id}|s:${scene.id}`
   const rng = mulberry32(hashSeed(seedKey))
 
   const { groups, sources, total } = buildGroups(profile, templates, rng)
@@ -460,7 +461,7 @@ export function buildPlaceOccupancySnapshot(
   insertOccupancySnapshot({
     worldId,
     placeId: place.id,
-    sceneId: scene?.id ?? null,
+    sceneId: scene.id,
     sourceTurnId,
     worldTime: cursor.world_time,
     occupancyJson: JSON.stringify(occupancy),

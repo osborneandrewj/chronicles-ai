@@ -247,9 +247,13 @@ function seedScene(worldId: number, placeName: string, kind: string): { placeId:
   const placeId = (db.prepare(
     'INSERT INTO places (world_id, name, kind) VALUES (?, ?, ?) RETURNING id',
   ).get(worldId, placeName, kind) as { id: number }).id
+  const nextNumber =
+    (db.prepare(
+      'SELECT COALESCE(MAX(scene_number), 0) AS m FROM scenes WHERE world_id = ?',
+    ).get(worldId) as { m: number }).m + 1
   const sceneId = (db.prepare(
-    "INSERT INTO scenes (world_id, place_id, title, scene_number, status) VALUES (?, ?, 'Scene', 2, 'active') RETURNING id",
-  ).get(worldId, placeId) as { id: number }).id
+    "INSERT INTO scenes (world_id, place_id, title, scene_number, status) VALUES (?, ?, 'Scene', ?, 'active') RETURNING id",
+  ).get(worldId, placeId, nextNumber) as { id: number }).id
   db.prepare('UPDATE worlds SET current_scene_id = ?, world_time = ? WHERE id = ?').run(
     sceneId, 'Day 1, 20:00', worldId,
   )
@@ -272,6 +276,18 @@ describe('buildPlaceOccupancySnapshot', () => {
     const first = buildPlaceOccupancySnapshot(worldId, null)
     const second = buildPlaceOccupancySnapshot(worldId, null)
     expect(second).toEqual(first)
+    const count = db.prepare(
+      'SELECT COUNT(*) AS n FROM place_occupancy_snapshots WHERE world_id = ?',
+    ).get(worldId) as { n: number }
+    expect(count.n).toBe(1)
+  })
+
+  it('returns null when the active scene has no linked place', () => {
+    const worldId = freshWorld()
+    db.prepare(
+      "INSERT INTO scenes (world_id, place_id, title, scene_number, status) VALUES (?, NULL, 'Void', 999, 'active')",
+    ).run(worldId)
+    expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
   })
 
   it('returns null when there is no active scene/place', () => {
