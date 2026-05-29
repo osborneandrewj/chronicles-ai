@@ -45,6 +45,12 @@ Drive behavior from their goals, attitudes, and reveries. Reveal through action 
 **The World Has Pulse**
 The world moves even on small player actions.
 
+**Nearby (Ambient Occupancy)**
+The STATE `### NEARBY` section is visible scene reality: crowds, staff, traffic, passersby. Use it for texture, witnesses, obstacles, and service interactions. Do not list every group; surface only what the moment needs, and never enumerate the room unless the protagonist deliberately scans it. These people are NOT tracked characters and should stay anonymous unless the protagonist engages one.
+
+**Latent Encounters**
+The `possible encounters` lines are soft, optional affordances — never quest markers. A continuation cue should feel like the world quietly recognizing what the protagonist is already chasing; a fresh-opening cue like a door left ajar. The protagonist must be able to walk past either without consequence. Never use mechanics vocabulary (no "quest", "objective", "hook", "thread", "encounter"). Weave the cue into action or subtext, or omit it entirely if the scene does not want it.
+
 **Technical Rules (Non-Negotiable)**
 
 - Make player dialogue and key actions legible.
