@@ -1,4 +1,4 @@
-import type { PopulationTemplateRow } from '@/lib/db'
+import type { PopulationTemplateRow, StoryThread } from '@/lib/db'
 
 // ---------------------------------------------------------------------------
 // Public types. occupancy is persisted as JSON and fed (compactly) to the
@@ -292,5 +292,98 @@ export function buildGroups(
     i++
   }
   return { groups, sources, total: placed }
+}
+
+const MAX_HOOKS = 3
+
+function overlapCount(a: string[], b: string[]): number {
+  const setB = new Set(b)
+  let n = 0
+  for (const tag of a) if (setB.has(tag)) n++
+  return n
+}
+
+function firstPromotable(sources: GroupSource[]): GroupSource | null {
+  return sources.find((s) => s.template.promotable) ?? null
+}
+
+// Pick the promotable occupant whose template tags best overlap a tag set;
+// fall back to the first promotable, else null (place-level hook).
+function bestCarrier(sources: GroupSource[], tags: string[]): GroupSource | null {
+  let best: GroupSource | null = null
+  let bestScore = -1
+  for (const s of sources) {
+    if (!s.template.promotable) continue
+    const score = overlapCount(s.template.match_tags, tags)
+    if (score > bestScore) {
+      best = s
+      bestScore = score
+    }
+  }
+  return best ?? firstPromotable(sources)
+}
+
+export function buildHooks(
+  profile: InferredProfile,
+  groups: OccupancyGroup[],
+  sources: GroupSource[],
+  activeThreads: StoryThread[],
+  rng: () => number,
+): EncounterHook[] {
+  const hooks: EncounterHook[] = []
+
+  // --- Continuation hooks: active threads whose relevance tags overlap the
+  //     place tags ∪ a present promotable occupant's tags. Highest overlap wins.
+  const scored = activeThreads
+    .map((t) => {
+      const tags = parseTags(t.relevance_tags_json)
+      const carrier = bestCarrier(sources, tags)
+      const carrierTags = carrier ? carrier.template.match_tags : []
+      const score = overlapCount(tags, profile.matchTags) + overlapCount(tags, carrierTags)
+      return { thread: t, carrier, score }
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+
+  for (const s of scored) {
+    if (hooks.length >= MAX_HOOKS) break
+    const occupantId = s.carrier ? s.carrier.groupId : null
+    const occupantLabel = s.carrier
+      ? groups.find((g) => g.id === s.carrier!.groupId)?.label ?? 'someone here'
+      : 'someone here'
+    hooks.push({
+      id: `hook_${hooks.length + 1}`,
+      kind: 'continuation',
+      occupant_id: occupantId,
+      thread_id: s.thread.id,
+      thread_ref: s.thread.title,
+      strength: s.score >= 2 ? 'strong' : 'ambient',
+      narrator_cue: `${capitalize(occupantLabel)} keeps half an eye on you, the way someone does when a name they've heard lately walks in.`,
+    })
+  }
+
+  // --- Seed hook: only when continuation hooks are sparse. Draw one promotable
+  //     occupant whose template carries a seed_premise, weighted/seeded.
+  if (hooks.length < 1) {
+    const carriers = sources.filter((s) => s.template.promotable && s.template.seed_premise)
+    if (carriers.length > 0) {
+      const chosen = carriers[Math.floor(rng() * carriers.length)]
+      const label = groups.find((g) => g.id === chosen.groupId)?.label ?? 'someone here'
+      hooks.push({
+        id: `hook_${hooks.length + 1}`,
+        kind: 'seed',
+        occupant_id: chosen.groupId,
+        premise: chosen.template.seed_premise ?? undefined,
+        strength: 'ambient',
+        narrator_cue: `${capitalize(label)} catches your eye, weighing whether to say something.`,
+      })
+    }
+  }
+
+  return hooks.slice(0, MAX_HOOKS)
+}
+
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)
 }
 

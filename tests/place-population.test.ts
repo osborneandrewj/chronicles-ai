@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { buildGroups, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import { buildGroups, buildHooks, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import type { StoryThread } from '@/lib/db'
 import {
   db,
   getLatestOccupancySnapshotRow,
@@ -149,5 +150,51 @@ describe('group selection', () => {
     const { groups, total } = buildGroups(profile, resolveTemplates([], 'road'), mulberry32(hashSeed('x')))
     expect(groups).toEqual([])
     expect(total).toBe(0)
+  })
+})
+
+function thread(partial: Partial<StoryThread>): StoryThread {
+  return {
+    id: 1, world_id: 1, title: 'T', kind: 'mystery', status: 'active',
+    summary: null, stakes: null, rewards: null, consequences: null, hidden: null,
+    relevance_tags_json: '[]', source_turn_id: null, resolved_turn_id: null,
+    created_at: '', updated_at: '', ...partial,
+  }
+}
+
+describe('hook matching', () => {
+  it('emits a continuation hook when a thread tag overlaps the place', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('hooks-A'))
+    const { groups, sources } = buildGroups(profile, templates, rng)
+    const threads = [thread({ id: 42, title: 'The missing courier', relevance_tags_json: '["bar","rumor"]' })]
+    const hooks = buildHooks(profile, groups, sources, threads, rng)
+    const cont = hooks.find((h) => h.kind === 'continuation')
+    expect(cont).toBeDefined()
+    expect(cont!.thread_id).toBe(42)
+    expect(cont!.thread_ref).toBe('The missing courier')
+  })
+
+  it('emits a seed hook when no thread overlaps but a promotable carrier exists', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('hooks-B'))
+    const { groups, sources } = buildGroups(profile, templates, rng)
+    const hooks = buildHooks(profile, groups, sources, [], rng)
+    expect(hooks.some((h) => h.kind === 'seed')).toBe(true)
+    expect(hooks.length).toBeLessThanOrEqual(3)
+  })
+
+  it('does not exceed 3 hooks total', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('hooks-C'))
+    const { groups, sources } = buildGroups(profile, templates, rng)
+    const threads = Array.from({ length: 6 }, (_, i) =>
+      thread({ id: 100 + i, title: `Thread ${i}`, relevance_tags_json: '["bar","social","rumor"]' }),
+    )
+    const hooks = buildHooks(profile, groups, sources, threads, rng)
+    expect(hooks.length).toBeLessThanOrEqual(3)
   })
 })
