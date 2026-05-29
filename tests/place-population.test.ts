@@ -88,6 +88,11 @@ describe('deterministic PRNG', () => {
     const b = mulberry32(hashSeed('world:1|place:2|scene:4'))
     expect(a()).not.toEqual(b())
   })
+
+  it('produces a known first value for a fixed seed (regression guard)', () => {
+    const rng = mulberry32(hashSeed('world:1|place:2|scene:3'))
+    expect(rng()).toBeCloseTo(0.9102079933509231, 6)
+  })
 })
 
 describe('profile inference', () => {

@@ -128,9 +128,10 @@ const KIND_ALIASES: Record<string, string> = {
 }
 
 function classify(name: string, kind: string | null): string {
-  const haystack = `${kind ?? ''} ${name}`.toLowerCase()
+  const words = `${kind ?? ''} ${name}`.toLowerCase().split(/\W+/)
+  const wordSet = new Set(words)
   for (const [keyword, profileKind] of Object.entries(KIND_ALIASES)) {
-    if (haystack.includes(keyword)) return profileKind
+    if (wordSet.has(keyword)) return profileKind
   }
   return 'generic'
 }
