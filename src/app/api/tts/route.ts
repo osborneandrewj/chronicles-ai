@@ -8,7 +8,7 @@ export const maxDuration = 60
 
 const MAX_TEXT_CHARS = 12000
 const MAX_CACHED_AUDIO_BYTES = 8 * 1024 * 1024
-const CACHE_ENTRIES_PER_WORLD = 3
+const CACHE_TURNS_PER_WORLD = 2
 
 interface TtsRequestBody {
   text?: unknown
@@ -137,7 +137,7 @@ async function cacheAudioStream(
     storeCachedTtsAudio({
       ...cache,
       audio: Buffer.from(arrayBuffer),
-      maxPerWorld: CACHE_ENTRIES_PER_WORLD,
+      turnsPerWorld: CACHE_TURNS_PER_WORLD,
     })
   } catch (err) {
     console.error('[tts] audio cache write failed', err)

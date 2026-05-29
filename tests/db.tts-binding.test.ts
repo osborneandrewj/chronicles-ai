@@ -83,7 +83,7 @@ describe('TTS audio replay cache', () => {
     expect(getCachedTtsAudio(worldId, turnId, 'model-a', 'eve', 'hash-b')).toBeNull()
   })
 
-  it('rejects non-assistant or cross-world cache writes and prunes to the newest entries', () => {
+  it('rejects non-assistant or cross-world cache writes and prunes to the newest turns', () => {
     const worldA = seedWorld(`cache-prune-a-${Math.random()}`).worldId
     const worldB = seedWorld(`cache-prune-b-${Math.random()}`).worldId
     const assistantA1 = insertTurn(worldA, 'assistant', 'One.', null).id
@@ -121,12 +121,46 @@ describe('TTS audio replay cache', () => {
         textHash: `hash-${idx}`,
         contentType: 'audio/mpeg',
         audio: Buffer.from(`audio-${idx}`),
-        maxPerWorld: 2,
+        turnsPerWorld: 2,
       })
     }
 
     expect(getCachedTtsAudio(worldA, assistantA1, 'model-a', 'eve', 'hash-0')).toBeNull()
     expect(getCachedTtsAudio(worldA, assistantA2, 'model-a', 'eve', 'hash-1')).not.toBeNull()
     expect(getCachedTtsAudio(worldA, assistantA3, 'model-a', 'eve', 'hash-2')).not.toBeNull()
+  })
+
+  it('retains by turn, not by entry: a multi-chunk newest turn never evicts its own chunks', () => {
+    // The distinguishing case from entry-count retention. Turn 3 has TWO cache
+    // entries (two text hashes — the shape v0.6.12 multi-chunk caching produces).
+    // Turn-based retention (turnsPerWorld=2) keeps the newest 2 distinct turns
+    // (turn 2 and turn 3) in full; only turn 1 is evicted. Entry-count=2 would
+    // instead keep just turn 3's two entries and wrongly evict turn 2.
+    const worldId = seedWorld(`cache-turns-${Math.random()}`).worldId
+    const t1 = insertTurn(worldId, 'assistant', 'First.', null).id
+    const t2 = insertTurn(worldId, 'assistant', 'Second.', null).id
+    const t3 = insertTurn(worldId, 'assistant', 'Third — a longer turn.', null).id
+
+    const store = (turnId: number, textHash: string) =>
+      storeCachedTtsAudio({
+        worldId,
+        turnId,
+        modelKey: 'model-a',
+        voiceId: 'eve',
+        textHash,
+        contentType: 'audio/mpeg',
+        audio: Buffer.from(`audio-${turnId}-${textHash}`),
+        turnsPerWorld: 2,
+      })
+
+    store(t1, 'h1')
+    store(t2, 'h2')
+    store(t3, 'chunk-a')
+    store(t3, 'chunk-b')
+
+    expect(getCachedTtsAudio(worldId, t1, 'model-a', 'eve', 'h1')).toBeNull()
+    expect(getCachedTtsAudio(worldId, t2, 'model-a', 'eve', 'h2')).not.toBeNull()
+    expect(getCachedTtsAudio(worldId, t3, 'model-a', 'eve', 'chunk-a')).not.toBeNull()
+    expect(getCachedTtsAudio(worldId, t3, 'model-a', 'eve', 'chunk-b')).not.toBeNull()
   })
 })
