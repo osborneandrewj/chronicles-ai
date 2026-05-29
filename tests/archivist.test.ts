@@ -492,6 +492,86 @@ describe('applyArchivistPatch', () => {
     expect(bran.current_place_id).toBe(cliff.id)
   })
 
+  // v0.6.10 scene-transition invariant — modelled on the Call-In Case
+  // (world 6, turns 389-403). The archivist relocates a cluster of NPCs to a
+  // new place while dropping the protagonist's own location and the scene
+  // action; deterministic code infers the move and advances player + cursor.
+  it('infers a player + cursor move when a cluster of NPCs relocates and the player row is omitted', () => {
+    // Establish two NPCs present with the player at the harbour (scene 1 place).
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Micha', description: 'A paramedic.', current_place_name: 'Mevagissey harbour' },
+        { name: 'Karen', description: 'A charge nurse.', current_place_name: 'Mevagissey harbour' },
+      ],
+    })
+    const harbour = getPlacesForWorld(worldId).find((p) => p.name === 'Mevagissey harbour')!
+    const priorScene = getActiveSceneForWorld(worldId)!
+    expect(priorScene.place_id).toBe(harbour.id)
+
+    // Travel turn: the cast relocates to the hospital; the archivist drops the
+    // player's location and omits the scene action (the Call-In failure shape).
+    const travelTurn = insertTurn(
+      worldId,
+      'assistant',
+      'The team pulls into Sacred Heart and hurries inside.',
+      null,
+    )
+    applyArchivistPatch(worldId, travelTurn.id, {
+      characters: [
+        { name: 'Micha', current_place_name: 'Sacred Heart Hospital' },
+        { name: 'Karen', current_place_name: 'Sacred Heart Hospital' },
+      ],
+    })
+
+    const hospital = getPlacesForWorld(worldId).find((p) => p.name === 'Sacred Heart Hospital')!
+    const activeScene = getActiveSceneForWorld(worldId)!
+    // Cursor advanced to a NEW scene at the hospital.
+    expect(activeScene.id).not.toBe(priorScene.id)
+    expect(activeScene.place_id).toBe(hospital.id)
+    // Prior scene auto-closed at the travel turn.
+    const closed = db
+      .prepare('SELECT status, closed_at_turn FROM scenes WHERE id = ?')
+      .get(priorScene.id) as { status: string; closed_at_turn: number }
+    expect(closed.status).toBe('completed')
+    expect(closed.closed_at_turn).toBe(travelTurn.id)
+    // Protagonist dragged along to the cluster.
+    const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
+    expect(player.current_place_id).toBe(hospital.id)
+  })
+
+  it('does NOT fire when the patch moves the player away from the relocating NPC cluster (turn-403 shape)', () => {
+    // NPCs present with the player at the harbour.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Micha', description: 'A paramedic.', current_place_name: 'Mevagissey harbour' },
+        { name: 'Karen', description: 'A charge nurse.', current_place_name: 'Mevagissey harbour' },
+      ],
+    })
+    const priorScene = getActiveSceneForWorld(worldId)!
+    const scenesBefore = getScenesForWorld(worldId).length
+
+    // The NPCs relocate to the hospital, but the patch explicitly keeps the
+    // protagonist at the harbour — the player is moving AWAY from the cluster,
+    // so the direction guard must suppress the inference.
+    const turn = insertTurn(
+      worldId,
+      'assistant',
+      'Back at the harbour, you watch the ambulance leave for Sacred Heart.',
+      null,
+    )
+    applyArchivistPatch(worldId, turn.id, {
+      characters: [
+        { name: 'Micha', current_place_name: 'Sacred Heart Hospital' },
+        { name: 'Karen', current_place_name: 'Sacred Heart Hospital' },
+        { name: 'Edith', is_player: true, current_place_name: 'Mevagissey harbour' },
+      ],
+    })
+
+    // No new scene, cursor unchanged.
+    expect(getScenesForWorld(worldId).length).toBe(scenesBefore)
+    expect(getWorldCursor(worldId).current_scene_id).toBe(priorScene.id)
+  })
+
   it('inserts a new NPC with active_goal and current_attitude', () => {
     applyArchivistPatch(worldId, turnId, {
       characters: [

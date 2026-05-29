@@ -220,7 +220,12 @@ export async function POST(req: Request) {
 
   // Re-read state so the narrator sees any place changes the agent applied.
   const narratorState = npcAgentResult ? getNarratorWorldState(worldId) : postPromotionState
-  const stateBlock = formatStateBlock(narratorState, plans)
+  // v0.6.10: the last couple of narrator turns let formatStateBlock suppress a
+  // stale Place anchor when recent prose has clearly travelled elsewhere.
+  const recentNarratorProse = recentForAgents
+    .filter((t) => t.role === 'assistant')
+    .map((t) => t.content)
+  const stateBlock = formatStateBlock(narratorState, plans, recentNarratorProse)
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // Keep the stable narrator instructions and prior turns separate from the

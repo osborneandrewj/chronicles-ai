@@ -178,6 +178,7 @@ export type NpcPlannedAction = {
 export function formatStateBlock(
   state: NarratorWorldState,
   plannedActions: NpcPlannedAction[] = [],
+  recentNarratorProse: string[] = [],
 ): string {
   const lines: string[] = [
     '## STATE',
@@ -192,7 +193,18 @@ export function formatStateBlock(
     const pacing = formatScenePacing(state.currentScene)
     if (pacing) lines.push(`  - pacing: ${pacing}`)
   }
-  if (state.currentPlace) {
+  // v0.6.10 belt-and-suspenders: if the active scene's place disagrees with
+  // recent prose (the last 2 narrator turns clearly depicted travel/arrival to
+  // a different named place), omit the Place line rather than assert a stale
+  // anchor. The narrator reads location from recent prose well; a wrong
+  // authoritative Place line is what produced the Call-In snap-back. This is a
+  // thin fallback — the archivist invariant fixing the cursor early is the
+  // primary fix; this only catches transitions the invariant cannot (e.g. an
+  // unpopulated destination with no NPC cluster to vote on).
+  const placeContradicted =
+    state.currentPlace !== null &&
+    recentProseDepictsTravelElsewhere(recentNarratorProse, state.currentPlace, state.knownPlaces)
+  if (state.currentPlace && !placeContradicted) {
     lines.push(`- Place: ${state.currentPlace.name}`)
     if (state.currentPlace.description) {
       lines.push(`  ${state.currentPlace.description}`)
@@ -380,6 +392,34 @@ export function formatStateBlock(
   }
 
   return lines.join('\n')
+}
+
+// True when the last 2 narrator turns clearly depict travel/arrival/entry to a
+// known place other than the active scene's place. Deliberately a simple
+// keyword + substring check, not LLM-based: a travel verb plus the name of a
+// *different* known place in the recent window. Conservative by design — when
+// the check is unsure it does not fire, and even a missed-but-correct
+// suppression is harmless because the narrator can still read place from prose.
+const TRAVEL_VERB =
+  /\b(?:arrive|arrives|arrived|arriving|enter|enters|entered|entering|walk(?:s|ed)? into|step(?:s|ped)? into|reach(?:es|ed)?|pull(?:s|ed)? into|drive(?:s)? to|drove to|head(?:s|ed)? to|made (?:your|their|his|her) way to|cross(?:es|ed)? into)\b/
+function recentProseDepictsTravelElsewhere(
+  recentNarratorProse: string[],
+  currentPlace: Place,
+  knownPlaces: Place[],
+): boolean {
+  const window = recentNarratorProse
+    .slice(-2)
+    .join('\n')
+    .toLowerCase()
+  if (!window || !TRAVEL_VERB.test(window)) return false
+
+  const currentKey = currentPlace.name.toLowerCase()
+  return knownPlaces.some((p) => {
+    if (p.id === currentPlace.id) return false
+    const name = p.name.toLowerCase()
+    if (name.length < 4 || name === currentKey) return false
+    return window.includes(name)
+  })
 }
 
 function formatScenePacing(scene: Scene): string | null {

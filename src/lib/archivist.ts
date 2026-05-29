@@ -949,6 +949,16 @@ const autoCloseSceneStmt = db.prepare<[number, number]>(
   `UPDATE scenes SET status = 'completed', closed_at_turn = ?, updated_at = datetime('now')
    WHERE id = ? AND status = 'active'`,
 )
+// v0.6.10 scene-transition invariant reads: the active scene's place and the
+// player row's place. currentSceneIdStmt returns only the scene id, so the
+// scene place is a separate join; the player place is a direct lookup.
+const currentScenePlaceIdStmt = db.prepare<[number]>(
+  `SELECT s.place_id FROM worlds w JOIN scenes s ON s.id = w.current_scene_id WHERE w.id = ?`,
+)
+const playerPlaceIdStmt = db.prepare<[number]>(
+  'SELECT current_place_id FROM characters WHERE world_id = ? AND is_player = 1',
+)
+const placeNameByIdStmt = db.prepare<[number]>('SELECT name FROM places WHERE id = ?')
 
 type StoryThreadRow = {
   id: number
@@ -1678,6 +1688,14 @@ export function applyArchivistPatch(
   patch: ArchivistPatch,
 ): void {
   const tx = db.transaction(() => {
+    // v0.6.10 scene-transition invariant state, populated in the character loop
+    // (step 2) and consumed after the scene-action step (step 3b). Keyed off
+    // which NPCs the patch RELOCATES this turn — the reliable signal that the
+    // protagonist travelled even when the archivist drops the player's own
+    // `current_place_name` (the exact Call-In Case failure).
+    const relocatedNpcByPlace = new Map<number, string[]>()
+    let playerPlaceFromPatch: number | null = null
+
     // 1. Places first, so character.current_place_name and scene.open.place_name
     //    can resolve to ids in the same patch.
     if (patch.places) {
@@ -1712,6 +1730,25 @@ export function applyArchivistPatch(
             ? upsertPlace(worldId, c.current_place_name, undefined, undefined)
             : null
         const existing = resolveCharacter(worldId, c.name)
+
+        // v0.6.10: tally NPC relocations for the scene-transition invariant.
+        // A relocation = a non-player row whose patch sets a place resolving to
+        // a different place_id than the row currently sits at. No-op
+        // restatements (placeId === existing place, e.g. "Jordana still at
+        // home") are excluded so the invariant fires on the first real travel
+        // turn rather than lagging a beat. The player's own place move is
+        // recorded separately to drive the backward-direction guard.
+        if (placeId !== null) {
+          const isPlayerRow = c.is_player === true || existing?.is_player === 1
+          if (isPlayerRow) {
+            playerPlaceFromPatch = placeId
+          } else if (placeId !== (existing?.current_place_id ?? null)) {
+            const names = relocatedNpcByPlace.get(placeId) ?? []
+            names.push(c.name)
+            relocatedNpcByPlace.set(placeId, names)
+          }
+        }
+
         const characterId: number = existing
           ? existing.id
           : (() => {
@@ -1817,6 +1854,83 @@ export function applyArchivistPatch(
         }
         setCurrentSceneStmt.run(row.id, worldId)
         setPlayersPlaceStmt.run(placeId, worldId)
+      }
+    }
+
+    // 3b. Deterministic scene-transition invariant (v0.6.10). The archivist
+    //     agent reliably moves NPCs across a travel boundary but frequently
+    //     drops the protagonist's own location, leaving the scene cursor pinned
+    //     at the origin while recent prose has the cast somewhere else — the
+    //     narrator then snaps the player back to the stale anchor (the Call-In
+    //     Case, world 6 turns 389-403). We can't key off the player's
+    //     `current_place_name` (empty on every travel turn), so we infer the
+    //     move from the NPC cluster the patch relocated this turn. Only runs
+    //     when the patch did NOT itself open/close a scene. This is a logged
+    //     best-guess, not a clean floor — see the false-positive tradeoff in
+    //     docs/30-v0.6.10-milestone.md (a lone NPC stepping out can drag the
+    //     cursor); recovery is the console.warn + inspector edit, and the
+    //     auto-opened scene is cheaply reversible (synthesised title, no
+    //     summary, prior scene auto-closed not deleted).
+    if ((!patch.scene || patch.scene.action === 'keep_open') && relocatedNpcByPlace.size > 0) {
+      let inferredPlaceId: number | null = null
+      let topCount = 0
+      let totalRelocated = 0
+      for (const [pid, names] of relocatedNpcByPlace) {
+        totalRelocated += names.length
+        if (names.length > topCount) {
+          topCount = names.length
+          inferredPlaceId = pid
+        }
+      }
+      // Clear majority = strictly more than half land at one place. A single
+      // relocated NPC trivially satisfies this (majority-of-one) — intended:
+      // it lets the cursor advance on the first travel turn.
+      const clearMajority = inferredPlaceId !== null && topCount * 2 > totalRelocated
+      const scenePlaceId =
+        (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
+        null
+      const playerPlaceId =
+        (playerPlaceIdStmt.get(worldId) as { current_place_id: number | null } | undefined)
+          ?.current_place_id ?? null
+      // Direction guard: never fire when the patch is moving the protagonist
+      // AWAY from the NPC cluster (the turn-403 home snap-back). On the common
+      // travel turn the player row is omitted entirely, so this is a no-op
+      // there; it only suppresses the explicit backward flip.
+      const movingPlayerAway =
+        playerPlaceFromPatch !== null && playerPlaceFromPatch !== inferredPlaceId
+
+      if (
+        clearMajority &&
+        inferredPlaceId !== scenePlaceId &&
+        inferredPlaceId !== playerPlaceId &&
+        !movingPlayerAway
+      ) {
+        const placeName =
+          (placeNameByIdStmt.get(inferredPlaceId!) as { name: string } | undefined)?.name ??
+          'destination'
+        const cursor = currentSceneIdStmt.get(worldId) as
+          | { current_scene_id: number | null }
+          | undefined
+        if (cursor?.current_scene_id) {
+          autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
+        }
+        const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
+        const newScene = insertSceneStmt.get(
+          worldId,
+          inferredPlaceId!,
+          `Arriving at ${placeName}`,
+          n + 1,
+          narratorTurnId,
+        ) as { id: number }
+        setCurrentSceneStmt.run(newScene.id, worldId)
+        setPlayersPlaceStmt.run(inferredPlaceId!, worldId)
+        console.warn('[archivist] scene-transition invariant fired', {
+          world_id: worldId,
+          turn_id: narratorTurnId,
+          prior_scene_place_id: scenePlaceId,
+          inferred_place_id: inferredPlaceId,
+          npcs: relocatedNpcByPlace.get(inferredPlaceId!) ?? [],
+        })
       }
     }
 
