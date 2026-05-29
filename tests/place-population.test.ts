@@ -1,7 +1,27 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
+import {
+  db,
+  getLatestOccupancySnapshotRow,
+  getPopulationTemplatesForKind,
+  insertOccupancySnapshot,
+} from '@/lib/db'
 import { runMigrations } from '@/lib/migrations'
+import { createWorld } from '@/lib/worlds'
+
+function freshWorld(): number {
+  return createWorld({
+    name: `Pop-${Math.random()}`,
+    premise: 'A quiet town with secrets.',
+    initialState: {
+      time: 'Day 1, 20:00',
+      location: 'The Anchor Tavern',
+      identity: 'A traveler.',
+      playerName: 'Wren',
+    },
+  }).id
+}
 
 describe('migration v22 — place population schema', () => {
   it('creates the three tables, the threads tag column, and passes FK check', () => {
@@ -25,5 +45,32 @@ describe('migration v22 — place population schema', () => {
 
     expect((db.pragma('foreign_key_check') as unknown[]).length).toBe(0)
     db.close()
+  })
+})
+
+describe('occupancy snapshot persistence', () => {
+  it('round-trips a snapshot row as JSON', () => {
+    const worldId = freshWorld()
+    const placeId = (db.prepare(
+      "SELECT id FROM places WHERE world_id = ? LIMIT 1",
+    ).get(worldId) as { id: number }).id
+
+    insertOccupancySnapshot({
+      worldId,
+      placeId,
+      sceneId: null,
+      sourceTurnId: null,
+      worldTime: 'Day 1, 20:00',
+      occupancyJson: '{"density":"busy","seed":"abc","groups":[],"traffic":null,"encounter_hooks":[]}',
+    })
+
+    const row = getLatestOccupancySnapshotRow(worldId, placeId)
+    expect(row).not.toBeNull()
+    expect(JSON.parse(row!.occupancy_json).density).toBe('busy')
+  })
+
+  it('returns built-in count 0 templates for an unknown world (DB empty)', () => {
+    const worldId = freshWorld()
+    expect(getPopulationTemplatesForKind(worldId, 'bar')).toEqual([])
   })
 })
