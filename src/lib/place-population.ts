@@ -296,6 +296,16 @@ export function buildGroups(
 
 const MAX_HOOKS = 3
 
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)
+}
+
+const CONTINUATION_CUES: Array<(label: string) => string> = [
+  (label) => `${capitalize(label)} keeps half an eye on you, the way someone does when a name they've heard lately walks in.`,
+  (label) => `${capitalize(label)} pauses a beat too long as you pass, as if placing you against something half-remembered.`,
+  (label) => `${capitalize(label)} watches you with the wary interest of someone who knows more than they let on.`,
+]
+
 function overlapCount(a: string[], b: string[]): number {
   const setB = new Set(b)
   let n = 0
@@ -343,7 +353,7 @@ export function buildHooks(
       return { thread: t, carrier, score }
     })
     .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.score - a.score || a.thread.id - b.thread.id)
 
   for (const s of scored) {
     if (hooks.length >= MAX_HOOKS) break
@@ -358,7 +368,7 @@ export function buildHooks(
       thread_id: s.thread.id,
       thread_ref: s.thread.title,
       strength: s.score >= 2 ? 'strong' : 'ambient',
-      narrator_cue: `${capitalize(occupantLabel)} keeps half an eye on you, the way someone does when a name they've heard lately walks in.`,
+      narrator_cue: CONTINUATION_CUES[hooks.length % CONTINUATION_CUES.length](occupantLabel),
     })
   }
 
@@ -381,9 +391,5 @@ export function buildHooks(
   }
 
   return hooks.slice(0, MAX_HOOKS)
-}
-
-function capitalize(s: string): string {
-  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)
 }
 

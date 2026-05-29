@@ -197,4 +197,48 @@ describe('hook matching', () => {
     const hooks = buildHooks(profile, groups, sources, threads, rng)
     expect(hooks.length).toBeLessThanOrEqual(3)
   })
+
+  it('filters out threads whose tags do not overlap (empty tags)', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('hooks-empty'))
+    const { groups, sources } = buildGroups(profile, templates, rng)
+    const threads = [thread({ id: 7, title: 'Unrelated', relevance_tags_json: '[]' })]
+    const hooks = buildHooks(profile, groups, sources, threads, rng)
+    expect(hooks.some((h) => h.kind === 'continuation')).toBe(false)
+  })
+
+  it('emits a place-level continuation hook (occupant_id null) when no promotable occupants exist', () => {
+    const profile = inferPlaceProfile({ name: 'Highway 7 shoulder', kind: 'road' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('hooks-road'))
+    const { groups, sources } = buildGroups(profile, templates, rng)
+    const threads = [thread({ id: 9, title: 'The tail car', relevance_tags_json: '["road","travel"]' })]
+    const hooks = buildHooks(profile, groups, sources, threads, rng)
+    const cont = hooks.find((h) => h.kind === 'continuation')
+    expect(cont).toBeDefined()
+    expect(cont!.occupant_id).toBeNull()
+  })
+
+  it('marks strength strong at overlap>=2 and ambient at overlap 1', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const ambientRng = mulberry32(hashSeed('hooks-ambient'))
+    const amb = buildGroups(profile, templates, ambientRng)
+    const ambientHooks = buildHooks(
+      profile, amb.groups, amb.sources,
+      [thread({ id: 11, title: 'Nightlife rumor', relevance_tags_json: '["nightlife"]' })],
+      ambientRng,
+    )
+    expect(ambientHooks.find((h) => h.kind === 'continuation')!.strength).toBe('ambient')
+
+    const strongRng = mulberry32(hashSeed('hooks-strong'))
+    const str = buildGroups(profile, templates, strongRng)
+    const strongHooks = buildHooks(
+      profile, str.groups, str.sources,
+      [thread({ id: 12, title: 'Bar rumor', relevance_tags_json: '["bar","rumor"]' })],
+      strongRng,
+    )
+    expect(strongHooks.find((h) => h.kind === 'continuation')!.strength).toBe('strong')
+  })
 })
