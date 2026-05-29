@@ -2,11 +2,13 @@ import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
 import { buildGroups, buildHooks, buildPlaceOccupancySnapshot, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import { applyArchivistPatch } from '@/lib/archivist'
 import type { StoryThread } from '@/lib/db'
 import {
   db,
   getLatestOccupancySnapshotRow,
   getPopulationTemplatesForKind,
+  getStoryDossierForWorld,
   insertOccupancySnapshot,
 } from '@/lib/db'
 import { runMigrations } from '@/lib/migrations'
@@ -319,5 +321,29 @@ describe('occupancy in the narrator state block', () => {
     const worldId = freshWorld()
     const state = getNarratorWorldState(worldId)
     expect(formatStateBlock(state)).not.toContain('### NEARBY')
+  })
+})
+
+describe('archivist relevance tags', () => {
+  it('persists relevance_tags on a thread and exposes them on the dossier', () => {
+    const worldId = freshWorld()
+    const turnId = (db.prepare(
+      "INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x') RETURNING id",
+    ).get(worldId) as { id: number }).id
+
+    applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'The missing courier',
+          kind: 'quest',
+          relevance_tags: ['bar', 'rumor', 'courier'],
+        },
+      ],
+    })
+
+    const threads = getStoryDossierForWorld(worldId).threads
+    const t = threads.find((x) => x.title === 'The missing courier')
+    expect(t).toBeDefined()
+    expect(JSON.parse(t!.relevance_tags_json)).toEqual(['bar', 'rumor', 'courier'])
   })
 })

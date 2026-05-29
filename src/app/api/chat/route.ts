@@ -33,7 +33,7 @@ import {
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
 import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
-import { buildPlaceOccupancySnapshot } from '@/lib/place-population'
+import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
@@ -224,8 +224,9 @@ export async function POST(req: Request) {
   // traffic, latent encounter hooks) BEFORE the final state read below, so
   // getNarratorWorldState picks up the persisted snapshot and formatStateBlock
   // renders it. Non-fatal: occupancy must never block narration.
+  let turnOccupancy: PlaceOccupancy | null = null
   try {
-    buildPlaceOccupancySnapshot(worldId, playerTurnId)
+    turnOccupancy = buildPlaceOccupancySnapshot(worldId, playerTurnId)
   } catch (err) {
     console.error('[place-population]', err)
   }
@@ -390,7 +391,7 @@ export async function POST(req: Request) {
         role: t.role,
         content: t.content,
       }))
-      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent)
+      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent, turnOccupancy)
         .then(({ patch, usage: archivistUsage }) => {
           applyArchivistPatch(worldId, narratorTurn.id, patch)
           updateTurnMetadata(narratorTurn.id, {
