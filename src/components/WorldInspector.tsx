@@ -237,16 +237,29 @@ function NowView({ state }: { state: FullWorldState }) {
   );
 }
 
+// Active story pressure first, quests at the top. Quests were previously a
+// separate group from threads, which meant the protagonist's actual objective
+// could sit under a "Threads" header while the "Quests" group rendered nothing
+// at all — reading as "no quests" even mid-quest. One ordered list, kind shown
+// as a tag, keeps every active thread visible in one place.
+const THREAD_KIND_RANK: Record<string, number> = {
+  quest: 0,
+  threat: 1,
+  mystery: 2,
+  relationship: 3,
+  background: 4,
+};
+
 function StoryView({ state }: { state: FullWorldState }) {
   const { dossier } = state;
-  const activeQuests = dossier.threads.filter((t) => t.status === "active" && t.kind === "quest");
-  const activeThreads = dossier.threads.filter((t) => t.status === "active" && t.kind !== "quest");
+  const threads = dossier.threads
+    .filter((t) => t.status === "active")
+    .sort((a, b) => (THREAD_KIND_RANK[a.kind] ?? 5) - (THREAD_KIND_RANK[b.kind] ?? 5));
   const objectives = dossier.objectives.filter((o) => o.status === "active" || o.status === "blocked");
   const clues = dossier.clues.filter((c) => c.status === "open" || c.status === "interpreted");
   const resources = dossier.resources;
   const empty =
-    activeQuests.length === 0 &&
-    activeThreads.length === 0 &&
+    threads.length === 0 &&
     objectives.length === 0 &&
     clues.length === 0 &&
     resources.length === 0;
@@ -254,39 +267,27 @@ function StoryView({ state }: { state: FullWorldState }) {
   if (empty) {
     return (
       <p className="text-neutral-500">
-        No active quests, threads, objectives, clues, or resources yet. The dossier fills out as the world is played.
+        No active threads, objectives, clues, or resources yet. The dossier fills out as the world is played.
       </p>
     );
   }
 
   return (
     <div className="space-y-4">
-      {activeQuests.length > 0 && (
-        <DossierGroup label={`Quests (${activeQuests.length})`}>
-          {activeQuests.map((q) => (
-            <DossierItem
-              key={q.id}
-              title={q.title}
-              meta={[
-                q.stakes ? `stakes: ${q.stakes}` : null,
-                q.rewards ? `rewards: ${q.rewards}` : null,
-                q.consequences ? `consequences: ${q.consequences}` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || null}
-            >
-              {q.summary}
-            </DossierItem>
-          ))}
-        </DossierGroup>
-      )}
-      {activeThreads.length > 0 && (
-        <DossierGroup label={`Threads (${activeThreads.length})`}>
-          {activeThreads.map((t) => (
+      {threads.length > 0 && (
+        <DossierGroup label={`Threads (${threads.length})`}>
+          {threads.map((t) => (
             <DossierItem
               key={t.id}
               title={t.title}
-              meta={[t.kind, t.stakes ? `stakes: ${t.stakes}` : null].filter(Boolean).join(" · ") || null}
+              meta={[
+                t.kind,
+                t.stakes ? `stakes: ${t.stakes}` : null,
+                t.rewards ? `rewards: ${t.rewards}` : null,
+                t.consequences ? `consequences: ${t.consequences}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || null}
             >
               {t.summary}
             </DossierItem>

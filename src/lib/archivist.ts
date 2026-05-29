@@ -1583,8 +1583,27 @@ function resolveStoryThreadId(
   worldId: number,
   narratorTurnId: number,
   threadTitle: string | undefined,
+  options: { preferQuest?: boolean } = {},
 ): number | null {
   if (!threadTitle) return null
+  // A thread that carries playable objectives is a mission — surface it as a
+  // `quest` rather than leaving it under the catch-all `mystery` default the
+  // model reaches for. We only upgrade the soft kinds (`mystery`/`background`):
+  // a deliberately-set `threat` or `relationship` keeps its kind even when an
+  // objective attaches (a hostage standoff is a threat the player works, not a
+  // quest). New threads spawned by an objective reference open as quests.
+  if (options.preferQuest) {
+    const existing = storyThreadByTitleStmt.get(worldId, threadTitle) as
+      | StoryThreadRow
+      | undefined
+    if (!existing || existing.kind === 'mystery' || existing.kind === 'background') {
+      return upsertStoryThread(worldId, narratorTurnId, {
+        title: threadTitle,
+        kind: 'quest',
+        status: 'active',
+      })
+    }
+  }
   return upsertStoryThread(worldId, narratorTurnId, { title: threadTitle, status: 'active' })
 }
 
@@ -1622,7 +1641,9 @@ function upsertStoryObjective(
   narratorTurnId: number,
   patch: StoryObjectivePatch,
 ): void {
-  const threadId = resolveStoryThreadId(worldId, narratorTurnId, patch.thread_title)
+  const threadId = resolveStoryThreadId(worldId, narratorTurnId, patch.thread_title, {
+    preferQuest: true,
+  })
   const existing = storyObjectiveByTitleStmt.get(worldId, patch.title) as { id: number } | undefined
   const status = patch.status ?? 'active'
   const completedTurnId =

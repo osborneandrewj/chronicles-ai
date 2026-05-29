@@ -163,6 +163,32 @@ describe('applyArchivistPatch', () => {
     })
   })
 
+  it('classifies objective-bearing threads as quests (new + mystery upgrade), but leaves threats alone', () => {
+    applyArchivistPatch(worldId, turnId, {
+      // A bare objective referencing a brand-new thread title (no thread row).
+      story_objectives: [{ title: 'Reach the spire', thread_title: 'The Spire Signal' }],
+      // Threads the model labelled itself; objectives attach on the next turn.
+      story_threads: [
+        { title: 'The Dead Forge', kind: 'mystery', summary: 'The furnaces went cold.' },
+        { title: 'The Hostage Standoff', kind: 'threat', summary: 'A captor makes demands.' },
+      ],
+    })
+    applyArchivistPatch(worldId, turnId, {
+      story_objectives: [
+        { title: 'Assess the silence', thread_title: 'The Dead Forge' },
+        { title: 'Stall the captor', thread_title: 'The Hostage Standoff' },
+      ],
+    })
+
+    const threads = getStoryDossierForWorld(worldId).threads
+    // Objective-spawned thread opens as a quest.
+    expect(threads.find((t) => t.title === 'The Spire Signal')!.kind).toBe('quest')
+    // A mystery that gains an objective is upgraded to a quest.
+    expect(threads.find((t) => t.title === 'The Dead Forge')!.kind).toBe('quest')
+    // A deliberate threat keeps its kind even with an objective attached.
+    expect(threads.find((t) => t.title === 'The Hostage Standoff')!.kind).toBe('threat')
+  })
+
   it('inserts a new character with description and place', () => {
     const patch: ArchivistPatch = {
       characters: [
