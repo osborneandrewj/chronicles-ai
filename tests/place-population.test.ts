@@ -10,6 +10,7 @@ import {
   insertOccupancySnapshot,
 } from '@/lib/db'
 import { runMigrations } from '@/lib/migrations'
+import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
 import { createWorld } from '@/lib/worlds'
 
 function freshWorld(): number {
@@ -294,5 +295,29 @@ describe('buildPlaceOccupancySnapshot', () => {
     const worldId = freshWorld()
     db.prepare("UPDATE scenes SET status = 'completed' WHERE world_id = ?").run(worldId)
     expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
+  })
+})
+
+describe('occupancy in the narrator state block', () => {
+  it('renders a compact occupancy section with density, groups, and hooks', () => {
+    const worldId = freshWorld()
+    seedScene(worldId, 'The Lantern Room', 'bar')
+    db.prepare(
+      "INSERT INTO story_threads (world_id, title, kind, status, relevance_tags_json) VALUES (?, 'The missing courier', 'quest', 'active', '[\"bar\",\"rumor\"]')",
+    ).run(worldId)
+
+    buildPlaceOccupancySnapshot(worldId, null)
+    const state = getNarratorWorldState(worldId)
+    const block = formatStateBlock(state)
+
+    expect(block).toContain('### NEARBY (ambient — not durable characters)')
+    expect(block).toContain('density:')
+    expect(block).toContain('possible encounters')
+  })
+
+  it('omits the occupancy section when there is no snapshot', () => {
+    const worldId = freshWorld()
+    const state = getNarratorWorldState(worldId)
+    expect(formatStateBlock(state)).not.toContain('### NEARBY')
   })
 })
