@@ -49,6 +49,7 @@ Milestones live in [`plans/milestones/`](plans/milestones/), one per release, na
 | v0.6.5 | [v0.6.5](plans/milestones/v0.6.5.md) | TBD (planning) | Mobile + desktop UI pass + replay-cost-footer bug |
 | v0.6.6 | [v0.6.6](plans/milestones/v0.6.6.md) | TBD (planning) | Archivist character canonicalization — short vs full name no longer duplicates rows |
 | v0.6.9 | [v0.6.9](plans/milestones/v0.6.9.md) | TBD (planning) | NPC/Narrator v2 intent audit — persist agent-tier planned actions, reconcile against narrator prose |
+| v0.6.10 | [v0.6.10](plans/milestones/v0.6.10.md) | 2026-05-28 | Self-healing scene-transition invariant — infer player+cursor move from relocated NPC cluster; fixes the Call-In snap-back |
 
 ## `reference/`
 

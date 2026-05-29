@@ -1888,7 +1888,7 @@ export function applyArchivistPatch(
     //     move from the NPC cluster the patch relocated this turn. Only runs
     //     when the patch did NOT itself open/close a scene. This is a logged
     //     best-guess, not a clean floor — see the false-positive tradeoff in
-    //     docs/30-v0.6.10-milestone.md (a lone NPC stepping out can drag the
+    //     docs/plans/milestones/v0.6.10.md (a lone NPC stepping out can drag the
     //     cursor); recovery is the console.warn + inspector edit, and the
     //     auto-opened scene is cheaply reversible (synthesised title, no
     //     summary, prior scene auto-closed not deleted).
