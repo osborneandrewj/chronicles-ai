@@ -239,7 +239,7 @@ Seven specialized agents, each with a distinct role and model tier:
 
 Agents communicate through the pipeline, not directly with each other. The Conductor is the runtime supervisor — it decides which agents run and in what order during play. In the MVP, the pipeline is hardcoded (narrator only); the Conductor adds dynamic decision-making in Phase 4.
 
-See [Agent System Design](03-agent-system-design.md) for detailed agent specifications.
+See [Agent System Design](agent-system-design.md) for detailed agent specifications.
 
 ### 2.4.1 Living World / Offscreen Agency
 
@@ -296,7 +296,7 @@ Reserved (output):                                1,024 tokens
 
 **Truncation order (load-bearing rule):** if the assembled context exceeds 8,000 tokens, drop from lowest priority upward. The **system prompt (P1), authoritative state (P2), and player action (P9) are never truncated** — they are the minimum viable prompt. P8 (recent raw turns) is truncated oldest-first; P6/P7 are truncated lowest-relevance-first. If, after dropping P3-P8 entirely, the remainder still exceeds 8,000 tokens, fail the call with a `ContextOverflowError` rather than silently truncating a mandatory section.
 
-See [Memory Architecture](04-memory-architecture.md) for the full retrieval pipeline design.
+See [Memory Architecture](memory-architecture.md) for the full retrieval pipeline design.
 
 ### 2.6 Data Layer
 
@@ -308,7 +308,7 @@ All persistent state lives in a single PostgreSQL instance with the pgvector ext
 
 No separate vector database. No Redis. No message queue. One database, one ORM, one source of truth. Operational simplicity for a solo developer.
 
-See [Database Design](02-database-design.md) for the full schema.
+See [Database Design](database-design.md) for the full schema.
 
 ## 3. Infrastructure Topology
 

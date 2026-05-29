@@ -99,7 +99,7 @@ Tell the new agent: **don't fix anything until you can run the dev server and re
 - `src/lib/sentence-splitter.ts` — `splitNewChunks` (paragraph-first, 600-char soft cap)
 - `src/app/api/chat/route.ts` — narrator stream endpoint
 - `src/app/api/tts/route.ts` — TTS endpoint (xAI)
-- `docs/16-v0.5.1-audio-chunking.md` — the chunking spec landed in `8b05352`
+- `docs/plans/milestones/v0.5.1-audio-chunking.md` — the chunking spec landed in `8b05352`
 
 ## Don'ts
 

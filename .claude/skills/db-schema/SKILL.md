@@ -9,7 +9,7 @@ paths:
   - "**/schema*"
 ---
 
-> **MVP sprint override (active until exit criteria in `docs/10-mvp-sprint.md` are met).**
+> **MVP sprint override (active until exit criteria in `docs/plans/milestones/mvp-sprint.md` are met).**
 > During the MVP sprint the conventions below are intentionally relaxed:
 > - SQLite via raw `better-sqlite3` (no Postgres, no Drizzle, no migrations)
 > - Single `turns(id, role, content, created_at)` table; `id` is INTEGER PRIMARY KEY AUTOINCREMENT

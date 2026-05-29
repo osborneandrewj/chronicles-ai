@@ -2,14 +2,14 @@
 
 AI-powered multiplayer interactive novel engine. Persistent world, multi-agent narrator system, living wiki + timeline.
 
-> **MVP sprint in progress** (target 2026-05-25). Until the exit criteria in `docs/10-mvp-sprint.md` are met, the stack and rules in this file describe the **post-sprint target**, not what's being built right now. Sprint reality: SQLite + raw `better-sqlite3`, no Drizzle, no migrations, no Docker; one `turns` table with autoincrement `id`; one streaming `POST /api/chat` route; Claude **Sonnet 4.6** (`claude-sonnet-4-6`); no auth, no rate limiting, no test suite. Read `docs/10-mvp-sprint.md` for the explicit cuts and accepted tradeoffs before suggesting anything from the long-term stack below.
+> **MVP sprint in progress** (target 2026-05-25). Until the exit criteria in `docs/plans/milestones/mvp-sprint.md` are met, the stack and rules in this file describe the **post-sprint target**, not what's being built right now. Sprint reality: SQLite + raw `better-sqlite3`, no Drizzle, no migrations, no Docker; one `turns` table with autoincrement `id`; one streaming `POST /api/chat` route; Claude **Sonnet 4.6** (`claude-sonnet-4-6`); no auth, no rate limiting, no test suite. Read `docs/plans/milestones/mvp-sprint.md` for the explicit cuts and accepted tradeoffs before suggesting anything from the long-term stack below.
 
 Architecture and design detail lives in `docs/` — read the relevant doc before non-trivial changes:
-- `docs/01-system-architecture.md` — overall structure, project layout
-- `docs/02-database-design.md` — full schema
-- `docs/03-agent-system-design.md` — agent roster, prompts, context flow
-- `docs/04-memory-architecture.md` — memory chunks, retrieval, embeddings
-- `docs/07-implementation-roadmap.md` — phased plan, current phase
+- `docs/specs/system-architecture.md` — overall structure, project layout
+- `docs/specs/database-design.md` — full schema
+- `docs/specs/agent-system-design.md` — agent roster, prompts, context flow
+- `docs/specs/memory-architecture.md` — memory chunks, retrieval, embeddings
+- `docs/plans/roadmap.md` — phased plan, current phase
 
 ## Working autonomy
 
@@ -77,7 +77,7 @@ Whenever you bump the project version:
 1. **Bump on the release branch, not post-merge.** Same branch as the release PR, ideally as the first or last commit. Never on `main` after the merge — that creates a window where prod runs new code under the old version string.
 2. **Bump both files.** `package.json` *and* `package-lock.json` (both the top-level `"version"` and the one under `"packages": { "": { ... } }`). Single commit. Don't rely on `npm install` to fix the lockfile after the fact.
 3. **Restart the dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev` and start it again, then visually confirm the header on `/` shows the new version. Same goes for Railway: a redeploy is required.
-4. **Update the milestone exit criteria.** Each milestone doc lists "`package.json` reads `vX.Y.Z` on the release branch" as an exit criterion — keep that pattern (see `docs/_template-milestone.md`).
+4. **Update the milestone exit criteria.** Each milestone doc lists "`package.json` reads `vX.Y.Z` on the release branch" as an exit criterion — keep that pattern (see `docs/plans/_template-milestone.md`).
 
 If you ever see the header showing a different version than `package.json` on disk, the dev server is stale — restart it.
 
