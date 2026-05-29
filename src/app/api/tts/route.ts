@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import { getCachedTtsAudio, storeCachedTtsAudio } from '@/lib/db'
-import { normalizeVoiceId, streamSpeech, TTS_MODEL_KEY, TtsError } from '@/lib/tts'
+import { normalizeVoiceId, streamSpeech, TTS_MODEL_KEY, TtsError, warmConnection } from '@/lib/tts'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -18,6 +18,14 @@ interface TtsRequestBody {
 }
 
 export async function POST(req: Request) {
+  // Pre-warm path: fired on player submit to overlap xAI's DNS/TLS/cold-start
+  // tax with narrator generation. Non-billable — warmConnection never reaches
+  // synthesis. Returns 204 immediately; the warm runs detached.
+  if (new URL(req.url).searchParams.get('warm') === '1') {
+    void warmConnection()
+    return new Response(null, { status: 204 })
+  }
+
   let body: TtsRequestBody
   try {
     body = (await req.json()) as TtsRequestBody

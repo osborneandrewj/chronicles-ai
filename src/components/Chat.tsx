@@ -261,6 +261,7 @@ export function Chat({
     muted,
     setMuted,
     status: audioStatus,
+    progress: audioProgress,
     activeTurnId: audioTurnId,
     primeAudio,
     replay,
@@ -276,6 +277,13 @@ export function Chat({
     const text = input.trim();
     if (!text || busy) return;
     primeAudio();
+    // Pre-warm xAI's connection (non-billable) in parallel with generation, so
+    // the first synthesis isn't paying DNS/TLS/cold-start on the critical path.
+    // Skip for muted sessions (no synthesis coming) and meta-commands (no
+    // narration). Exactly one warm per narration-producing submit.
+    if (!muted && !text.startsWith("/")) {
+      void fetch("/api/tts?warm=1", { method: "POST" }).catch(() => {});
+    }
     sendMessage({ text, metadata: { createdAt: new Date().toISOString() } });
     setInput("");
     setStickToBottom(true);
@@ -439,10 +447,10 @@ export function Chat({
             // that resolved id rather than the AI SDK `msg-…` id.
             const dbId = m.role === "assistant" ? effectiveDbTurnId(m) : undefined;
             const dbIdStr = dbId !== undefined ? String(dbId) : undefined;
-            const turnAudioStatus =
-              m.role === "assistant" && dbIdStr !== undefined && dbIdStr === audioTurnId
-                ? audioStatus
-                : "idle";
+            const isAudioTurn =
+              m.role === "assistant" && dbIdStr !== undefined && dbIdStr === audioTurnId;
+            const turnAudioStatus = isAudioTurn ? audioStatus : "idle";
+            const turnAudioProgress = isAudioTurn ? audioProgress : null;
             const text = messageText(m);
             const createdAt = m.metadata?.createdAt;
             const prevUser = m.role === "assistant" ? findPrevUser(messages, idx) : undefined;
@@ -458,6 +466,7 @@ export function Chat({
                     text={text}
                     streaming={isStreamingThis}
                     audioStatus={turnAudioStatus}
+                    audioProgress={turnAudioProgress}
                     cost={cost}
                     canReplay={canReplay}
                     replayDisabled={muted}
@@ -605,10 +614,45 @@ function UserTurn({ text, createdAt }: { text: string; createdAt: string | undef
   );
 }
 
+function AudioProgressBar({
+  status,
+  progress,
+}: {
+  status: "idle" | "loading" | "speaking";
+  progress: number | null;
+}) {
+  if (status === "idle") return null;
+  // Determinate once we're playing and the active clip's duration is known;
+  // otherwise (prep, or a progressive stream whose duration hasn't resolved) an
+  // honest indeterminate sweep rather than a fake percentage.
+  const determinate = status === "speaking" && progress !== null;
+  const pct = determinate ? Math.round((progress ?? 0) * 100) : undefined;
+  return (
+    <div
+      role="progressbar"
+      aria-label={status === "loading" ? "Preparing narrator audio" : "Narrator playback progress"}
+      aria-valuemin={0}
+      aria-valuemax={determinate ? 100 : undefined}
+      aria-valuenow={pct}
+      className="mt-1.5 h-0.5 w-full max-w-56 overflow-hidden rounded-full bg-neutral-800"
+    >
+      {determinate ? (
+        <div
+          className="h-full rounded-full bg-amber-500/80 transition-[width] duration-150 ease-linear"
+          style={{ width: `${pct}%` }}
+        />
+      ) : (
+        <div className="chronicles-audio-sweep h-full w-1/3 rounded-full bg-amber-500/70" />
+      )}
+    </div>
+  );
+}
+
 function NarratorTurn({
   text,
   streaming,
   audioStatus,
+  audioProgress,
   cost,
   canReplay,
   replayDisabled,
@@ -617,6 +661,7 @@ function NarratorTurn({
   text: string;
   streaming: boolean;
   audioStatus: "idle" | "loading" | "speaking";
+  audioProgress: number | null;
   cost: TurnCost | undefined;
   canReplay: boolean;
   replayDisabled: boolean;
@@ -640,6 +685,7 @@ function NarratorTurn({
           </span>
         )}
       </div>
+      <AudioProgressBar status={audioStatus} progress={audioProgress} />
       <div className="mt-1.5 whitespace-pre-wrap font-serif text-[17px] leading-[1.8] text-neutral-100">
         {text}
         {streaming && <span className="chronicles-cursor text-amber-500/70" />}

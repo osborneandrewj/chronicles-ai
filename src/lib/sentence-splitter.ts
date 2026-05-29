@@ -15,6 +15,14 @@ export interface SplitResult {
 
 export interface SplitOptions {
   flush?: boolean
+  // First-chunk overlap mode. When set, splitNewChunks emits AT MOST ONE chunk:
+  // the text up to the first paragraph boundary whose accumulated content
+  // reaches `minChars` (leading sub-minChars paragraphs are coalesced into it).
+  // There is deliberately NO soft-cap forced cut in this mode, so the chunk-1
+  // boundary is identical whether computed from a partial stream or the full
+  // text on replay — which is what makes replay a cache hit. On flush, the
+  // entire remainder is emitted as a single chunk (the prosodically-whole tail).
+  minChars?: number
 }
 
 export function splitNewChunks(
@@ -23,6 +31,11 @@ export function splitNewChunks(
   options: SplitOptions = {},
 ): SplitResult {
   const flush = options.flush ?? false
+
+  if (options.minChars !== undefined) {
+    return splitFirstChunk(text, cursor, options.minChars, flush)
+  }
+
   const chunks: string[] = []
   let pos = cursor
 
@@ -59,6 +72,35 @@ export function splitNewChunks(
   }
 
   return { chunks, cursor: pos }
+}
+
+// First-chunk overlap extractor (see SplitOptions.minChars). On flush, returns
+// the whole remainder as one chunk. Otherwise returns the slice up to the first
+// paragraph boundary at/after `minChars`, or nothing if no such boundary has
+// arrived yet. No soft-cap subdivision: the boundary must be a real paragraph
+// break so the decision is deterministic across partial-stream and full-text.
+function splitFirstChunk(
+  text: string,
+  cursor: number,
+  minChars: number,
+  flush: boolean,
+): SplitResult {
+  if (flush) {
+    const piece = text.slice(cursor).trim()
+    return { chunks: piece ? [piece] : [], cursor: text.length }
+  }
+
+  const re = new RegExp(PARAGRAPH_BOUNDARY.source, 'g')
+  re.lastIndex = cursor
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const piece = text.slice(cursor, m.index).trim()
+    if (piece.length >= minChars) {
+      return { chunks: [piece], cursor: m.index + m[0].length }
+    }
+  }
+
+  return { chunks: [], cursor }
 }
 
 // Subdivide a paragraph that exceeds the soft cap into sentence-bounded

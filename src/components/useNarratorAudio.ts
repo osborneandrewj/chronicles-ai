@@ -2,9 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { splitNewChunks } from "@/lib/sentence-splitter";
+
 const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
 const PRIME_AUDIO_SECONDS = 0.05;
 const PROGRESSIVE_AUDIO_MIME = "audio/mpeg";
+// First-chunk overlap floor: the opening chunk synthesized mid-stream extends to
+// the first paragraph boundary at or after this many characters, so it's a real
+// prosodic unit rather than a one-line opener with a huge tail. Tunable.
+const FIRST_CHUNK_MIN_CHARS = 280;
+const TTFA_DEBUG = process.env.NODE_ENV !== "production";
 
 export type NarratorAudioStatus = "idle" | "loading" | "speaking";
 
@@ -29,9 +36,23 @@ interface UseNarratorAudioReturn {
   muted: boolean;
   setMuted: (next: boolean) => void;
   status: NarratorAudioStatus;
+  // Audio progress: null during the prep window (indeterminate "preparing"
+  // state) and once idle; 0..1 during playback (determinate bar). xAI's chunked
+  // MP3 transfer has no Content-Length, so prep can't be a true percentage.
+  progress: number | null;
   activeTurnId: string | undefined;
   primeAudio: () => void;
   replay: (turnId: string, text: string) => void;
+}
+
+// TTFA breakdown for the first streamed chunk (dev-only). Lets us see whether
+// the bottleneck is the network round-trip or xAI synthesis, and confirm the
+// overlap actually fired mid-stream — see v0.6.12 milestone exit criterion 4.
+interface TtfaMarks {
+  requestedAt: number;
+  firstByteAt: number | null;
+  contentLength: string | null;
+  overlapped: boolean;
 }
 
 interface JobState {
@@ -45,10 +66,24 @@ interface JobState {
   controllers: Set<AbortController>;
   flushed: boolean;
   charsSent: number;
+  // First-chunk overlap bookkeeping. firstChunkSent flips once the opening chunk
+  // has been dispatched (mid-stream or, for short turns/replay, at flush);
+  // tailSent flips once the remainder has been dispatched. Together they make
+  // each turn fire exactly the [chunk1, tail] pair (or a single chunk for short
+  // turns), with at most one prosodic seam.
+  firstChunkSent: boolean;
+  tailSent: boolean;
   sourceNode: AudioBufferSourceNode | null;
+  // Web Audio playback clock for the determinate progress bar: the context time
+  // at which the current buffer started, plus its duration. The media-element
+  // and progressive paths read currentTime/duration off the shared element.
+  audioStartedAt: number | null;
+  audioClipDuration: number | null;
   mediaUrl: string | null;
   mediaSource: MediaSource | null;
   failed: boolean;
+  ttfa: TtfaMarks | null;
+  ttfaLogged: boolean;
 }
 
 function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): JobState {
@@ -63,10 +98,16 @@ function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): 
     controllers: new Set(),
     flushed: false,
     charsSent: 0,
+    firstChunkSent: false,
+    tailSent: false,
     sourceNode: null,
+    audioStartedAt: null,
+    audioClipDuration: null,
     mediaUrl: null,
     mediaSource: null,
     failed: false,
+    ttfa: null,
+    ttfaLogged: false,
   };
 }
 
@@ -86,6 +127,7 @@ export function useNarratorAudio({
 }: UseNarratorAudioArgs): UseNarratorAudioReturn {
   const [muted, setMutedState] = useState<boolean>(false);
   const [status, setStatus] = useState<NarratorAudioStatus>("idle");
+  const [progress, setProgress] = useState<number | null>(null);
   const [override, setOverride] = useState<Override | null>(null);
   const jobRef = useRef<JobState | null>(null);
   const mutedRef = useRef(false);
@@ -254,12 +296,16 @@ export function useNarratorAudio({
     source.buffer = clip.buffer;
     source.connect(ctx.destination);
     j.sourceNode = source;
+    j.audioStartedAt = ctx.currentTime;
+    j.audioClipDuration = clip.buffer.duration;
     setStatus("speaking");
     source.onended = () => {
       const cur = jobRef.current;
       if (!cur || cur !== j) return;
       source.disconnect();
       cur.sourceNode = null;
+      cur.audioStartedAt = null;
+      cur.audioClipDuration = null;
       cur.playSeq += 1;
       void playNext();
     };
@@ -278,6 +324,18 @@ export function useNarratorAudio({
       if (owner.failed) return;
       const controller = new AbortController();
       owner.controllers.add(controller);
+      // Instrument only the opening streamed chunk — that's what time-to-first-
+      // audio is now. `overlapped` records whether it was dispatched while the
+      // narrator was still streaming (the win we're after).
+      const isFirstStreamed = seq === 0 && owner.source === "stream";
+      if (isFirstStreamed) {
+        owner.ttfa = {
+          requestedAt: now(),
+          firstByteAt: null,
+          contentLength: null,
+          overlapped: !owner.flushed,
+        };
+      }
       try {
         if (!mutedRef.current) setStatus("loading");
         const res = await fetch("/api/tts", {
@@ -291,6 +349,10 @@ export function useNarratorAudio({
           }),
           signal: controller.signal,
         });
+        if (isFirstStreamed && owner.ttfa) {
+          owner.ttfa.firstByteAt = now();
+          owner.ttfa.contentLength = res.headers.get("Content-Length");
+        }
         if (!res.ok) {
           setStatus("idle");
           markFailed(owner, `[narrator-audio] /api/tts ${res.status} ${await safeText(res)}`);
@@ -367,24 +429,113 @@ export function useNarratorAudio({
 
     const j = jobRef.current;
     if (!j) return;
-    if (effective.streaming) return;
+    if (mutedRef.current || j.failed) return;
 
+    const text = effective.text;
+
+    if (effective.streaming) {
+      // First-chunk overlap: the moment the first paragraph boundary at/after
+      // the floor lands, synthesize that opening chunk while the narrator keeps
+      // streaming. At most one chunk fires mid-stream — the rest waits for flush
+      // so the tail stays a single continuous read (one seam, not N).
+      if (!j.firstChunkSent) {
+        const { chunks, cursor } = splitNewChunks(text, j.cursor, {
+          minChars: FIRST_CHUNK_MIN_CHARS,
+        });
+        const chunk = chunks[0];
+        if (chunk) {
+          j.cursor = cursor;
+          j.firstChunkSent = true;
+          void fetchChunk(chunk, j.nextSeq++, j);
+        }
+      }
+      return;
+    }
+
+    // Stream ended, or this is a replay. Flush into the same deterministic
+    // [chunk1, tail] split the live turn cached, so a replay reproduces both
+    // hashes and hits v0.6.11's cache (free replay, no extra synthesis).
     j.flushed = true;
-    const fullText = effective.text.trim();
-    if (j.cursor === 0) {
-      j.cursor = effective.text.length;
-      if (fullText && !mutedRef.current && !j.failed) {
-        const seq = j.nextSeq++;
-        void fetchChunk(fullText, seq, j);
+
+    // Resolve chunk 1 from the complete text for turns whose boundary never
+    // arrived mid-stream and for replays. The boundary is identical to the live
+    // decision, so the chunk1 hash matches.
+    if (!j.firstChunkSent) {
+      const { chunks, cursor } = splitNewChunks(text, j.cursor, {
+        minChars: FIRST_CHUNK_MIN_CHARS,
+      });
+      const chunk = chunks[0];
+      if (chunk) {
+        j.cursor = cursor;
+        j.firstChunkSent = true;
+        void fetchChunk(chunk, j.nextSeq++, j);
       }
     }
 
-    if (!effective.streaming && j.flushed && j.nextSeq === j.playSeq && !j.sourceNode && !j.mediaUrl) {
+    // The remainder is one chunk — the prosodically-whole tail. (For a short
+    // single-paragraph turn no chunk1 fired, so this is the entire turn as one
+    // chunk, byte-identical to v0.6.11's single-hash cache entry.)
+    if (!j.tailSent) {
+      const { chunks, cursor } = splitNewChunks(text, j.cursor, {
+        minChars: FIRST_CHUNK_MIN_CHARS,
+        flush: true,
+      });
+      j.cursor = cursor;
+      j.tailSent = true;
+      const tail = chunks[0];
+      if (tail) {
+        void fetchChunk(tail, j.nextSeq++, j);
+      }
+    }
+
+    if (j.flushed && j.nextSeq === j.playSeq && !j.sourceNode && !j.mediaUrl) {
       setStatus("idle");
       playedRef.current.add(j.turnId);
       if (j.source === "replay") setOverride(null);
     }
   }, [effective, fetchChunk, resetJob]);
+
+  // Determinate playback progress. While speaking, sample the active clip's
+  // position each frame (currentTime/duration for the media paths, an elapsed/
+  // duration clock for Web Audio). Outside playback, progress is null so the UI
+  // falls back to the indeterminate "preparing" state.
+  useEffect(() => {
+    if (status !== "speaking") {
+      setProgress(null);
+      return;
+    }
+    let raf = 0;
+    let last = -1;
+    const tick = () => {
+      const next = jobRef.current ? computeProgress(jobRef.current) : null;
+      // Only re-render on a meaningful change to avoid 60fps state churn.
+      if (next === null ? last !== -1 : Math.abs(next - last) >= 0.005) {
+        last = next ?? -1;
+        setProgress(next);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [status]);
+
+  // Dev-only TTFA breakdown, logged once per streamed turn the first time it
+  // reaches playback. See v0.6.12 milestone exit criterion 4.
+  useEffect(() => {
+    if (!TTFA_DEBUG || status !== "speaking") return;
+    const j = jobRef.current;
+    if (!j || j.source !== "stream" || j.ttfaLogged || !j.ttfa || j.ttfa.firstByteAt === null) {
+      return;
+    }
+    j.ttfaLogged = true;
+    const { requestedAt, firstByteAt, contentLength, overlapped } = j.ttfa;
+    const reqToByte = Math.round(firstByteAt - requestedAt);
+    const byteToAudio = Math.round(now() - firstByteAt);
+    console.info(
+      `[narrator-audio][ttfa] request→firstByte=${reqToByte}ms firstByte→firstAudio=${byteToAudio}ms ` +
+        `content-length=${contentLength ?? "none"} overlapped=${overlapped}`,
+    );
+  }, [status]);
 
   const setMuted = useCallback(
     (next: boolean) => {
@@ -430,7 +581,38 @@ export function useNarratorAudio({
 
   const activeTurnId = jobRef.current && status !== "idle" ? jobRef.current.turnId : undefined;
 
-  return { muted, setMuted, status, activeTurnId, primeAudio, replay };
+  return { muted, setMuted, status, progress, activeTurnId, primeAudio, replay };
+}
+
+function now(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+// Read the active clip's playback fraction (0..1), or null if it can't be
+// determined yet (e.g. a progressive stream whose duration is still unknown —
+// the UI shows indeterminate until it resolves).
+function computeProgress(job: JobState): number | null {
+  const audio = sharedMediaElement;
+  if (job.mediaUrl && audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+    return clamp01(audio.currentTime / audio.duration);
+  }
+  if (
+    job.sourceNode &&
+    job.audioStartedAt !== null &&
+    job.audioClipDuration &&
+    sharedAudioContext &&
+    sharedAudioContext.state !== "closed"
+  ) {
+    return clamp01((sharedAudioContext.currentTime - job.audioStartedAt) / job.audioClipDuration);
+  }
+  return null;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
 }
 
 async function playProgressiveMediaResponse(
