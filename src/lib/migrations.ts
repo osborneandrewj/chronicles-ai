@@ -651,6 +651,71 @@ export const migrations: Migration[] = [
       `)
     },
   },
+  {
+    // v0.6.13 — Living Place Simulation v1. Places generate a bounded,
+    // deterministic occupancy snapshot (crowds, staff, traffic) plus latent
+    // encounter hooks that bridge the ambient world to the story dossier.
+    // story_threads gain relevance_tags_json so the deterministic matcher can
+    // connect an active thread to a place/occupant by tag overlap.
+    version: 22,
+    name: 'living_place_simulation',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE place_profiles (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id              INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          place_id              INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+          profile_kind          TEXT NOT NULL,
+          capacity_min          INTEGER NOT NULL DEFAULT 0,
+          capacity_max          INTEGER NOT NULL DEFAULT 6,
+          typical_roles_json    TEXT NOT NULL DEFAULT '[]',
+          open_hours_json       TEXT,
+          traffic_level         TEXT NOT NULL DEFAULT 'medium'
+                                CHECK (traffic_level IN ('none','low','medium','high','surge')),
+          ambience_tags_json    TEXT NOT NULL DEFAULT '[]',
+          match_tags_json       TEXT NOT NULL DEFAULT '[]',
+          encounter_rules_json  TEXT NOT NULL DEFAULT '[]',
+          created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(world_id, place_id)
+        );
+
+        CREATE TABLE population_templates (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id              INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          place_profile_kind    TEXT,
+          role                  TEXT NOT NULL,
+          label                 TEXT NOT NULL,
+          description           TEXT,
+          behavior_tags_json    TEXT NOT NULL DEFAULT '[]',
+          match_tags_json       TEXT NOT NULL DEFAULT '[]',
+          seed_premise          TEXT,
+          promotable            INTEGER NOT NULL DEFAULT 0,
+          weight                INTEGER NOT NULL DEFAULT 1,
+          created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE place_occupancy_snapshots (
+          id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id              INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          place_id              INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+          scene_id              INTEGER REFERENCES scenes(id) ON DELETE SET NULL,
+          source_turn_id        INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          world_time            TEXT,
+          occupancy_json        TEXT NOT NULL,
+          created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX place_profiles_world_place ON place_profiles(world_id, place_id);
+        CREATE INDEX population_templates_world_role ON population_templates(world_id, role);
+        CREATE INDEX occupancy_world_place_scene ON place_occupancy_snapshots(world_id, place_id, scene_id, id);
+      `)
+      // SQLite permits ALTER TABLE ADD COLUMN with a non-NULL default only when
+      // the default is a literal constant. '[]' qualifies. No REFERENCES here.
+      db.exec("ALTER TABLE story_threads ADD COLUMN relevance_tags_json TEXT NOT NULL DEFAULT '[]'")
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run
