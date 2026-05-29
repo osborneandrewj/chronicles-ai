@@ -1,3 +1,5 @@
+import type { PopulationTemplateRow } from '@/lib/db'
+
 // ---------------------------------------------------------------------------
 // Public types. occupancy is persisted as JSON and fed (compactly) to the
 // narrator; match-tags live only in code/templates and are never persisted on
@@ -139,4 +141,160 @@ function classify(name: string, kind: string | null): string {
 export function inferPlaceProfile(place: { name: string; kind: string | null }): InferredProfile {
   const profileKind = classify(place.name, place.kind)
   return { profileKind, ...PROFILE_DEFS[profileKind] }
+}
+
+// Built-in templates keyed by profile kind. Used when a world has no DB-defined
+// population_templates for that kind, so occupancy works out of the box and is
+// deterministically testable. seed_premise !== null marks a SEED-hook carrier.
+const DEFAULT_TEMPLATES: Record<string, PopulationTemplate[]> = {
+  bar: [
+    { id: null, role: 'staff', label: 'a bartender working the rail', description: null, behavior_tags: ['attentive'], match_tags: ['bar', 'rumor', 'social'], seed_premise: 'The bartender quietly brokers introductions for the right customer.', promotable: true, weight: 3 },
+    { id: null, role: 'patrons', label: 'a clutch of off-shift workers', description: null, behavior_tags: ['loud'], match_tags: ['bar', 'social'], seed_premise: null, promotable: false, weight: 4 },
+    { id: null, role: 'regulars', label: 'a lone regular nursing a drink', description: null, behavior_tags: ['watchful'], match_tags: ['bar', 'rumor'], seed_premise: 'The regular has been waiting for someone to ask the right question.', promotable: true, weight: 2 },
+  ],
+  restaurant: [
+    { id: null, role: 'staff', label: 'a harried server', description: null, behavior_tags: ['busy'], match_tags: ['restaurant', 'service'], seed_premise: null, promotable: true, weight: 3 },
+    { id: null, role: 'diners', label: 'a table of diners mid-meal', description: null, behavior_tags: ['absorbed'], match_tags: ['restaurant', 'social'], seed_premise: null, promotable: false, weight: 4 },
+  ],
+  cafe: [
+    { id: null, role: 'staff', label: 'a barista at the machine', description: null, behavior_tags: ['steady'], match_tags: ['cafe', 'coffee'], seed_premise: null, promotable: true, weight: 3 },
+    { id: null, role: 'patrons', label: 'a laptop worker in the corner', description: null, behavior_tags: ['absorbed'], match_tags: ['cafe', 'work'], seed_premise: null, promotable: false, weight: 3 },
+  ],
+  hospital: [
+    { id: null, role: 'staff', label: 'a charge nurse at the station', description: null, behavior_tags: ['guarded'], match_tags: ['hospital', 'records', 'authority'], seed_premise: 'The nurse knows which charts are missing and why.', promotable: true, weight: 3 },
+    { id: null, role: 'patients', label: 'patients waiting on hard chairs', description: null, behavior_tags: ['anxious'], match_tags: ['hospital', 'sick'], seed_premise: null, promotable: false, weight: 3 },
+    { id: null, role: 'visitors', label: 'a visitor pacing the corridor', description: null, behavior_tags: ['restless'], match_tags: ['hospital'], seed_premise: null, promotable: false, weight: 2 },
+  ],
+  office: [
+    { id: null, role: 'staff', label: 'a receptionist screening arrivals', description: null, behavior_tags: ['formal'], match_tags: ['office', 'records'], seed_premise: 'The receptionist controls who gets past the front desk.', promotable: true, weight: 3 },
+    { id: null, role: 'visitors', label: 'a courier waiting for a signature', description: null, behavior_tags: ['impatient'], match_tags: ['office'], seed_premise: null, promotable: false, weight: 2 },
+  ],
+  market: [
+    { id: null, role: 'vendors', label: 'a vendor calling prices', description: null, behavior_tags: ['loud'], match_tags: ['market', 'trade', 'rumor'], seed_premise: 'The vendor trades gossip as readily as goods.', promotable: true, weight: 3 },
+    { id: null, role: 'shoppers', label: 'shoppers haggling at the stalls', description: null, behavior_tags: ['busy'], match_tags: ['market', 'crowd'], seed_premise: null, promotable: false, weight: 4 },
+  ],
+  road: [
+    { id: null, role: 'drivers', label: 'passing drivers behind glass', description: null, behavior_tags: ['transient'], match_tags: ['road', 'vehicle'], seed_premise: null, promotable: false, weight: 4 },
+    { id: null, role: 'pedestrians', label: 'a pedestrian waiting to cross', description: null, behavior_tags: ['hurried'], match_tags: ['road', 'travel'], seed_premise: null, promotable: false, weight: 2 },
+  ],
+  transit: [
+    { id: null, role: 'commuters', label: 'commuters checking the board', description: null, behavior_tags: ['impatient'], match_tags: ['transit', 'commute', 'crowd'], seed_premise: null, promotable: false, weight: 4 },
+    { id: null, role: 'staff', label: 'an attendant near the gates', description: null, behavior_tags: ['watchful'], match_tags: ['transit', 'authority'], seed_premise: null, promotable: true, weight: 2 },
+  ],
+  park: [
+    { id: null, role: 'visitors', label: 'a dog-walker on the path', description: null, behavior_tags: ['relaxed'], match_tags: ['park', 'outdoor'], seed_premise: null, promotable: false, weight: 3 },
+  ],
+  generic: [
+    { id: null, role: 'bystanders', label: 'a few unremarkable bystanders', description: null, behavior_tags: ['incidental'], match_tags: ['public'], seed_premise: null, promotable: false, weight: 3 },
+  ],
+}
+
+function parseTags(json: string): string[] {
+  try {
+    const v = JSON.parse(json)
+    return Array.isArray(v) ? v.map(String) : []
+  } catch {
+    return []
+  }
+}
+
+// DB-defined templates for the world override built-ins of the same kind;
+// otherwise fall back to the built-in set. Always returns at least one.
+export function resolveTemplates(
+  rows: PopulationTemplateRow[],
+  profileKind: string,
+): PopulationTemplate[] {
+  if (rows.length > 0) {
+    return rows.map((r) => ({
+      id: r.id,
+      role: r.role,
+      label: r.label,
+      description: r.description,
+      behavior_tags: parseTags(r.behavior_tags_json),
+      match_tags: parseTags(r.match_tags_json),
+      seed_premise: r.seed_premise,
+      promotable: r.promotable === 1,
+      weight: r.weight,
+    }))
+  }
+  return DEFAULT_TEMPLATES[profileKind] ?? DEFAULT_TEMPLATES.generic
+}
+
+const TRAFFIC_TARGET: Record<InferredProfile['trafficLevel'], number> = {
+  none: 0,
+  low: 2,
+  medium: 4,
+  high: 7,
+  surge: 11,
+}
+
+export function densityForCount(count: number, capacityMax: number): OccupancyDensity {
+  if (count <= 0) return 'empty'
+  const ratio = capacityMax > 0 ? count / capacityMax : 0
+  if (ratio < 0.25) return 'sparse'
+  if (ratio < 0.5) return 'moderate'
+  if (ratio < 0.85) return 'busy'
+  return 'packed'
+}
+
+function weightedPick(
+  templates: PopulationTemplate[],
+  rng: () => number,
+): PopulationTemplate {
+  const total = templates.reduce((n, t) => n + Math.max(1, t.weight), 0)
+  let r = rng() * total
+  for (const t of templates) {
+    r -= Math.max(1, t.weight)
+    if (r <= 0) return t
+  }
+  return templates[templates.length - 1]
+}
+
+export type GroupSource = { groupId: string; template: PopulationTemplate }
+
+// Build bounded occupancy groups. Each iteration picks a template (weighted),
+// emits one group with a small count, and stops at the capacity target or 6
+// groups. Returns the parallel template sources so the hook matcher can read
+// each present occupant's match-tags without persisting them.
+export function buildGroups(
+  profile: InferredProfile,
+  templates: PopulationTemplate[],
+  rng: () => number,
+): { groups: OccupancyGroup[]; sources: GroupSource[]; total: number } {
+  const target = Math.min(
+    Math.max(TRAFFIC_TARGET[profile.trafficLevel], profile.capacityMin),
+    profile.capacityMax,
+  )
+  const groups: OccupancyGroup[] = []
+  const sources: GroupSource[] = []
+  let placed = 0
+  let i = 0
+  while (placed < target && groups.length < 6 && templates.length > 0) {
+    const template = weightedPick(templates, rng)
+    const remaining = target - placed
+    const count = Math.max(1, Math.min(remaining, 1 + Math.floor(rng() * 3)))
+    const groupId = `occ_${i + 1}`
+    const visibility: OccupantVisibility = template.promotable ? 'available' : 'background'
+    groups.push({
+      id: groupId,
+      label: count > 1 ? pluralizeLabel(template.label, count) : template.label,
+      role: template.role,
+      count,
+      visibility,
+      behavior: template.behavior_tags[0] ?? 'present',
+      promotable: template.promotable,
+      template_id: template.id,
+    })
+    sources.push({ groupId, template })
+    placed += count
+    i++
+  }
+  return { groups, sources, total: placed }
+}
+
+function pluralizeLabel(label: string, count: number): string {
+  // Templates whose labels already read as plural ("patrons", "shoppers")
+  // pass through; singular labels get a leading count for crowds.
+  if (/^(a|an|the)\s/i.test(label)) return `${count} ${label.replace(/^(a|an|the)\s/i, '')}`
+  return label
 }

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { hashSeed, inferPlaceProfile, mulberry32 } from '@/lib/place-population'
+import { buildGroups, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
 import {
   db,
   getLatestOccupancySnapshotRow,
@@ -112,5 +112,31 @@ describe('profile inference', () => {
   it('falls back to generic for unrecognized places', () => {
     const p = inferPlaceProfile({ name: 'A featureless void', kind: null })
     expect(p.profileKind).toBe('generic')
+  })
+})
+
+describe('group selection', () => {
+  it('respects capacity bounds and caps group count at 6', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const rng = mulberry32(hashSeed('seed-A'))
+    const { groups } = buildGroups(profile, templates, rng)
+    const total = groups.reduce((n, g) => n + g.count, 0)
+    expect(total).toBeLessThanOrEqual(profile.capacityMax)
+    expect(groups.length).toBeLessThanOrEqual(6)
+    expect(groups.every((g) => g.count >= 1)).toBe(true)
+  })
+
+  it('is stable for the same seed', () => {
+    const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
+    const templates = resolveTemplates([], profile.profileKind)
+    const first = buildGroups(profile, templates, mulberry32(hashSeed('seed-B'))).groups
+    const second = buildGroups(profile, templates, mulberry32(hashSeed('seed-B'))).groups
+    expect(second).toEqual(first)
+  })
+
+  it('maps counts to a density band', () => {
+    expect(densityForCount(0, 12)).toBe('empty')
+    expect(densityForCount(11, 12)).toBe('packed')
   })
 })
