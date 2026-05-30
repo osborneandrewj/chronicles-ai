@@ -20,7 +20,7 @@ import process from 'node:process'
 import Database from 'better-sqlite3'
 
 function parseArgs(argv) {
-  const args = { world: null, canonical: null, dupes: [], list: null, dryRun: false }
+  const args = { world: null, canonical: null, dupes: [], list: null, dryRun: false, detect: null }
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i]
     if (k === '--world') args.world = Number(argv[++i])
@@ -28,6 +28,7 @@ function parseArgs(argv) {
     else if (k === '--dupe') args.dupes.push(Number(argv[++i]))
     else if (k === '--list-world') args.list = Number(argv[++i])
     else if (k === '--dry-run') args.dryRun = true
+    else if (k === '--detect') args.detect = Number(argv[++i])
   }
   return args
 }
@@ -136,6 +137,55 @@ function filterAliasesAgainstName(raw, name) {
     out.push(trimmed)
   }
   return out.length > 0 ? out.join('\n') : null
+}
+
+// Mirror of src/lib/character-identity.ts + src/lib/character-dedup.ts. Keep in
+// sync with those if the rules change. NOTE: the name-key (near-identical-name)
+// rule is intentionally omitted here — the two rules below are sufficient for
+// CLI use.
+const ARTICLE_RE = /^(the|a|an)\s+/i
+const isDescriptorName = (name) => ARTICLE_RE.test((name ?? '').trim())
+const FACT_MIN_LEN = 25
+function distinctiveLines(text) {
+  if (!text) return new Set()
+  return new Set(
+    text
+      .split('\n')
+      .map((l) => l.replace(/\s*\[t:\d+\]\s*$/, '').trim().toLowerCase())
+      .filter((l) => l.length >= FACT_MIN_LEN),
+  )
+}
+function detectWorld(worldId) {
+  const db = openDb()
+  const chars = db
+    .prepare(
+      `SELECT id, name, is_player, current_place_id, status, memorable_facts, observations
+         FROM characters WHERE world_id = ? AND is_player = 0 AND status != 'dead' ORDER BY id`,
+    )
+    .all(worldId)
+  const pairs = []
+  for (let i = 0; i < chars.length; i++) {
+    for (let j = i + 1; j < chars.length; j++) {
+      const a = chars[i], b = chars[j]
+      let reason = null
+      if (a.current_place_id != null && a.current_place_id === b.current_place_id &&
+          isDescriptorName(a.name) !== isDescriptorName(b.name)) {
+        reason = 'descriptor + named at same place'
+      }
+      if (!reason) {
+        const al = new Set([...distinctiveLines(a.memorable_facts), ...distinctiveLines(a.observations)])
+        const bl = new Set([...distinctiveLines(b.memorable_facts), ...distinctiveLines(b.observations)])
+        for (const l of al) { if (bl.has(l)) { reason = 'shared memorable fact'; break } }
+      }
+      if (reason) pairs.push({ a, b, reason })
+    }
+  }
+  console.log(`[detect] ${pairs.length} candidate pair(s) in world ${worldId}`)
+  for (const { a, b, reason } of pairs) {
+    console.log(`  #${a.id} "${a.name}" ~ #${b.id} "${b.name}" — ${reason}`)
+    console.log(`    node scripts/merge-characters.mjs --world ${worldId} --canonical ${b.id} --dupe ${a.id}`)
+  }
+  db.close()
 }
 
 function mergeOne(db, worldId, canonicalId, dupeId, dryRun) {
@@ -258,6 +308,10 @@ function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.list !== null) {
     listWorld(args.list)
+    return
+  }
+  if (args.detect !== null) {
+    detectWorld(args.detect)
     return
   }
   if (args.world === null || args.canonical === null || args.dupes.length === 0) {
