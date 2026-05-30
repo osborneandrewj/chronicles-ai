@@ -715,6 +715,17 @@ export const migrations: Migration[] = [
       db.exec("ALTER TABLE story_threads ADD COLUMN relevance_tags_json TEXT NOT NULL DEFAULT '[]'")
     },
   },
+  {
+    // v0.6.16 — soft-archive worlds. `archived_at` is NULL for active worlds
+    // and an ISO timestamp once archived. Nullable with no default so every
+    // existing world stays active after the migration. Reversible: unarchiving
+    // sets it back to NULL.
+    version: 23,
+    name: 'world_archived_at',
+    up: (db) => {
+      db.exec('ALTER TABLE worlds ADD COLUMN archived_at TEXT')
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run
