@@ -348,6 +348,28 @@ describe('applyArchivistPatch', () => {
     expect(matches[0].aliases ?? '').toContain('The Attendant at the Gates')
   })
 
+  it('reveals_name_of renames a descriptor row to the proper name, no duplicate', () => {
+    applyArchivistPatch(worldId, turnId, {
+      characters: [{ name: 'The Attendant at the Gates', description: 'Station attendant.' }],
+    })
+    db.prepare(
+      "UPDATE characters SET agency_level = 'local' WHERE world_id = ? AND lower(name) = lower('The Attendant at the Gates')",
+    ).run(worldId)
+
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Jérôme Moreau', reveals_name_of: 'The Attendant at the Gates', active_goal: 'survive' },
+      ],
+    })
+
+    const matches = getCharactersForWorld(worldId).filter((c) =>
+      ['Jérôme Moreau', 'The Attendant at the Gates'].includes(c.name),
+    )
+    expect(matches).toHaveLength(1)
+    expect(matches[0].name).toBe('Jérôme Moreau')
+    expect(matches[0].agency_level).toBe('local')
+  })
+
   it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
     applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'gave the player a silver locket' }],
