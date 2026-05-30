@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { db } from '@/lib/db'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
+import type { PlaceOccupancy } from '@/lib/place-population'
 import { loadPrompt } from '@/lib/prompt-files'
 import type { NarratorWorldState } from '@/lib/world-state'
 
@@ -138,6 +139,10 @@ const StoryThreadPatchSchema = z.object({
     .string()
     .optional()
     .describe('Narrator-visible pressure that should influence events but not be exposed directly.'),
+  relevance_tags: z
+    .array(z.string())
+    .optional()
+    .describe('Lowercase topic + place-kind tags (e.g. "bar","docks","medical","courier") used to surface this thread where it is relevant. Tag the place kinds and subjects the protagonist would pursue it at. Emit 2-5 tags.'),
 })
 
 const StoryCluePatchSchema = z.object({
@@ -241,14 +246,35 @@ export function extractDeterministicPatch(
   }
 }
 
+function formatOccupancyForArchivist(occupancy: PlaceOccupancy | null): string {
+  if (!occupancy) return ''
+  const promotable = occupancy.groups.filter((g) => g.promotable)
+  if (promotable.length === 0 && occupancy.encounter_hooks.length === 0) return ''
+  const lines: string[] = ['NEARBY PROMOTABLE OCCUPANTS (promote ONLY if the protagonist engaged them this turn):']
+  for (const g of promotable) {
+    lines.push(`- ${g.id}: ${g.label} (${g.role}) — ${g.behavior}`)
+  }
+  for (const h of occupancy.encounter_hooks) {
+    if (h.kind === 'continuation') {
+      lines.push(`- hook ${h.id}: occupant ${h.occupant_id ?? '(place)'} relates to thread "${h.thread_ref}". If engaged, add a clue/objective to that thread.`)
+    } else {
+      lines.push(`- hook ${h.id}: occupant ${h.occupant_id ?? '(place)'} can open a NEW thread — premise: ${h.premise}. If engaged, create that thread (tagged).`)
+    }
+  }
+  return lines.join('\n')
+}
+
 export async function extractPatch(
   premise: string,
   prior: NarratorWorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
+  occupancy: PlaceOccupancy | null = null,
 ): Promise<{ patch: ArchivistPatch; usage: LanguageModelUsage }> {
   const transcript = recent
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
     .join('\n\n')
+
+  const occupancyBlock = formatOccupancyForArchivist(occupancy)
 
   const priorBlock = JSON.stringify(
     {
@@ -344,6 +370,7 @@ export async function extractPatch(
           '',
           'RECENT TURNS:',
           transcript,
+          ...(occupancyBlock ? ['', occupancyBlock] : []),
           '',
           'Return the patch.',
         ].join('\n'),
@@ -970,10 +997,11 @@ type StoryThreadRow = {
   rewards: string | null
   consequences: string | null
   hidden: string | null
+  relevance_tags_json: string
 }
 
 const storyThreadByTitleStmt = db.prepare<[number, string]>(
-  `SELECT id, title, kind, status, summary, stakes, rewards, consequences, hidden
+  `SELECT id, title, kind, status, summary, stakes, rewards, consequences, hidden, relevance_tags_json
    FROM story_threads
    WHERE world_id = ? AND lower(title) = lower(?)`,
 )
@@ -988,14 +1016,19 @@ const insertStoryThreadStmt = db.prepare<
     string | null,
     string | null,
     string | null,
+    string,
     number | null,
   ]
 >(
   `INSERT INTO story_threads
-     (world_id, title, kind, status, summary, stakes, rewards, consequences, hidden, source_turn_id)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     (world_id, title, kind, status, summary, stakes, rewards, consequences, hidden, relevance_tags_json, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
    RETURNING id`,
 )
+// relevance_tags_json uses a plain assignment (not COALESCE like the
+// nullable fields above): the caller computes relevanceTagsJson to a
+// non-null value — new tags when the patch supplies them, else the
+// existing row's tags — so the JS layer owns the preserve-merge.
 const updateStoryThreadStmt = db.prepare<
   [
     string,
@@ -1005,20 +1038,22 @@ const updateStoryThreadStmt = db.prepare<
     string | null,
     string | null,
     string | null,
+    string,
     number | null,
     number,
   ]
 >(
   `UPDATE story_threads SET
-     kind             = ?,
-     status           = ?,
-     summary          = COALESCE(?, summary),
-     stakes           = COALESCE(?, stakes),
-     rewards          = COALESCE(?, rewards),
-     consequences     = COALESCE(?, consequences),
-     hidden           = COALESCE(?, hidden),
-     resolved_turn_id = COALESCE(?, resolved_turn_id),
-     updated_at       = datetime('now')
+     kind                = ?,
+     status              = ?,
+     summary             = COALESCE(?, summary),
+     stakes              = COALESCE(?, stakes),
+     rewards             = COALESCE(?, rewards),
+     consequences        = COALESCE(?, consequences),
+     hidden              = COALESCE(?, hidden),
+     relevance_tags_json = ?,
+     resolved_turn_id    = COALESCE(?, resolved_turn_id),
+     updated_at          = datetime('now')
    WHERE id = ?`,
 )
 const storyClueByTitleStmt = db.prepare<[number, string]>(
@@ -1548,6 +1583,9 @@ function upsertStoryThread(
   const status = patch.status ?? existing?.status ?? 'active'
   const resolvedTurnId =
     status === 'resolved' || status === 'failed' ? narratorTurnId : null
+  const relevanceTagsJson = patch.relevance_tags
+    ? JSON.stringify(patch.relevance_tags)
+    : (existing?.relevance_tags_json ?? '[]')
 
   if (existing) {
     updateStoryThreadStmt.run(
@@ -1558,6 +1596,7 @@ function upsertStoryThread(
       patch.rewards ?? null,
       patch.consequences ?? null,
       patch.hidden ?? null,
+      relevanceTagsJson,
       resolvedTurnId,
       existing.id,
     )
@@ -1574,6 +1613,7 @@ function upsertStoryThread(
     patch.rewards ?? null,
     patch.consequences ?? null,
     patch.hidden ?? null,
+    relevanceTagsJson,
     narratorTurnId,
   ) as { id: number }
   return row.id

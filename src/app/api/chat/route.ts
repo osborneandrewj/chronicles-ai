@@ -33,6 +33,7 @@ import {
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
 import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
+import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
@@ -219,8 +220,20 @@ export async function POST(req: Request) {
     npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
   const plans = npcAgentResult?.plans ?? []
 
-  // Re-read state so the narrator sees any place changes the agent applied.
-  const narratorState = npcAgentResult ? getNarratorWorldState(worldId) : postPromotionState
+  // v0.6.13: build/refresh the deterministic place occupancy snapshot (crowds,
+  // traffic, latent encounter hooks) BEFORE the final state read below, so
+  // getNarratorWorldState picks up the persisted snapshot and formatStateBlock
+  // renders it. Non-fatal: occupancy must never block narration.
+  let turnOccupancy: PlaceOccupancy | null = null
+  try {
+    turnOccupancy = buildPlaceOccupancySnapshot(worldId, playerTurnId)
+  } catch (err) {
+    console.error('[place-population]', err)
+  }
+
+  // v0.6.13: always re-read — the occupancy snapshot above was persisted after
+  // postPromotionState was captured, so it is only visible via a fresh read.
+  const narratorState = getNarratorWorldState(worldId)
   // v0.6.10: the last couple of narrator turns let formatStateBlock suppress a
   // stale Place anchor when recent prose has clearly travelled elsewhere.
   const recentNarratorProse = recentForAgents
@@ -378,7 +391,7 @@ export async function POST(req: Request) {
         role: t.role,
         content: t.content,
       }))
-      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent)
+      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent, turnOccupancy)
         .then(({ patch, usage: archivistUsage }) => {
           applyArchivistPatch(worldId, narratorTurn.id, patch)
           updateTurnMetadata(narratorTurn.id, {

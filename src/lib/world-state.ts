@@ -2,15 +2,18 @@ import {
   getActiveSceneForWorld,
   getCharactersForWorld,
   getCharactersInPlace,
+  getLatestOccupancySnapshotRow,
   getPlace,
   getPlacesForWorld,
   getScenesForWorld,
   getStoryDossierForWorld,
   getTurnTimestampsForWorld,
   getWorldCursor,
+  type OccupancySnapshotRow,
   type StoryDossier,
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
+import type { PlaceOccupancy } from '@/lib/place-population'
 
 export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
 
@@ -93,6 +96,7 @@ export type NarratorWorldState = {
   knownCharacters: Character[]
   knownPlaces: Place[]
   dossier: StoryDossier
+  occupancy: PlaceOccupancy | null
 }
 
 export type FullWorldState = {
@@ -117,6 +121,12 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     ? getCharactersInPlace(worldId, currentPlace.id).filter((c) => c.is_player === 0)
     : []
 
+  const occupancyRow = currentPlace ? getLatestOccupancySnapshotRow(worldId, currentPlace.id) : null
+  const occupancy =
+    occupancyRow && occupancyRow.scene_id === (activeScene?.id ?? null)
+      ? parseOccupancyRow(occupancyRow)
+      : null
+
   return {
     worldTime: cursor.world_time,
     currentScene: activeScene,
@@ -125,6 +135,7 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
     knownCharacters,
     knownPlaces,
     dossier: getStoryDossierForWorld(worldId),
+    occupancy,
   }
 }
 
@@ -298,6 +309,11 @@ export function formatStateBlock(
     }
   }
 
+  const occupancyBlock = formatOccupancyBlock(state.occupancy)
+  if (occupancyBlock) {
+    lines.push('', occupancyBlock)
+  }
+
   // Real-world geographic anchors for known places. These come from a one-time
   // Nominatim resolve per place and are authoritative: the narrator (and the
   // NPC agent, which sees a parallel block) must not contradict the street or
@@ -467,6 +483,41 @@ function formatPlayerCanonBlock(
     }
   }
 
+  return lines.join('\n')
+}
+
+function parseOccupancyRow(row: OccupancySnapshotRow | null): PlaceOccupancy | null {
+  if (!row) return null
+  try {
+    return JSON.parse(row.occupancy_json) as PlaceOccupancy
+  } catch {
+    return null
+  }
+}
+
+export function formatOccupancyBlock(occupancy: PlaceOccupancy | null): string {
+  if (!occupancy || (occupancy.groups.length === 0 && !occupancy.traffic)) return ''
+  const lines: string[] = []
+  lines.push('### NEARBY (ambient — not durable characters)')
+  lines.push(
+    'Texture, witnesses, obstacles, and service — use naturally; do not name every person. These are not tracked NPCs unless the protagonist engages them.',
+  )
+  lines.push(`- density: ${occupancy.density}`)
+  for (const g of occupancy.groups) {
+    const avail = g.promotable ? ' (could become someone)' : ''
+    lines.push(`- ${limit(g.label, 80)} — ${limit(g.behavior, 80)}${avail}`)
+  }
+  if (occupancy.traffic) {
+    const t = occupancy.traffic
+    const motion = t.notable_motion ? `; ${t.notable_motion}` : ''
+    lines.push(`- traffic: vehicles ${t.vehicles}, pedestrians ${t.pedestrians}${motion}`)
+  }
+  if (occupancy.encounter_hooks.length > 0) {
+    lines.push('- possible encounters (latent — surface only if the protagonist engages; never as a quest marker):')
+    for (const h of occupancy.encounter_hooks) {
+      lines.push(`  - ${limit(h.narrator_cue, 160)}`)
+    }
+  }
   return lines.join('\n')
 }
 

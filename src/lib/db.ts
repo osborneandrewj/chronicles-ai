@@ -28,6 +28,7 @@ export type StoryThread = {
   rewards: string | null
   consequences: string | null
   hidden: string | null
+  relevance_tags_json: string
   source_turn_id: number | null
   resolved_turn_id: number | null
   created_at: string
@@ -96,6 +97,50 @@ export type StoryDossier = {
   objectives: StoryObjective[]
   resources: StoryResource[]
   timeline: TimelineEvent[]
+}
+
+export type PlaceProfileRow = {
+  id: number
+  world_id: number
+  place_id: number
+  profile_kind: string
+  capacity_min: number
+  capacity_max: number
+  typical_roles_json: string
+  open_hours_json: string | null
+  traffic_level: 'none' | 'low' | 'medium' | 'high' | 'surge'
+  ambience_tags_json: string
+  match_tags_json: string
+  encounter_rules_json: string
+  created_at: string
+  updated_at: string
+}
+
+export type PopulationTemplateRow = {
+  id: number
+  world_id: number
+  place_profile_kind: string | null
+  role: string
+  label: string
+  description: string | null
+  behavior_tags_json: string
+  match_tags_json: string
+  seed_premise: string | null
+  promotable: number
+  weight: number
+  created_at: string
+  updated_at: string
+}
+
+export type OccupancySnapshotRow = {
+  id: number
+  world_id: number
+  place_id: number
+  scene_id: number | null
+  source_turn_id: number | null
+  world_time: string | null
+  occupancy_json: string
+  created_at: string
 }
 
 type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
@@ -320,7 +365,7 @@ const turnTimestampsForWorldStmt = db.prepare<[number]>(
 )
 const storyThreadsForWorldStmt = db.prepare<[number]>(
   `SELECT id, world_id, title, kind, status, summary, stakes, rewards, consequences,
-          hidden, source_turn_id, resolved_turn_id, created_at, updated_at
+          hidden, relevance_tags_json, source_turn_id, resolved_turn_id, created_at, updated_at
    FROM story_threads
    WHERE world_id = ?
    ORDER BY
@@ -635,6 +680,106 @@ export function getStoryDossierForWorld(worldId: number): StoryDossier {
     resources: storyResourcesForWorldStmt.all(worldId) as StoryResource[],
     timeline: timelineEventsForWorldStmt.all(worldId) as TimelineEvent[],
   }
+}
+
+const placeProfileByPlaceStmt = db.prepare<[number, number]>(
+  `SELECT id, world_id, place_id, profile_kind, capacity_min, capacity_max,
+          typical_roles_json, open_hours_json, traffic_level, ambience_tags_json,
+          match_tags_json, encounter_rules_json, created_at, updated_at
+   FROM place_profiles WHERE world_id = ? AND place_id = ?`,
+)
+
+const insertPlaceProfileStmt = db.prepare<
+  [number, number, string, number, number, string, string, string]
+>(
+  `INSERT INTO place_profiles
+     (world_id, place_id, profile_kind, capacity_min, capacity_max,
+      typical_roles_json, match_tags_json, traffic_level)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(world_id, place_id) DO NOTHING`,
+)
+
+const populationTemplatesByKindStmt = db.prepare<[number, string]>(
+  `SELECT id, world_id, place_profile_kind, role, label, description,
+          behavior_tags_json, match_tags_json, seed_premise, promotable, weight,
+          created_at, updated_at
+   FROM population_templates
+   WHERE world_id = ? AND (place_profile_kind = ? OR place_profile_kind IS NULL)
+   ORDER BY id ASC`,
+)
+
+const insertOccupancySnapshotStmt = db.prepare<
+  [number, number, number | null, number | null, string | null, string]
+>(
+  `INSERT INTO place_occupancy_snapshots
+     (world_id, place_id, scene_id, source_turn_id, world_time, occupancy_json)
+   VALUES (?, ?, ?, ?, ?, ?)`,
+)
+
+const latestOccupancySnapshotStmt = db.prepare<[number, number]>(
+  `SELECT id, world_id, place_id, scene_id, source_turn_id, world_time,
+          occupancy_json, created_at
+   FROM place_occupancy_snapshots
+   WHERE world_id = ? AND place_id = ?
+   ORDER BY id DESC LIMIT 1`,
+)
+
+export function getPlaceProfileRow(worldId: number, placeId: number): PlaceProfileRow | null {
+  return (placeProfileByPlaceStmt.get(worldId, placeId) as PlaceProfileRow | undefined) ?? null
+}
+
+export function insertPlaceProfile(input: {
+  worldId: number
+  placeId: number
+  profileKind: string
+  capacityMin: number
+  capacityMax: number
+  typicalRolesJson: string
+  matchTagsJson: string
+  trafficLevel: 'none' | 'low' | 'medium' | 'high' | 'surge'
+}): void {
+  insertPlaceProfileStmt.run(
+    input.worldId,
+    input.placeId,
+    input.profileKind,
+    input.capacityMin,
+    input.capacityMax,
+    input.typicalRolesJson,
+    input.matchTagsJson,
+    input.trafficLevel,
+  )
+}
+
+export function getPopulationTemplatesForKind(
+  worldId: number,
+  profileKind: string,
+): PopulationTemplateRow[] {
+  return populationTemplatesByKindStmt.all(worldId, profileKind) as PopulationTemplateRow[]
+}
+
+export function insertOccupancySnapshot(input: {
+  worldId: number
+  placeId: number
+  sceneId: number | null
+  sourceTurnId: number | null
+  worldTime: string | null
+  occupancyJson: string
+}): void {
+  insertOccupancySnapshotStmt.run(
+    input.worldId,
+    input.placeId,
+    input.sceneId,
+    input.sourceTurnId,
+    input.worldTime,
+    input.occupancyJson,
+  )
+}
+
+export function getLatestOccupancySnapshotRow(
+  worldId: number,
+  placeId: number,
+): OccupancySnapshotRow | null {
+  return (latestOccupancySnapshotStmt.get(worldId, placeId) as OccupancySnapshotRow | undefined) ?? null
 }
 
 // v0.6.6 — player→archivist correction scrollback. Rows are inserted by the
