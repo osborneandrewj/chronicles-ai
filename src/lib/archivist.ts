@@ -1925,9 +1925,13 @@ export function applyArchivistPatch(
         // (possibly new) descriptors as alternate names on the kept row.
         // Existing aliases are preserved; new ones are appended; the
         // canonical name itself is filtered out of the list.
-        if (c.aliases && c.aliases.length > 0) {
+        if ((c.aliases && c.aliases.length > 0) || c.reveals_name_of) {
           const existingAliases = (existing?.aliases ?? null)
-          const incoming = c.aliases.map((a) => a.trim()).filter((a) => a.length > 0).join('\n')
+          const incomingNames = [
+            ...(c.aliases ?? []),
+            ...(c.reveals_name_of ? [c.reveals_name_of] : []),
+          ]
+          const incoming = incomingNames.map((a) => a.trim()).filter((a) => a.length > 0).join('\n')
           const combined = mergeLineBlocks(existingAliases, incoming.length > 0 ? incoming : null)
           const filtered = filterAliasesAgainstName(combined, c.name)
           setCharacterAliasesStmt.run(filtered, characterId)
