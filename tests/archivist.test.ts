@@ -368,6 +368,7 @@ describe('applyArchivistPatch', () => {
     expect(matches).toHaveLength(1)
     expect(matches[0].name).toBe('Jérôme Moreau')
     expect(matches[0].agency_level).toBe('local')
+    expect(matches[0].aliases ?? '').toContain('The Attendant at the Gates')
   })
 
   it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
