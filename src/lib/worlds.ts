@@ -16,6 +16,7 @@ export type WorldSummary = {
   name: string
   premise: string
   created_at: string
+  archived_at: string | null
   turn_count: number
 }
 
@@ -41,11 +42,28 @@ const getWorldStmt = db.prepare<[number]>(
 
 const listWorldsStmt = db.prepare(`
   SELECT
-    w.id, w.name, w.premise, w.created_at,
+    w.id, w.name, w.premise, w.created_at, w.archived_at,
     COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
   FROM worlds w
+  WHERE w.archived_at IS NULL
   ORDER BY w.created_at DESC, w.id DESC
 `)
+
+const listArchivedWorldsStmt = db.prepare(`
+  SELECT
+    w.id, w.name, w.premise, w.created_at, w.archived_at,
+    COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
+  FROM worlds w
+  WHERE w.archived_at IS NOT NULL
+  ORDER BY w.archived_at DESC, w.id DESC
+`)
+
+const archiveWorldStmt = db.prepare<[number]>(
+  "UPDATE worlds SET archived_at = datetime('now') WHERE id = ?",
+)
+const unarchiveWorldStmt = db.prepare<[number]>(
+  'UPDATE worlds SET archived_at = NULL WHERE id = ?',
+)
 
 const insertPlaceStmt = db.prepare<[number, string, string, string | null]>(
   `INSERT INTO places (world_id, name, description, kind) VALUES (?, ?, ?, ?) RETURNING id`,
@@ -137,4 +155,16 @@ export function getWorld(id: number): World | null {
 
 export function listWorlds(): WorldSummary[] {
   return listWorldsStmt.all() as WorldSummary[]
+}
+
+export function listArchivedWorlds(): WorldSummary[] {
+  return listArchivedWorldsStmt.all() as WorldSummary[]
+}
+
+export function archiveWorld(id: number): void {
+  archiveWorldStmt.run(id)
+}
+
+export function unarchiveWorld(id: number): void {
+  unarchiveWorldStmt.run(id)
 }
