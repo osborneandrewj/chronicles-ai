@@ -314,6 +314,40 @@ describe('applyArchivistPatch', () => {
     expect(marcusRows).toHaveLength(3)
   })
 
+  it('renames a descriptor NPC to a revealed proper name via aliases, with no duplicate row', () => {
+    // An agentic, descriptor-named NPC the player has been interrogating.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'The Attendant at the Gates', description: 'Station attendant.', current_attitude: 'terrified' },
+      ],
+    })
+    db.prepare(
+      "UPDATE characters SET agency_level = 'local' WHERE world_id = ? AND lower(name) = lower('The Attendant at the Gates')",
+    ).run(worldId)
+
+    // The reveal turn: the descriptor figure gives a proper name. The archivist
+    // is expected to rename-and-alias the SAME row (not mint a new one) — the
+    // exact shape prompt rule "A revealed name is the same person" requires.
+    applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'Jérôme Moreau',
+          aliases: ['The Attendant at the Gates'],
+          description: 'Cornavin station maintenance staff; has a daughter.',
+          active_goal: 'survive',
+        },
+      ],
+    })
+
+    const matches = getCharactersForWorld(worldId).filter((c) =>
+      ['Jérôme Moreau', 'The Attendant at the Gates'].includes(c.name),
+    )
+    expect(matches).toHaveLength(1) // merged, not duplicated
+    expect(matches[0].name).toBe('Jérôme Moreau')
+    expect(matches[0].agency_level).toBe('local') // agentic identity preserved
+    expect(matches[0].aliases ?? '').toContain('The Attendant at the Gates')
+  })
+
   it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
     applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'gave the player a silver locket' }],
