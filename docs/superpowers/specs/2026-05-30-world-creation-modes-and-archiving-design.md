@@ -36,10 +36,7 @@ The tab toggle is a small client component. Basic leads because it is the lower-
 Flat list of 16 labels (genres + subgenres folded in). The label string is fed to the LLM as the seed — no per-genre config beyond the label.
 
 ```
-High Fantasy, Dark Fantasy, Urban Fantasy, Science Fiction,
-Space Opera, Cyberpunk, Steampunk, Post-Apocalyptic,
-Mystery / Detective, Noir, Thriller / Espionage, Horror,
-Cosmic Horror, Historical, Western, Romance
+High Fantasy, Dark Fantasy, Urban Fantasy, Sword & Sorcery, Grimdark, Portal/Isekai, Gaslamp Fantasy, Weird West, Science Fiction, Space Opera, Cyberpunk, Steampunk, Post-Apocalyptic, Military Sci-Fi, Solarpunk/Hopepunk, Biopunk/Nanopunk, Time Travel/Alternate History, First Contact/Alien Invasion, Mecha/Giant Robot, Dystopian Rebellion, Mystery/Detective, Noir, Thriller/Espionage, Paranormal/Occult Detective, Heist, Horror, Cosmic Horror, Historical, Historical Adventure, Western, Pulp/Treasure-Hunting Adventure, Survival/Wilderness, Pirate/Swashbuckling, Superhero/Powered Individuals, Romance, Mythological Retellings, Cozy Adventure
 ```
 
 Defined as a single exported `const GENRES` array (the source of truth for both the picker UI and server-side validation). Grid layout: 2 columns on mobile, 4 on desktop.
