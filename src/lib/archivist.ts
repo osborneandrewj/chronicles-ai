@@ -125,6 +125,15 @@ const CharacterPatchSchema = z.object({
         'CORRECTION USE: only set when the player explicitly tells the archivist two existing ' +
         'rows are the same person.',
     ),
+  reveals_name_of: z
+    .string()
+    .optional()
+    .describe(
+      'The existing descriptor/title or prior name of the figure this row IS. Set when a figure ' +
+        'you already track is given or reveals a proper name: put the proper name in `name` and the ' +
+        'old descriptor here. The named existing row is renamed and merged into this one — the safe, ' +
+        'preferred way to handle a name reveal (clearer than `aliases`).',
+    ),
 })
 
 const StoryThreadPatchSchema = z.object({
@@ -645,7 +654,8 @@ function hasMeaningfulCharacterPatch(c: CharacterPatch): boolean {
     c.current_attitude !== undefined ||
     c.observations_append !== undefined ||
     c.player_notes_append !== undefined ||
-    (c.aliases !== undefined && c.aliases.length > 0)
+    (c.aliases !== undefined && c.aliases.length > 0) ||
+    c.reveals_name_of !== undefined
   )
 }
 
@@ -1814,8 +1824,14 @@ export function applyArchivistPatch(
         // name from the patch wins. Otherwise resolveCharacter's own soft-
         // match auto-merges the rows first and keeps the older row's name
         // (e.g. "Jordana" instead of "Jordana Osborne").
-        if (c.aliases && c.aliases.length > 0) {
-          runAliasMerges(worldId, c.name, c.aliases)
+        // `reveals_name_of` is a clearer, safe-framed alias for the name-reveal
+        // case; fold it into the same tested merge machinery as `aliases`.
+        const aliasMergeNames = [
+          ...(c.aliases ?? []),
+          ...(c.reveals_name_of ? [c.reveals_name_of] : []),
+        ]
+        if (aliasMergeNames.length > 0) {
+          runAliasMerges(worldId, c.name, aliasMergeNames)
         }
         const placeId =
           c.current_place_name !== undefined
