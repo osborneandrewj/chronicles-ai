@@ -1,3 +1,4 @@
+import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
 import {
   getActiveSceneForWorld,
   getCharactersForWorld,
@@ -107,6 +108,7 @@ export type FullWorldState = {
   scenes: Scene[]
   dossier: StoryDossier
   turnTimestamps: Record<number, string>
+  potentialDuplicates: DuplicatePair[]
 }
 
 export function getNarratorWorldState(worldId: number): NarratorWorldState {
@@ -144,14 +146,16 @@ export function getFullWorldState(worldId: number): FullWorldState {
   const turnTimestamps = Object.fromEntries(
     getTurnTimestampsForWorld(worldId).map((turn) => [turn.id, turn.created_at]),
   )
+  const characters = getCharactersForWorld(worldId)
   return {
     worldTime: cursor.world_time,
     currentSceneId: cursor.current_scene_id,
-    characters: getCharactersForWorld(worldId),
+    characters,
     places: getPlacesForWorld(worldId),
     scenes: getScenesForWorld(worldId),
     dossier: getStoryDossierForWorld(worldId),
     turnTimestamps,
+    potentialDuplicates: findLikelyDuplicateCharacters(characters),
   }
 }
 

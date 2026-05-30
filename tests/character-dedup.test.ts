@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
+import { applyArchivistPatch } from '@/lib/archivist'
 import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
 import type { Character } from '@/lib/db'
+import { getFullWorldState } from '@/lib/world-state'
+import { createWorld } from '@/lib/worlds'
 
 // Minimal Character factory — only the fields the detector reads matter; cast
 // through unknown so we don't have to fill every column.
@@ -60,5 +63,23 @@ describe('findLikelyDuplicateCharacters', () => {
       ch({ id: 3, name: 'The Corpse', current_place_id: 5, status: 'dead' }),
     ]
     expect(findLikelyDuplicateCharacters(chars)).toHaveLength(0)
+  })
+})
+
+describe('getFullWorldState.potentialDuplicates', () => {
+  it('flags a descriptor + named pair at the same place', () => {
+    const world = createWorld({
+      name: `Dup-${Math.random()}`,
+      premise: 'x',
+      initialState: { time: 't', location: 'Cornavin station', identity: 'i', playerName: 'Andrew' },
+    })
+    applyArchivistPatch(world.id, 1, {
+      characters: [
+        { name: 'The Attendant at the Gates', current_place_name: 'Cornavin station' },
+        { name: 'Jérôme Moreau', current_place_name: 'Cornavin station' },
+      ],
+    })
+    const dup = getFullWorldState(world.id).potentialDuplicates
+    expect(dup.some((p) => p.reason === 'descriptor + named at same place')).toBe(true)
   })
 })
