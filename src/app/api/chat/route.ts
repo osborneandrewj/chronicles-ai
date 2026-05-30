@@ -15,6 +15,7 @@ import {
   extractDeterministicPatch,
   extractPatch,
 } from '@/lib/archivist'
+import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
@@ -22,6 +23,7 @@ import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
 import {
   getActiveSceneForWorld,
+  getCharactersForWorld,
   insertTurn,
   latestAssistantAfterLatestUser,
   latestTurn,
@@ -373,6 +375,15 @@ export async function POST(req: Request) {
             patch: deterministicPatch,
           },
         })
+        try {
+          for (const d of findLikelyDuplicateCharacters(getCharactersForWorld(worldId))) {
+            console.warn(
+              `[dup-detector] world ${worldId}: "${d.aName}" (#${d.aId}) ~ "${d.bName}" (#${d.bId}) — ${d.reason}`,
+            )
+          }
+        } catch (err) {
+          console.error('[dup-detector]', err)
+        }
         return
       }
 
@@ -397,6 +408,15 @@ export async function POST(req: Request) {
           updateTurnMetadata(narratorTurn.id, {
             archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
           })
+          try {
+            for (const d of findLikelyDuplicateCharacters(getCharactersForWorld(worldId))) {
+              console.warn(
+                `[dup-detector] world ${worldId}: "${d.aName}" (#${d.aId}) ~ "${d.bName}" (#${d.bId}) — ${d.reason}`,
+              )
+            }
+          } catch (err) {
+            console.error('[dup-detector]', err)
+          }
         })
         .catch((err) => {
           updateTurnMetadata(narratorTurn.id, {
