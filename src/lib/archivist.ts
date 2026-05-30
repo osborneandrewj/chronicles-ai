@@ -264,11 +264,51 @@ function formatOccupancyForArchivist(occupancy: PlaceOccupancy | null): string {
   return lines.join('\n')
 }
 
+// Injected on the world's first narration (A + C2). The opening archivist runs
+// against an empty dossier, so without this it tends to extract only characters
+// and leave the world with no thread and an untyped place. We make both the
+// central thread and the starting place's kind mandatory.
+export const OPENING_ARCHIVIST_DIRECTIVE = [
+  "OPENING TURN — this is the world's first narration and the dossier is empty.",
+  'From the premise and this opening narration you MUST do BOTH of the following:',
+  '1. Create at least one story_thread capturing the central goal, danger, or tension the premise sets up. ' +
+    'Choose kind: quest for a goal the protagonist is pursuing or has taken on, threat for a danger or clock ' +
+    'bearing down, mystery only for an unexplained situation with no objective yet. Set 2-5 lowercase ' +
+    'relevance_tags (topic + place-kind).',
+  "2. Set the starting place's kind via a places[] patch — the concrete locale where the scene opens " +
+    '(e.g. street, transit, bar, market, hospital, office, cafe, restaurant, park, dock, alley) — so the ' +
+    'world can populate it. Patch the place by the name shown in PRIOR STATE.',
+].join('\n')
+
+// Pure assembly of the archivist's user message. Extracted so the opening-turn
+// bootstrap contract (does isOpening inject the directive?) is unit-testable
+// without exercising the LLM call.
+export function buildArchivistUserContent(parts: {
+  priorBlock: string
+  transcript: string
+  occupancyBlock: string
+  isOpening: boolean
+}): string {
+  const { priorBlock, transcript, occupancyBlock, isOpening } = parts
+  return [
+    'PRIOR STATE:',
+    priorBlock,
+    '',
+    'RECENT TURNS:',
+    transcript,
+    ...(occupancyBlock ? ['', occupancyBlock] : []),
+    ...(isOpening ? ['', OPENING_ARCHIVIST_DIRECTIVE] : []),
+    '',
+    'Return the patch.',
+  ].join('\n')
+}
+
 export async function extractPatch(
   premise: string,
   prior: NarratorWorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
   occupancy: PlaceOccupancy | null = null,
+  isOpening = false,
 ): Promise<{ patch: ArchivistPatch; usage: LanguageModelUsage }> {
   const transcript = recent
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
@@ -364,16 +404,7 @@ export async function extractPatch(
       },
       {
         role: 'user',
-        content: [
-          'PRIOR STATE:',
-          priorBlock,
-          '',
-          'RECENT TURNS:',
-          transcript,
-          ...(occupancyBlock ? ['', occupancyBlock] : []),
-          '',
-          'Return the patch.',
-        ].join('\n'),
+        content: buildArchivistUserContent({ priorBlock, transcript, occupancyBlock, isOpening }),
       },
     ],
   })

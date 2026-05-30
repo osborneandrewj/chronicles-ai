@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { classifyPlaceKind } from '@/lib/place-population'
 import { extractSettingRegion } from '@/lib/region-extractor'
 
 export type World = {
@@ -46,8 +47,8 @@ const listWorldsStmt = db.prepare(`
   ORDER BY w.created_at DESC, w.id DESC
 `)
 
-const insertPlaceStmt = db.prepare<[number, string, string]>(
-  `INSERT INTO places (world_id, name, description) VALUES (?, ?, ?) RETURNING id`,
+const insertPlaceStmt = db.prepare<[number, string, string, string | null]>(
+  `INSERT INTO places (world_id, name, description, kind) VALUES (?, ?, ?, ?) RETURNING id`,
 )
 const insertCharacterStmt = db.prepare<[number, string, string, number]>(
   `INSERT INTO characters (world_id, name, description, is_player, current_place_id)
@@ -89,10 +90,14 @@ export function createWorld(input: CreateWorldInput): World {
       null,
     ) as World
 
+    // C1: type the seed place from the full location string so the living-place
+    // sim has a profile to populate from turn one. Leaves kind null for coarse
+    // locations (e.g. a bare city); the opening archivist (C2) refines it.
     const place = insertPlaceStmt.get(
       world.id,
       derivePlaceName(initialState.location),
       initialState.location,
+      classifyPlaceKind(initialState.location),
     ) as { id: number }
     insertCharacterStmt.run(
       world.id,

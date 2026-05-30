@@ -1,13 +1,14 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { buildGroups, buildHooks, buildPlaceOccupancySnapshot, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import { buildGroups, buildHooks, buildPlaceOccupancySnapshot, classifyPlaceKind, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
 import { applyArchivistPatch } from '@/lib/archivist'
 import type { StoryThread } from '@/lib/db'
 import {
   db,
   getLatestOccupancySnapshotRow,
   getPlaceProfileRow,
+  getPlacesForWorld,
   getPopulationTemplatesForKind,
   getStoryDossierForWorld,
   insertOccupancySnapshot,
@@ -28,6 +29,40 @@ function freshWorld(): number {
     },
   }).id
 }
+
+describe('classifyPlaceKind', () => {
+  it('returns the profile kind when a keyword matches', () => {
+    expect(classifyPlaceKind('The Anchor Tavern')).toBe('bar')
+    expect(classifyPlaceKind('Gare de Lyon station')).toBe('transit')
+    expect(classifyPlaceKind('a narrow service alley')).toBe('road')
+    expect(classifyPlaceKind('the morning market')).toBe('market')
+  })
+
+  it('returns null when no keyword matches', () => {
+    expect(classifyPlaceKind('Paris')).toBeNull()
+    expect(classifyPlaceKind('Mevagissey harbour')).toBeNull()
+  })
+})
+
+describe('createWorld place kind (C1)', () => {
+  it('classifies a keyworded location into places.kind', () => {
+    const id = createWorld({
+      name: `KindA-${Math.random()}`,
+      premise: 'x',
+      initialState: { time: 't', location: 'The Brass Lantern Tavern', identity: 'i', playerName: 'P' },
+    }).id
+    expect(getPlacesForWorld(id)[0].kind).toBe('bar')
+  })
+
+  it('leaves kind null for a bare city location', () => {
+    const id = createWorld({
+      name: `KindB-${Math.random()}`,
+      premise: 'x',
+      initialState: { time: 't', location: 'Paris', identity: 'i', playerName: 'P' },
+    }).id
+    expect(getPlacesForWorld(id)[0].kind).toBeNull()
+  })
+})
 
 describe('migration v22 — place population schema', () => {
   it('creates the three tables, the threads tag column, and passes FK check', () => {

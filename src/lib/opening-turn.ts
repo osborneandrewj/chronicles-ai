@@ -66,9 +66,13 @@ export async function generateOpeningTurn(worldId: number, premise: string): Pro
   updateTurnMetadata(narratorTurn.id, { narrator: narratorMeta })
 
   try {
-    const { patch, usage: archivistUsage } = await extractPatch(premise, priorState, [
-      { role: 'assistant', content: trimmed },
-    ])
+    const { patch, usage: archivistUsage } = await extractPatch(
+      premise,
+      priorState,
+      [{ role: 'assistant', content: trimmed }],
+      null,
+      true, // isOpening — bootstrap the central thread + concrete place kind
+    )
     applyArchivistPatch(worldId, narratorTurn.id, patch)
     updateTurnMetadata(narratorTurn.id, {
       archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
