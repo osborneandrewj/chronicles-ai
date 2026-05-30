@@ -9,6 +9,7 @@
 // Usage:
 //   node scripts/merge-characters.mjs --world <id> --canonical <id> --dupe <id> [--dupe <id>...]
 //   node scripts/merge-characters.mjs --list-world <id>     # show characters with id/name/aliases
+//   node scripts/merge-characters.mjs --detect <id>         # list likely-duplicate character pairs
 //   node scripts/merge-characters.mjs --dry-run --world <id> --canonical <id> --dupe <id>
 //
 // Run locally with `set -a; source .env.local; set +a; node scripts/...`
@@ -317,6 +318,7 @@ function main() {
   if (args.world === null || args.canonical === null || args.dupes.length === 0) {
     console.error('Usage:')
     console.error('  --list-world <id>')
+    console.error('  --detect <id>')
     console.error('  --world <id> --canonical <id> --dupe <id> [--dupe <id>...] [--dry-run]')
     process.exit(1)
   }
