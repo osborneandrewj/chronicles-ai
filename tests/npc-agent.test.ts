@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { applyArchivistPatch } from '@/lib/archivist'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
-import { applyNpcAgentPatch } from '@/lib/npc-agent'
+import { applyNpcAgentPatch, NpcAgentPatchSchema, repairNpcAgentText } from '@/lib/npc-agent'
 import { createWorld } from '@/lib/worlds'
 
 function seedWorld(name: string): { worldId: number; turnId: number } {
@@ -26,6 +26,51 @@ function promoteToLocal(worldId: number, name: string): void {
        WHERE world_id = ? AND lower(name) = lower(?)`,
   ).run(worldId, name)
 }
+
+describe('repairNpcAgentText', () => {
+  // Mirrors the real shape recovered from a live Haiku flake: valid content,
+  // broken serialization.
+  const intended = {
+    npc_updates: [{ name: 'The Attendant at the Gates', current_focus: 'obeying' }],
+    planned_actions: [
+      {
+        npc_name: 'The Attendant at the Gates',
+        intent: 'survive by surrendering everything',
+        planned_action: 'empties his pockets with shaking hands',
+        intent_type: 'comply',
+      },
+    ],
+  }
+
+  it('rebuilds the body crammed into a stringified npc_updates field (Shape 1)', () => {
+    const inner = `${JSON.stringify(intended.npc_updates)},\n"planned_actions": ${JSON.stringify(intended.planned_actions)}`
+    const malformed = JSON.stringify({ npc_updates: inner })
+
+    const repaired = repairNpcAgentText(malformed)
+    expect(repaired).not.toBeNull()
+    const obj = JSON.parse(repaired!)
+    expect(NpcAgentPatchSchema.safeParse(obj).success).toBe(true)
+    expect(obj).toEqual(intended)
+  })
+
+  it('parses array fields returned as JSON strings (Shape 2)', () => {
+    const malformed = JSON.stringify({
+      npc_updates: JSON.stringify(intended.npc_updates),
+      planned_actions: JSON.stringify(intended.planned_actions),
+    })
+    const repaired = repairNpcAgentText(malformed)
+    expect(repaired).not.toBeNull()
+    expect(NpcAgentPatchSchema.safeParse(JSON.parse(repaired!)).success).toBe(true)
+  })
+
+  it('returns null when there is nothing to repair', () => {
+    expect(repairNpcAgentText(JSON.stringify(intended))).toBeNull()
+  })
+
+  it('returns null for unparseable text', () => {
+    expect(repairNpcAgentText('not json at all')).toBeNull()
+  })
+})
 
 describe('applyNpcAgentPatch', () => {
   let worldId: number

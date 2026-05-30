@@ -179,6 +179,49 @@ export const NpcAgentPatchSchema = z.object({
 
 export type NpcAgentPatch = z.infer<typeof NpcAgentPatchSchema>
 
+// Haiku occasionally serializes the whole patch wrong: instead of two arrays it
+// returns the object body crammed into a single stringified `npc_updates`
+// field (e.g. `{"npc_updates":"[…],\n\"planned_actions\": […]\n"}`), or returns
+// an array field as a JSON string. The content is intact — only the shape is
+// broken — so we rebuild the valid object before Zod sees it. Wired as
+// generateObject's experimental_repairText; returns null when it can't help (so
+// the SDK throws and the route's graceful skip kicks in). Pure + unit-tested.
+export function repairNpcAgentText(text: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const obj = parsed as Record<string, unknown>
+
+  // Shape 1: the model opened a string after `"npc_updates":` and dumped the
+  // rest of the body into it, so `planned_actions` never made it to the top
+  // level. Re-wrap the stringified body with its key and re-parse.
+  if (typeof obj.npc_updates === 'string' && !('planned_actions' in obj)) {
+    try {
+      return JSON.stringify(JSON.parse(`{"npc_updates":${obj.npc_updates}}`))
+    } catch {
+      // fall through to per-field repair
+    }
+  }
+
+  // Shape 2: one or both array fields came back as JSON strings.
+  let changed = false
+  for (const key of ['npc_updates', 'planned_actions'] as const) {
+    if (typeof obj[key] === 'string') {
+      try {
+        obj[key] = JSON.parse(obj[key] as string)
+        changed = true
+      } catch {
+        return null
+      }
+    }
+  }
+  return changed ? JSON.stringify(obj) : null
+}
+
 export const NPC_AGENT_MODEL = 'claude-haiku-4-5-20251001'
 
 type AgentNpcRow = {
@@ -344,6 +387,11 @@ export async function runNpcAgentTick(
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
     schema: NpcAgentPatchSchema,
+    // The NPC tick is best-effort (the route degrades to plan-less narration on
+    // failure), so cap retries to keep a flake from stalling the turn. The
+    // repair below recovers Haiku's common mis-serialization before that.
+    maxRetries: 1,
+    experimental_repairText: async ({ text }) => repairNpcAgentText(text),
     messages: [
       {
         role: 'system',
