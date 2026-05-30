@@ -1,12 +1,15 @@
 import Link from 'next/link'
 
 import pkg from '../../package.json'
-import { listWorlds, type WorldSummary } from '@/lib/worlds'
+import { ArchivedSection } from '@/components/ArchivedSection'
+import { WorldRowMenu } from '@/components/WorldRowMenu'
+import { listArchivedWorlds, listWorlds, type WorldSummary } from '@/lib/worlds'
 
 export const dynamic = 'force-dynamic'
 
 export default function Home() {
   const worlds = listWorlds()
+  const archived = listArchivedWorlds()
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col bg-black px-4 py-5 sm:px-8 sm:py-8">
@@ -40,11 +43,13 @@ export default function Home() {
         <ul className="space-y-3">
           {worlds.map((w) => (
             <li key={w.id}>
-              <WorldRow world={w} />
+              <WorldRow world={w} menuVariant="archive" />
             </li>
           ))}
         </ul>
       )}
+
+      <ArchivedSection worlds={archived} />
     </main>
   )
 }
@@ -64,40 +69,48 @@ function EmptyState() {
   )
 }
 
-function WorldRow({ world }: { world: WorldSummary }) {
+function WorldRow({
+  world,
+  menuVariant,
+}: {
+  world: WorldSummary
+  menuVariant: 'archive' | 'unarchive'
+}) {
+  const muted = menuVariant === 'unarchive'
   return (
-    <Link
-      href={`/worlds/${world.id}/play`}
-      className="group flex min-h-28 items-center gap-3 rounded-[1.75rem] border border-neutral-800 bg-[#1b1c1f] px-4 py-4 shadow-lg shadow-black/20 transition hover:border-neutral-700 hover:bg-[#1f2024] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 sm:px-5"
+    <div
+      className={`group relative flex min-h-28 items-center gap-3 rounded-[1.75rem] border border-neutral-800 bg-[#1b1c1f] px-4 py-4 shadow-lg shadow-black/20 transition hover:border-neutral-700 hover:bg-[#1f2024] sm:px-5 ${
+        muted ? 'opacity-60' : ''
+      }`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-lg font-semibold tracking-tight text-neutral-100">
-            {world.name}
-          </span>
-          <span className="shrink-0 rounded-full bg-neutral-900 px-2 py-1 text-xs tabular-nums text-neutral-400">
-            {world.turn_count}
-          </span>
-        </div>
-        <p className="mt-2 line-clamp-2 font-serif text-base leading-relaxed text-neutral-300">
-          {world.premise}
-        </p>
-        <div className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
-          <ClockIcon />
-          <span>{formatCreatedAt(world.created_at)}</span>
-          <span aria-hidden>·</span>
-          <span>
-            {world.turn_count} turn{world.turn_count === 1 ? '' : 's'}
-          </span>
-        </div>
-      </div>
-      <span
-        aria-hidden
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-neutral-700/80 text-neutral-300 transition group-hover:border-amber-500/50 group-hover:text-amber-200"
+      <Link
+        href={`/worlds/${world.id}/play`}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-[1.5rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
       >
-        <ArrowRightIcon />
-      </span>
-    </Link>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-lg font-semibold tracking-tight text-neutral-100">
+              {world.name}
+            </span>
+            <span className="shrink-0 rounded-full bg-neutral-900 px-2 py-1 text-xs tabular-nums text-neutral-400">
+              {world.turn_count}
+            </span>
+          </div>
+          <p className="mt-2 line-clamp-2 font-serif text-base leading-relaxed text-neutral-300">
+            {world.premise}
+          </p>
+          <div className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
+            <ClockIcon />
+            <span>{formatCreatedAt(world.created_at)}</span>
+            <span aria-hidden>·</span>
+            <span>
+              {world.turn_count} turn{world.turn_count === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+      </Link>
+      <WorldRowMenu worldId={world.id} variant={menuVariant} />
+    </div>
   )
 }
 
@@ -115,25 +128,6 @@ function PlusIcon() {
     >
       <path d="M8 3.5v9" />
       <path d="M3.5 8h9" />
-    </svg>
-  )
-}
-
-function ArrowRightIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 8h10" />
-      <path d="M9 4l4 4-4 4" />
     </svg>
   )
 }
