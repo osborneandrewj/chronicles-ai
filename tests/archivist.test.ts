@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   applyArchivistPatch,
+  buildArchivistUserContent,
   extractDeterministicPatch,
+  OPENING_ARCHIVIST_DIRECTIVE,
   sanitizeArchivistPatch,
   type ArchivistPatch,
 } from '@/lib/archivist'
@@ -36,6 +38,22 @@ function seedWorld(name: string): { worldId: number; turnId: number } {
   const turn = insertTurn(world.id, 'assistant', 'The wind picks up.', null)
   return { worldId: world.id, turnId: turn.id }
 }
+
+describe('buildArchivistUserContent (opening bootstrap, A)', () => {
+  const base = { priorBlock: '{"world_time":"dusk"}', transcript: 'NARRATOR: Rain falls.', occupancyBlock: '' }
+
+  it('includes the opening directive only when isOpening is true', () => {
+    expect(buildArchivistUserContent({ ...base, isOpening: true })).toContain(OPENING_ARCHIVIST_DIRECTIVE)
+    expect(buildArchivistUserContent({ ...base, isOpening: false })).not.toContain(OPENING_ARCHIVIST_DIRECTIVE)
+  })
+
+  it('always carries the prior state and transcript and ends with the return instruction', () => {
+    const content = buildArchivistUserContent({ ...base, isOpening: false })
+    expect(content).toContain(base.priorBlock)
+    expect(content).toContain(base.transcript)
+    expect(content.trimEnd().endsWith('Return the patch.')).toBe(true)
+  })
+})
 
 describe('applyArchivistPatch', () => {
   let worldId: number

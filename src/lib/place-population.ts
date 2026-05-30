@@ -140,13 +140,20 @@ const KIND_ALIASES: Record<string, string> = {
   park: 'park', garden: 'park', plaza: 'park', square: 'park',
 }
 
-function classify(name: string, kind: string | null): string {
-  const words = `${kind ?? ''} ${name}`.toLowerCase().split(/\W+/)
-  const wordSet = new Set(words)
+// Pure keyword classifier shared by profile inference (which falls back to
+// 'generic') and the seed-time place-kind assignment in createWorld (which
+// leaves kind unset when there is no match). Returns null when no keyword hits
+// so callers can distinguish "no signal yet" from a deliberate 'generic'.
+export function classifyPlaceKind(text: string): string | null {
+  const wordSet = new Set(text.toLowerCase().split(/\W+/))
   for (const [keyword, profileKind] of Object.entries(KIND_ALIASES)) {
     if (wordSet.has(keyword)) return profileKind
   }
-  return 'generic'
+  return null
+}
+
+function classify(name: string, kind: string | null): string {
+  return classifyPlaceKind(`${kind ?? ''} ${name}`) ?? 'generic'
 }
 
 export function inferPlaceProfile(place: { name: string; kind: string | null }): InferredProfile {
