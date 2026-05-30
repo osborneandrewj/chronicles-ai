@@ -1,6 +1,6 @@
 import Link from 'next/link'
 
-import { CreateWorldForm } from './CreateWorldForm'
+import { CreateModeTabs } from './CreateModeTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +24,7 @@ export default function NewWorldPage() {
         tone — the narrator will hew closer to vivid concrete details than to vague mood words.
       </p>
 
-      <CreateWorldForm />
+      <CreateModeTabs />
     </main>
   )
 }
