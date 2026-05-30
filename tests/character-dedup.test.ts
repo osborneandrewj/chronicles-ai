@@ -32,6 +32,16 @@ describe('findLikelyDuplicateCharacters', () => {
     expect(findLikelyDuplicateCharacters(chars)).toHaveLength(0)
   })
 
+  it('flags a near-identical normalized name at different places', () => {
+    const chars = [
+      ch({ id: 1, name: 'Marco, Reeves', current_place_id: 1 }),
+      ch({ id: 2, name: 'Marco Reeves', current_place_id: 9 }),
+    ]
+    const pairs = findLikelyDuplicateCharacters(chars)
+    expect(pairs).toHaveLength(1)
+    expect(pairs[0].reason).toBe('near-identical name')
+  })
+
   it('flags a pair that shares a distinctive memorable fact', () => {
     const fact = 'carries Jérôme Moreau key ring including a vehicle fob [t:454]'
     const chars = [
@@ -39,7 +49,8 @@ describe('findLikelyDuplicateCharacters', () => {
       ch({ id: 2, name: 'Andy', current_place_id: 9, observations: fact }),
     ]
     const pairs = findLikelyDuplicateCharacters(chars)
-    expect(pairs.some((p) => p.reason === 'shared memorable fact')).toBe(true)
+    expect(pairs).toHaveLength(1)
+    expect(pairs[0].reason).toBe('shared memorable fact')
   })
 
   it('excludes the player and dead characters', () => {

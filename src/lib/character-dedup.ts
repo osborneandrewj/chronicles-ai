@@ -34,7 +34,9 @@ export function findLikelyDuplicateCharacters(chars: Character[]): DuplicatePair
       const b = active[j]
       let reason: string | null = null
 
-      // (a) descriptor + named, same place
+      // Rule 1: descriptor + named, same place. Ordered cheapest-check-first;
+      // two descriptor-only names at the same place are intentionally NOT flagged
+      // here — Rules 2/3 remain as fallbacks for those.
       if (
         a.current_place_id != null &&
         a.current_place_id === b.current_place_id &&
@@ -43,13 +45,13 @@ export function findLikelyDuplicateCharacters(chars: Character[]): DuplicatePair
         reason = 'descriptor + named at same place'
       }
 
-      // (c) near-identical normalized name
+      // Rule 2: near-identical normalized name
       if (!reason) {
         const ka = nameKey(a.name)
         if (ka && ka === nameKey(b.name)) reason = 'near-identical name'
       }
 
-      // (b) shared distinctive memorable fact / observation
+      // Rule 3: shared distinctive memorable fact / observation
       if (!reason) {
         const aLines = new Set([
           ...distinctiveLines(a.memorable_facts),
