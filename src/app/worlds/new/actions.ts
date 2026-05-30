@@ -3,8 +3,10 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
+import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn } from '@/lib/opening-turn'
-import { createWorld, setSettingRegionForWorld } from '@/lib/worlds'
+import { generateWorldFromGenre } from '@/lib/world-generator'
+import { createWorld, setSettingRegionForWorld, type CreateWorldInput } from '@/lib/worlds'
 
 const CreateWorldSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -19,8 +21,24 @@ const CreateWorldSchema = z.object({
     .default('Travel-worn newcomer — name not yet established.'),
 })
 
+const BasicWorldSchema = z.object({
+  playerName: z.string().trim().max(120).optional(),
+  genre: z.string().trim().refine(isGenre, 'Pick a genre from the list'),
+})
+
 export type CreateWorldFormState = {
   error?: string
+}
+
+// Shared tail for both creation modes: persist the world, extract a geocoding
+// region from the premise, synthesize the narrator's opening move, then send
+// the player into /play. `redirect` throws by design, so it must be the caller's
+// last statement (and is therefore invoked here, not returned).
+async function createAndOpenWorld(input: CreateWorldInput): Promise<never> {
+  const world = createWorld(input)
+  await setSettingRegionForWorld(world.id, input.premise, input.initialState.location)
+  await generateOpeningTurn(world.id, input.premise)
+  redirect(`/worlds/${world.id}/play`)
 }
 
 export async function createWorldAction(
@@ -39,24 +57,42 @@ export async function createWorldAction(
     return { error: parsed.error.issues.map((i) => i.message).join('; ') }
   }
   const { name, premise, location, time, playerName, identity } = parsed.data
-  const world = createWorld({
+  return createAndOpenWorld({
     name,
     premise,
     initialState: { time, location, identity, playerName },
   })
-  // Extract a Nominatim-friendly region string from the premise (e.g.
-  // "Hayden, Idaho, USA") and persist it before the opening turn fires.
-  // This biases real-world geocoding for every place created in this world.
-  // Failures are swallowed inside the helper — a missing region just means
-  // less-biased lookups, not a broken world.
-  await setSettingRegionForWorld(world.id, premise, location)
-  // Synthesize the narrator's opening move before redirecting so the player
-  // lands on a live fictional moment instead of an empty page. Awaited
-  // intentionally: the action stays blocked until both the narrator and the
-  // archivist have run, so /play hydrates with the opening already in place
-  // and the inspector reflects any newly-introduced state. Failures inside
-  // generateOpeningTurn are swallowed (logged) — a flaky LLM call shouldn't
-  // strand the user without a world.
-  await generateOpeningTurn(world.id, premise)
-  redirect(`/worlds/${world.id}/play`)
+}
+
+export async function createBasicWorldAction(
+  _prev: CreateWorldFormState,
+  formData: FormData,
+): Promise<CreateWorldFormState> {
+  const parsed = BasicWorldSchema.safeParse({
+    playerName: formData.get('playerName') || undefined,
+    genre: formData.get('genre'),
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues.map((i) => i.message).join('; ') }
+  }
+  const { playerName, genre } = parsed.data
+
+  let generated
+  try {
+    generated = await generateWorldFromGenre(genre, playerName ?? null)
+  } catch (err) {
+    console.error('[world generator failed]', err)
+    return { error: "Couldn't generate a world — try again, or use Advanced." }
+  }
+
+  return createAndOpenWorld({
+    name: generated.name,
+    premise: generated.premise,
+    initialState: {
+      time: generated.time,
+      location: generated.location,
+      identity: generated.identity,
+      playerName: playerName ?? undefined,
+    },
+  })
 }
