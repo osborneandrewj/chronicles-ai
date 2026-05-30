@@ -185,7 +185,7 @@ function InspectorBody({
   if (tab === "story") return <StoryView state={state} />;
   if (tab === "archivist")
     return <ArchivistView worldId={worldId} onCorrectionApplied={onCorrectionApplied} />;
-  return <WikiView state={state} />;
+  return <WikiView state={state} worldId={worldId} />;
 }
 
 function NowView({ state }: { state: FullWorldState }) {
@@ -333,7 +333,7 @@ function StoryView({ state }: { state: FullWorldState }) {
   );
 }
 
-function WikiView({ state }: { state: FullWorldState }) {
+function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }) {
   type WikiSubtab = "characters" | "places" | "scenes";
   const [sub, setSub] = useState<WikiSubtab>("characters");
   const sortedScenes = useMemo(
@@ -372,20 +372,37 @@ function WikiView({ state }: { state: FullWorldState }) {
       </div>
 
       {sub === "characters" && (
-        state.characters.length === 0 ? (
-          <p className="text-neutral-500">No characters yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {state.characters.map((c) => (
-              <CharacterCard
-                key={c.id}
-                character={c}
-                places={state.places}
-                turnTimestamps={state.turnTimestamps}
-              />
-            ))}
-          </ul>
-        )
+        <>
+          {state.potentialDuplicates.length > 0 && (
+            <div className="mb-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200">
+              <p className="font-medium">Potential duplicate characters</p>
+              <ul className="mt-1 space-y-1">
+                {state.potentialDuplicates.map((d) => (
+                  <li key={`${d.aId}-${d.bId}`}>
+                    &quot;{d.aName}&quot; (#{d.aId}) ~ &quot;{d.bName}&quot; (#{d.bId}) — {d.reason}
+                    <code className="ml-1 block text-amber-300/80">
+                      node scripts/merge-characters.mjs --world {worldId} --canonical {d.bId} --dupe {d.aId}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {state.characters.length === 0 ? (
+            <p className="text-neutral-500">No characters yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {state.characters.map((c) => (
+                <CharacterCard
+                  key={c.id}
+                  character={c}
+                  places={state.places}
+                  turnTimestamps={state.turnTimestamps}
+                />
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       {sub === "places" && (
