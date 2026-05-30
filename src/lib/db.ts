@@ -4,6 +4,8 @@ import path from 'node:path'
 import { runMigrations } from '@/lib/migrations'
 import type { Character, Place, Scene } from '@/lib/world-state'
 
+export type { Character }
+
 export type TurnRole = 'user' | 'assistant'
 
 export type Turn = {
