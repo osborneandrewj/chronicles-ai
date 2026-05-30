@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import { isDescriptorName } from '@/lib/character-identity'
 import { db } from '@/lib/db'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import type { PlaceOccupancy } from '@/lib/place-population'
@@ -308,6 +309,7 @@ export function buildArchivistUserContent(parts: {
     ...(occupancyBlock ? ['', occupancyBlock] : []),
     ...(isOpening ? ['', OPENING_ARCHIVIST_DIRECTIVE] : []),
     '',
+    'NOTE: a character marked "descriptor_placeholder": true is an unnamed stand-in. If the latest turn names that figure (they state a name, are named, or ID is found), rename THAT row — set `name` to the proper name and `reveals_name_of` to the descriptor — do not create a new character.',
     'Return the patch.',
   ].join('\n')
 }
@@ -342,6 +344,8 @@ export async function extractPatch(
         name: c.name,
         is_player: c.is_player === 1,
         status: c.status,
+        descriptor_placeholder:
+          c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
         current_place:
           c.current_place_id && prior.currentPlace?.id === c.current_place_id
             ? prior.currentPlace.name
@@ -354,6 +358,8 @@ export async function extractPatch(
         name: c.name,
         is_player: c.is_player === 1,
         status: c.status,
+        descriptor_placeholder:
+          c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
         description: limit(c.description, 120),
         memorable_facts:
           c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
