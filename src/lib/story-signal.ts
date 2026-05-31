@@ -17,6 +17,9 @@ export function hasRichStorySignal(playerText: string, narratorText: string): bo
       text,
     ) ||
     /\b(call|calls|called|text|texts|email|emails|post|posts|message|messages)\b/.test(text) ||
-    /[""][^""]{2,}[""]/.test(`${playerText}\n${narratorText}`)
+    // Character classes include BOTH straight (") and curly (U+201C/U+201D)
+    // quotes — the narrator emits smart-quoted dialogue, so dropping the curly
+    // quotes silently breaks dialogue detection. Keep both pairs intact.
+    /["“][^"”]{2,}["”]/.test(`${playerText}\n${narratorText}`)
   )
 }
