@@ -13,4 +13,9 @@ describe('prompt content guards', () => {
     const p = loadPrompt('npc-agent-system').toLowerCase()
     expect(p).toContain('era-appropriate')
   })
+
+  it('archivist prompt makes dossier emission a directive, not optional', () => {
+    const p = loadPrompt('archivist-system').toLowerCase()
+    expect(p).toContain('a memorable_fact is not a substitute for a thread')
+  })
 })
