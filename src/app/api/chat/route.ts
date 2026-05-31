@@ -266,6 +266,9 @@ export async function POST(req: Request) {
     openClueTitles: narratorState.dossier.clues
       .filter((c) => c.status === 'open' || c.status === 'interpreted')
       .map((c) => c.title),
+    activeThreatTitles: narratorState.dossier.threads
+      .filter((t) => t.status === 'active' && t.kind === 'threat')
+      .map((t) => t.title),
   })
 
   const trailingUser: ModelMessage = {

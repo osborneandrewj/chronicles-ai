@@ -18,4 +18,9 @@ describe('prompt content guards', () => {
     const p = loadPrompt('archivist-system').toLowerCase()
     expect(p).toContain('a memorable_fact is not a substitute for a thread')
   })
+
+  it('narrator prompt instructs the world to act when the player is passive', () => {
+    const p = loadPrompt('narrator-system').toLowerCase()
+    expect(p).toContain('scenes must never stall')
+  })
 })
