@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { POST } from '@/app/api/chat/route'
+import { hasRichStorySignal } from '@/lib/story-signal'
 import { createWorld } from '@/lib/worlds'
 
 // These tests exercise the request-validation layer of POST /api/chat. They
@@ -17,6 +18,15 @@ function buildRequest(worldId: number | string, body: BodyInit): Request {
     body,
   })
 }
+
+describe('hasRichStorySignal', () => {
+  it('fires on discovery/danger language', () => {
+    expect(hasRichStorySignal('I hurl my javelin at the scout', 'The scout dies, an ambush map in his pouch')).toBe(true)
+  })
+  it('is quiet on routine continuation', () => {
+    expect(hasRichStorySignal('we continue', 'You walk on beneath the canopy.')).toBe(false)
+  })
+})
 
 describe('POST /api/chat — request parsing', () => {
   let worldId: number

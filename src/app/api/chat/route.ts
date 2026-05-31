@@ -38,6 +38,7 @@ import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
+import { hasRichStorySignal } from '@/lib/story-signal'
 import {
   formatSceneDigestForClassifier,
   formatStateBlock,
@@ -490,24 +491,8 @@ function shouldRunArchivistLlm(
   narratorText: string,
   hasDeterministicPatch: boolean,
 ): boolean {
+  if (hasRichStorySignal(playerText, narratorText)) return true
   const text = `${playerText}\n${narratorText}`.toLowerCase()
-  const richSignal =
-    /\b(named|called|introduced|introduces|appears|arrives|enters|walks in|bartender|clerk|manager|wife|husband|mother|father|daughter|son)\b/.test(
-      text,
-    ) ||
-    /\b(minutes?|hours?|morning|afternoon|evening|night|later|next day|noon|midnight)\b/.test(
-      text,
-    ) ||
-    /\b(dies|dead|wounded|injured|takes|picks up|hands|gives|receives|promises|learns|discovers)\b/.test(
-      text,
-    ) ||
-    /\b(clue|evidence|lead|objective|mission|thread|mystery|fragment|serial|pattern match|matches|matched|scan result|identif(?:y|ies|ied)|decode[sd]?|translat(?:e|es|ed))\b/.test(
-      text,
-    ) ||
-    /\b(call|calls|called|text|texts|email|emails|post|posts|message|messages)\b/.test(text) ||
-    /["“][^"”]{2,}["”]/.test(`${playerText}\n${narratorText}`)
-
-  if (richSignal) return true
   return !hasDeterministicPatch && /\b(leave|left|arrive|arrives|enter|entered|go to|drive to|walk to)\b/.test(text)
 }
 
