@@ -228,6 +228,7 @@ function NowView({ state }: { state: FullWorldState }) {
                 character={c}
                 places={state.places}
                 turnTimestamps={state.turnTimestamps}
+                turnNumbers={state.turnNumbers}
               />
             ))}
           </ul>
@@ -398,6 +399,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
                   character={c}
                   places={state.places}
                   turnTimestamps={state.turnTimestamps}
+                  turnNumbers={state.turnNumbers}
                 />
               ))}
             </ul>
@@ -477,10 +479,12 @@ function CharacterCard({
   character: c,
   places,
   turnTimestamps,
+  turnNumbers,
 }: {
   character: FullWorldState["characters"][number];
   places: FullWorldState["places"];
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
 }) {
   const currentPlace = c.current_place_id
     ? places.find((p) => p.id === c.current_place_id)?.name
@@ -524,7 +528,7 @@ function CharacterCard({
         </div>
       )}
       {c.is_player !== 1 && (
-        <NpcAgencySummary character={c} turnTimestamps={turnTimestamps} />
+        <NpcAgencySummary character={c} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
       )}
       {c.description && <p className="mt-0.5 text-neutral-400">{c.description}</p>}
       {c.player_notes && (
@@ -548,7 +552,7 @@ function CharacterCard({
             <CharacterStateGroup label="Mind">
               {c.long_term_agenda && (
                 <CharField label="agenda" tone="emerald">
-                  <MultiLine value={c.long_term_agenda} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.long_term_agenda} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
               {c.relationship_to_player && (
@@ -556,17 +560,17 @@ function CharacterCard({
               )}
               {c.private_beliefs && (
                 <CharField label="beliefs" tone="sky">
-                  <MultiLine value={c.private_beliefs} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.private_beliefs} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
               {c.reveries && (
                 <CharField label="reveries" tone="violet">
-                  <MultiLine value={c.reveries} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.reveries} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
               {c.tool_access && (
                 <CharField label="tools" tone="sky">
-                  <MultiLine value={c.tool_access} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.tool_access} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
             </CharacterStateGroup>
@@ -575,7 +579,7 @@ function CharacterCard({
             <CharacterStateGroup label="Now">
               {c.personal_goals && (
                 <CharField label="personal goals" tone="emerald">
-                  <MultiLine value={c.personal_goals} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.personal_goals} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
               {c.active_goal && (
@@ -593,12 +597,12 @@ function CharacterCard({
             <CharacterStateGroup label="History">
               {c.recent_activity && (
                 <CharField label="activity" tone="sky">
-                  <MultiLine value={c.recent_activity} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.recent_activity} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
               {c.observations && (
                 <CharField label="observed" tone="amber">
-                  <MultiLine value={c.observations} turnTimestamps={turnTimestamps} />
+                  <MultiLine value={c.observations} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
             </CharacterStateGroup>
@@ -606,12 +610,13 @@ function CharacterCard({
         </dl>
       )}
       {c.is_player === 1 && playerProfileGroups.length > 0 && (
-        <PlayerProfileGroups groups={playerProfileGroups} turnTimestamps={turnTimestamps} />
+        <PlayerProfileGroups groups={playerProfileGroups} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
       )}
       {c.is_player !== 1 && c.memorable_facts && (
         <StateEntryList
           value={c.memorable_facts}
           turnTimestamps={turnTimestamps}
+          turnNumbers={turnNumbers}
           className="mt-1 list-disc pl-4 text-neutral-500"
           collapsedLabel="updates"
         />
@@ -623,9 +628,11 @@ function CharacterCard({
 function PlayerProfileGroups({
   groups,
   turnTimestamps,
+  turnNumbers,
 }: {
   groups: PlayerProfileGroup[];
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
 }) {
   return (
     <dl className="mt-1.5 space-y-1.5 text-[12px]">
@@ -634,7 +641,7 @@ function PlayerProfileGroups({
           <ul className="space-y-0.5">
             {group.entries.map((entry, i) => (
               <li key={`${group.key}-${i}`} className="text-neutral-300">
-                <StateEntryLine value={entry.line} turnTimestamps={turnTimestamps} />
+                <StateEntryLine value={entry.line} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
               </li>
             ))}
           </ul>
@@ -647,13 +654,15 @@ function PlayerProfileGroups({
 function NpcAgencySummary({
   character: c,
   turnTimestamps,
+  turnNumbers,
 }: {
   character: FullWorldState["characters"][number];
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
 }) {
   const parts = [`seen ${c.appearance_count}x`];
-  const lastSeen = turnLabel(c.last_seen_turn_id, turnTimestamps);
-  const lastTick = turnLabel(c.last_agent_tick_turn_id, turnTimestamps);
+  const lastSeen = turnLabel(c.last_seen_turn_id, turnTimestamps, turnNumbers);
+  const lastTick = turnLabel(c.last_agent_tick_turn_id, turnTimestamps, turnNumbers);
   if (lastSeen) parts.push(`last seen ${lastSeen}`);
   if (lastTick) parts.push(`agent tick ${lastTick}`);
 
@@ -754,35 +763,43 @@ function CharField({
 function turnLabel(
   turnId: number | null | undefined,
   turnTimestamps: Record<number, string>,
+  turnNumbers: Record<number, number>,
 ): string | null {
   if (!turnId) return null;
+  const turnNo = turnNumbers[turnId];
   const timestamp = turnTimestamps[turnId];
-  return timestamp ? formatTimestamp(timestamp) : `#${turnId}`;
+  const date = timestamp ? formatTimestamp(timestamp) : null;
+  if (turnNo) return date ? `#${turnNo} ${date}` : `#${turnNo}`;
+  return date ?? `#${turnId}`;
 }
 
 function MultiLine({
   value,
   turnTimestamps,
+  turnNumbers,
 }: {
   value: string;
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
 }) {
   const lines = value.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length === 1) {
-    return <StateEntryLine value={lines[0]} turnTimestamps={turnTimestamps} />;
+    return <StateEntryLine value={lines[0]} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />;
   }
-  return <StateEntryList value={value} turnTimestamps={turnTimestamps} />;
+  return <StateEntryList value={value} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />;
 }
 
 function StateEntryList({
   value,
   turnTimestamps,
+  turnNumbers,
   className = "space-y-0.5",
   collapsedLabel = "entries",
   initialVisible = 5,
 }: {
   value: string;
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
   className?: string;
   collapsedLabel?: string;
   initialVisible?: number;
@@ -806,7 +823,7 @@ function StateEntryList({
       <ul className={className}>
         {visibleLines.map((l, i) => (
           <li key={`${expanded ? "all" : "recent"}-${i}`}>
-            <StateEntryLine value={l} turnTimestamps={turnTimestamps} />
+            <StateEntryLine value={l} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
           </li>
         ))}
       </ul>
@@ -817,15 +834,23 @@ function StateEntryList({
 function StateEntryLine({
   value,
   turnTimestamps,
+  turnNumbers,
 }: {
   value: string;
   turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
 }) {
   const entry = parseStateEntry(value);
   const timestamp = entry.turnId === null ? undefined : turnTimestamps[entry.turnId];
+  const turnNo = entry.turnId === null ? undefined : turnNumbers[entry.turnId];
   return (
     <span>
       {entry.text}
+      {turnNo && (
+        <span className="ml-1.5 whitespace-nowrap text-[10px] text-neutral-500">
+          #{turnNo}
+        </span>
+      )}
       {timestamp && (
         <time
           dateTime={dateTimeAttr(timestamp)}
