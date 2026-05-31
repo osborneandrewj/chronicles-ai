@@ -26,6 +26,14 @@ describe('hasRichStorySignal', () => {
   it('is quiet on routine continuation', () => {
     expect(hasRichStorySignal('we continue', 'You walk on beneath the canopy.')).toBe(false)
   })
+  // Regression: the quote branch must match smart (curly) quotes, not only
+  // straight ones — the narrator emits smart-quoted dialogue.
+  it('fires on smart-quoted dialogue with no other signal words', () => {
+    expect(hasRichStorySignal('', 'He leans close and murmurs, “the bridge is watched.”')).toBe(true)
+  })
+  it('fires on straight-quoted dialogue', () => {
+    expect(hasRichStorySignal('', 'She says, "wait here for the others."')).toBe(true)
+  })
 })
 
 describe('POST /api/chat — request parsing', () => {
