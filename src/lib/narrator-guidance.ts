@@ -86,7 +86,15 @@ function pickBeatCue(ctx: GuidanceContext): string | null {
     return 'The player is trying to learn something — return a concrete result, partial match, contradiction, named obstacle, or new lead.'
   }
   if (ctx.stance === 'observe' || isAttentionOnlyMove(text)) {
-    return 'Observation should reveal a new handle: a detail, offer, threat, contradiction, interruption, or lead.'
+    return (
+      'The protagonist is taking in the scene — render the surroundings in depth: lead with concrete, ' +
+      'multi-sensory specifics (light, sound, smell, temperature, terrain, distances, the people and ' +
+      'their bearing) so the world feels inhabited and particular, then surface at least one new handle ' +
+      '(a detail, offer, threat, contradiction, or lead). This is an establishing beat in the ' +
+      'medium-to-long band — do not answer a look-around with two or three sentences. If the scene was ' +
+      'already painted this richly on a recent turn, vary the focus or advance something rather than ' +
+      'repeating the same survey.'
+    )
   }
   if (ctx.stance === 'say') {
     const language = detectMarkedSpokenLanguage(text)

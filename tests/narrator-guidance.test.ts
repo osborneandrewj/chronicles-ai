@@ -93,7 +93,7 @@ describe('formatNarratorTurnGuidance', () => {
       plannedActionCount: 0,
     })
 
-    expect(guidance).toContain('Observation should reveal a new handle')
+    expect(guidance.toLowerCase()).toContain('render the surroundings')
     expect(guidance).toContain('detail, offer, threat')
   })
 
@@ -296,5 +296,22 @@ describe('formatNarratorTurnGuidance', () => {
 
     expect(guidance).toContain('keep the fiction in place')
     expect(guidance).not.toContain('branch the player can pursue')
+  })
+})
+
+describe('observation depth', () => {
+  it('asks an orienting move to render the surroundings in depth, not just a handle', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ stance: 'observe', playerText: 'I look around', recentTurns: [] }),
+    )
+    expect(out.toLowerCase()).toContain('render the surroundings')
+    expect(out.toLowerCase()).toContain('multi-sensory')
+  })
+
+  it('does not apply the observation cue to a driving move', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ stance: 'do', playerText: 'I charge the line', recentTurns: [] }),
+    )
+    expect(out.toLowerCase()).not.toContain('render the surroundings')
   })
 })
