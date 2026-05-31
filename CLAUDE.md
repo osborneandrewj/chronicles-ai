@@ -26,7 +26,7 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 
 ## Tech Stack
 
-Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (`@ai-sdk/anthropic`) · Claude Sonnet 4 (narrator/seeder/actor) + Haiku (compiler/linter/archivist/conductor) · PostgreSQL 17 + pgvector · Drizzle ORM (postgres-js driver) · Zod · Voyage AI embeddings (Phase 2+) · NextAuth.js (Phase 5+)
+Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (`@ai-sdk/anthropic`) · Grok 4.3 (narrator/seeder/actor) + Haiku (compiler/linter/archivist/conductor) · PostgreSQL 17 + pgvector · Drizzle ORM (postgres-js driver) · Zod · Voyage AI embeddings (Phase 2+) · NextAuth.js (Phase 5+)
 
 ## Commands
 
