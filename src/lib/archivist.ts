@@ -274,32 +274,37 @@ function formatOccupancyForArchivist(occupancy: PlaceOccupancy | null): string {
   return lines.join('\n')
 }
 
-// Injected on the world's first narration (A + C2). The opening archivist runs
-// against an empty dossier, so without this it tends to extract only characters
-// and leave the world with no thread and an untyped place. We make both the
-// central thread and the starting place's kind mandatory.
-export const OPENING_ARCHIVIST_DIRECTIVE = [
-  "OPENING TURN — this is the world's first narration and the dossier is empty.",
-  'From the premise and this opening narration you MUST do BOTH of the following:',
-  '1. Create at least one story_thread capturing the central goal, danger, or tension the premise sets up. ' +
-    'Choose kind: quest for a goal the protagonist is pursuing or has taken on, threat for a danger or clock ' +
-    'bearing down, mystery only for an unexplained situation with no objective yet. Set 2-5 lowercase ' +
-    'relevance_tags (topic + place-kind).',
-  "2. Set the starting place's kind via a places[] patch — the concrete locale where the scene opens " +
-    '(e.g. street, transit, bar, market, hospital, office, cafe, restaurant, park, dock, alley) — so the ' +
-    'world can populate it. Patch the place by the name shown in PRIOR STATE.',
+// The dossier is empty and the latest narration carries story-shaped pressure.
+// Fires on the opening turn AND on any later turn until the world has at least
+// one active thread — the gap that left worlds with a permanently empty dossier
+// (Haiku ignored the one-shot opening directive). Reframed as a hard mandate.
+export const THREAD_MANDATE_DIRECTIVE = [
+  'DOSSIER BOOTSTRAP — this world has no active story_thread yet.',
+  'The latest narration establishes story pressure. You MUST create at least one story_thread',
+  'capturing the central goal, danger, or tension in play. Choose kind: quest for a goal the',
+  'protagonist is pursuing or has taken on, threat for a danger or clock bearing down, mystery',
+  'only for an unexplained situation with no objective yet. Set 2-5 lowercase relevance_tags',
+  '(topic + place-kind). A memorable_fact is NOT a substitute for a thread.',
 ].join('\n')
 
-// Pure assembly of the archivist's user message. Extracted so the opening-turn
-// bootstrap contract (does isOpening inject the directive?) is unit-testable
-// without exercising the LLM call.
+// Only on the world's literal first narration: the starting place needs a kind
+// so the world can populate it.
+export const PLACE_KIND_DIRECTIVE = [
+  "OPENING TURN — set the starting place's kind via a places[] patch — the concrete locale where",
+  'the scene opens (e.g. street, transit, bar, market, hospital, office, cafe, restaurant, park,',
+  'dock, alley) — so the world can populate it. Patch the place by the name shown in PRIOR STATE.',
+].join('\n')
+
+// Pure assembly of the archivist's user message. Extracted so the directive
+// injection contract is unit-testable without exercising the LLM call.
 export function buildArchivistUserContent(parts: {
   priorBlock: string
   transcript: string
   occupancyBlock: string
-  isOpening: boolean
+  threadMandate: boolean
+  placeKindMandate: boolean
 }): string {
-  const { priorBlock, transcript, occupancyBlock, isOpening } = parts
+  const { priorBlock, transcript, occupancyBlock, threadMandate, placeKindMandate } = parts
   return [
     'PRIOR STATE:',
     priorBlock,
@@ -307,7 +312,8 @@ export function buildArchivistUserContent(parts: {
     'RECENT TURNS:',
     transcript,
     ...(occupancyBlock ? ['', occupancyBlock] : []),
-    ...(isOpening ? ['', OPENING_ARCHIVIST_DIRECTIVE] : []),
+    ...(threadMandate ? ['', THREAD_MANDATE_DIRECTIVE] : []),
+    ...(placeKindMandate ? ['', PLACE_KIND_DIRECTIVE] : []),
     '',
     'NOTE: a character marked "descriptor_placeholder": true is an unnamed stand-in. If the latest turn names that figure (they state a name, are named, or ID is found), rename THAT row — set `name` to the proper name and `reveals_name_of` to the descriptor — do not create a new character.',
     'Return the patch.',
@@ -320,6 +326,7 @@ export async function extractPatch(
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
   occupancy: PlaceOccupancy | null = null,
   isOpening = false,
+  bootstrapDossier = false,
 ): Promise<{ patch: ArchivistPatch; usage: LanguageModelUsage }> {
   const transcript = recent
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
@@ -419,7 +426,13 @@ export async function extractPatch(
       },
       {
         role: 'user',
-        content: buildArchivistUserContent({ priorBlock, transcript, occupancyBlock, isOpening }),
+        content: buildArchivistUserContent({
+          priorBlock,
+          transcript,
+          occupancyBlock,
+          threadMandate: isOpening || bootstrapDossier,
+          placeKindMandate: isOpening,
+        }),
       },
     ],
   })

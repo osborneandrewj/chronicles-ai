@@ -4,8 +4,9 @@ import {
   applyArchivistPatch,
   buildArchivistUserContent,
   extractDeterministicPatch,
-  OPENING_ARCHIVIST_DIRECTIVE,
+  PLACE_KIND_DIRECTIVE,
   sanitizeArchivistPatch,
+  THREAD_MANDATE_DIRECTIVE,
   type ArchivistPatch,
 } from '@/lib/archivist'
 import {
@@ -42,16 +43,38 @@ function seedWorld(name: string): { worldId: number; turnId: number } {
 describe('buildArchivistUserContent (opening bootstrap, A)', () => {
   const base = { priorBlock: '{"world_time":"dusk"}', transcript: 'NARRATOR: Rain falls.', occupancyBlock: '' }
 
-  it('includes the opening directive only when isOpening is true', () => {
-    expect(buildArchivistUserContent({ ...base, isOpening: true })).toContain(OPENING_ARCHIVIST_DIRECTIVE)
-    expect(buildArchivistUserContent({ ...base, isOpening: false })).not.toContain(OPENING_ARCHIVIST_DIRECTIVE)
+  it('includes the thread mandate on the opening turn', () => {
+    expect(buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: true })).toContain(THREAD_MANDATE_DIRECTIVE)
+    expect(buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })).not.toContain(THREAD_MANDATE_DIRECTIVE)
   })
 
   it('always carries the prior state and transcript and ends with the return instruction', () => {
-    const content = buildArchivistUserContent({ ...base, isOpening: false })
+    const content = buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })
     expect(content).toContain(base.priorBlock)
     expect(content).toContain(base.transcript)
     expect(content.trimEnd().endsWith('Return the patch.')).toBe(true)
+  })
+})
+
+describe('archivist directive assembly', () => {
+  const base = { priorBlock: '{}', transcript: 'PLAYER: x', occupancyBlock: '' }
+
+  it('injects only the thread mandate when bootstrapping a non-opening empty dossier', () => {
+    const content = buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: false })
+    expect(content).toContain(THREAD_MANDATE_DIRECTIVE)
+    expect(content).not.toContain(PLACE_KIND_DIRECTIVE)
+  })
+
+  it('injects both mandates on the true opening turn', () => {
+    const content = buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: true })
+    expect(content).toContain(THREAD_MANDATE_DIRECTIVE)
+    expect(content).toContain(PLACE_KIND_DIRECTIVE)
+  })
+
+  it('injects neither on a routine turn', () => {
+    const content = buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })
+    expect(content).not.toContain(THREAD_MANDATE_DIRECTIVE)
+    expect(content).not.toContain(PLACE_KIND_DIRECTIVE)
   })
 })
 
