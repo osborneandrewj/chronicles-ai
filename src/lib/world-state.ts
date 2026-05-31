@@ -15,6 +15,7 @@ import {
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 import type { PlaceOccupancy } from '@/lib/place-population'
+import { buildTurnNumberMap } from '@/lib/turn-numbers'
 
 export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
 
@@ -108,6 +109,7 @@ export type FullWorldState = {
   scenes: Scene[]
   dossier: StoryDossier
   turnTimestamps: Record<number, string>
+  turnNumbers: Record<number, number>
   potentialDuplicates: DuplicatePair[]
 }
 
@@ -143,9 +145,11 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
 
 export function getFullWorldState(worldId: number): FullWorldState {
   const cursor = getWorldCursor(worldId)
+  const orderedTurns = getTurnTimestampsForWorld(worldId)
   const turnTimestamps = Object.fromEntries(
-    getTurnTimestampsForWorld(worldId).map((turn) => [turn.id, turn.created_at]),
+    orderedTurns.map((turn) => [turn.id, turn.created_at]),
   )
+  const turnNumbers = buildTurnNumberMap(orderedTurns.map((turn) => turn.id))
   const characters = getCharactersForWorld(worldId)
   return {
     worldTime: cursor.world_time,
@@ -155,6 +159,7 @@ export function getFullWorldState(worldId: number): FullWorldState {
     scenes: getScenesForWorld(worldId),
     dossier: getStoryDossierForWorld(worldId),
     turnTimestamps,
+    turnNumbers,
     potentialDuplicates: findLikelyDuplicateCharacters(characters),
   }
 }
