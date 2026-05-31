@@ -403,7 +403,19 @@ export async function POST(req: Request) {
         role: t.role,
         content: t.content,
       }))
-      const archivistPromise = extractPatch(world.premise, priorState, archivistRecent, turnOccupancy)
+      const activeThreadCount = priorState.dossier.threads.filter(
+        (t) => t.status === 'active',
+      ).length
+      const bootstrapDossier =
+        activeThreadCount === 0 && hasRichStorySignal(playerText, trimmed)
+      const archivistPromise = extractPatch(
+        world.premise,
+        priorState,
+        archivistRecent,
+        turnOccupancy,
+        false,
+        bootstrapDossier,
+      )
         .then(({ patch, usage: archivistUsage }) => {
           applyArchivistPatch(worldId, narratorTurn.id, patch)
           updateTurnMetadata(narratorTurn.id, {
