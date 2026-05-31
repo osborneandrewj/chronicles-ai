@@ -2,6 +2,55 @@ import { describe, expect, it } from 'vitest'
 
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 
+function ctx(overrides: Partial<Parameters<typeof formatNarratorTurnGuidance>[0]> = {}) {
+  return {
+    stance: 'observe',
+    inputMode: 'in-character',
+    playerText: 'I look around',
+    recentTurns: [],
+    presentNpcCount: 1,
+    plannedActionCount: 0,
+    ...overrides,
+  }
+}
+
+describe('narrator momentum ladder', () => {
+  it('fires the L2 "world acts" cue after the idle threshold of passive moves', () => {
+    const recentTurns = [
+      { role: 'user' as const, content: 'I look around' },
+      { role: 'assistant' as const, content: 'The camp stirs.' },
+      { role: 'user' as const, content: 'we continue' },
+      { role: 'assistant' as const, content: 'You march on.' },
+    ]
+    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns }))
+    expect(out.toLowerCase()).toContain('world acts')
+  })
+
+  it('does not fire L2 when the player is actively driving', () => {
+    const recentTurns = [
+      { role: 'user' as const, content: 'I hurl my javelin at the scout' },
+      { role: 'assistant' as const, content: 'It strikes home.' },
+    ]
+    const out = formatNarratorTurnGuidance(
+      ctx({ stance: 'do', playerText: 'I charge the line', recentTurns }),
+    )
+    expect(out.toLowerCase()).not.toContain('world acts')
+  })
+
+  it('names an active threat thread as the pressure source when one exists', () => {
+    const recentTurns = [
+      { role: 'user' as const, content: 'I look around' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+      { role: 'user' as const, content: 'I wait' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+    ]
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns, activeThreatTitles: ['Ambush at the bend'] }),
+    )
+    expect(out).toContain('Ambush at the bend')
+  })
+})
+
 describe('formatNarratorTurnGuidance', () => {
   it('pushes spoken answers instead of summarized replies on say turns', () => {
     const guidance = formatNarratorTurnGuidance({

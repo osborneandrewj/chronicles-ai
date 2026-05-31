@@ -1,3 +1,7 @@
+// Consecutive low-agency player moves before the narrator should make the world
+// act on its own (escalating momentum). Tunable.
+const MOMENTUM_IDLE_THRESHOLD = 2
+
 type RecentTurn = { role: 'user' | 'assistant'; content: string }
 
 type GuidanceContext = {
@@ -10,6 +14,7 @@ type GuidanceContext = {
   worldTime?: string | null
   activeObjectiveTitles?: string[]
   openClueTitles?: string[]
+  activeThreatTitles?: string[]
 }
 
 export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
@@ -48,6 +53,9 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
 
   const continuity = pickContinuityNudge(ctx.recentTurns)
   if (continuity) lines.push(continuity)
+
+  const momentum = pickMomentumCue(ctx)
+  if (momentum) lines.push(momentum)
 
   if (needsBranch(ctx)) {
     lines.push('Leave at least one branch the player can pursue.')
@@ -88,6 +96,49 @@ function pickBeatCue(ctx: GuidanceContext): string | null {
     return 'Let audible dialogue be audible — write the words someone answers with, not a summary.'
   }
   return null
+}
+
+function isLowAgencyMove(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  // Short observation / waiting / bare continuation — the player is marking time.
+  if (isAttentionOnlyMove(text)) return true
+  return (
+    compact.length <= 40 &&
+    /\b(wait|waits|continue|continues|keep going|carry on|stay|stand|listen|nothing|hold|pause|rest)\b/.test(
+      compact,
+    )
+  )
+}
+
+function countTrailingIdleMoves(ctx: GuidanceContext): number {
+  // Current move + trailing player moves, newest-first, until a driving move.
+  const priorPlayer = ctx.recentTurns
+    .filter((t) => t.role === 'user')
+    .map((t) => t.content)
+    .reverse()
+  let count = isLowAgencyMove(ctx.playerText) ? 1 : 0
+  if (count === 0) return 0
+  for (const text of priorPlayer) {
+    if (isLowAgencyMove(text)) count += 1
+    else break
+  }
+  return count
+}
+
+function pickMomentumCue(ctx: GuidanceContext): string | null {
+  const idle = countTrailingIdleMoves(ctx)
+  if (idle < MOMENTUM_IDLE_THRESHOLD) return null
+  const threat = ctx.activeThreatTitles?.[0]
+  const pressure = threat
+    ? ` Draw the pressure from the active threat "${threat}".`
+    : ''
+  return (
+    'The player is marking time — the world acts: make something happen TO the protagonist this ' +
+    'turn that they did not initiate (an NPC pursues its goal, a threat closes, time bites, a new ' +
+    'element enters). Create a situation, not a forced choice; do not decide the protagonist’s ' +
+    'actions or feelings; one intrusion only.' +
+    pressure
+  )
 }
 
 function pickContinuityNudge(turns: RecentTurn[]): string | null {
