@@ -29,12 +29,15 @@ function scrubKilometer(text) {
 }
 
 function dedupStripFacts(text) {
-  // Remove the redundant second strip-the-scout line (keep the first).
+  // Remove the redundant second "stripped the scout's pouch/torc" line, keeping
+  // the first. The pattern is anchored on the STRIP verb so it does not also
+  // catch the distinct map-discovery / show-Marcus facts, which merely mention
+  // "the dead scout's pouch" without being a strip action.
   const lines = text.split('\n')
   let seenStrip = false
   const kept = []
   for (const line of lines) {
-    const isStrip = /strip(?:ped)?.*(?:pouch|torc).*scout|scout.*(?:pouch|torc)/i.test(line)
+    const isStrip = /\bstrip(?:ped|s)?\b.*\b(?:pouch|torc)\b/i.test(line)
     if (isStrip) {
       if (seenStrip) continue
       seenStrip = true
