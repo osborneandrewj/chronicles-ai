@@ -7,6 +7,7 @@ import { db } from '@/lib/db'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import type { PlaceOccupancy } from '@/lib/place-population'
 import { loadPrompt } from '@/lib/prompt-files'
+import { repointReveries } from '@/lib/reveries'
 import type { NarratorWorldState } from '@/lib/world-state'
 
 // Discriminated on `action` rather than the doc's keep_open/close/open key shape.
@@ -952,7 +953,6 @@ const mergeCharacterStmt = db.prepare<
     string | null,
     string | null,
     string | null,
-    string | null,
     number,
     number | null,
     number | null,
@@ -975,7 +975,6 @@ const mergeCharacterStmt = db.prepare<
      current_focus           = ?,
      recent_activity         = ?,
      private_beliefs         = ?,
-     reveries                = ?,
      relationship_to_player  = ?,
      long_term_agenda        = ?,
      tool_access             = ?,
@@ -1462,7 +1461,6 @@ function mergeCharacters(
     current_focus: freshest(target, source, (r) => r.current_focus),
     recent_activity: mergeLineBlocks(target.recent_activity, source.recent_activity),
     private_beliefs: mergeLineBlocks(target.private_beliefs, source.private_beliefs),
-    reveries: mergeLineBlocks(target.reveries, source.reveries),
     relationship_to_player: freshest(target, source, (r) => r.relationship_to_player),
     long_term_agenda: mergeLineBlocks(target.long_term_agenda, source.long_term_agenda),
     tool_access: mergeLineBlocks(target.tool_access, source.tool_access),
@@ -1475,6 +1473,11 @@ function mergeCharacters(
     player_notes: mergeLineBlocks(target.player_notes, source.player_notes),
     aliases: mergedAliases,
   }
+  // Re-point reverie ROWS onto the surviving target BEFORE deleting the source.
+  // npc_reveries.character_id has ON DELETE CASCADE, so deleting the source
+  // first would drop its reveries before we could carry them over. The dormant
+  // characters.reveries text column is intentionally no longer merged here.
+  repointReveries(source.id, target.id)
   deleteCharacterStmt.run(source.id)
   mergeCharacterStmt.run(
     merged.name,
@@ -1490,7 +1493,6 @@ function mergeCharacters(
     merged.current_focus,
     merged.recent_activity,
     merged.private_beliefs,
-    merged.reveries,
     merged.relationship_to_player,
     merged.long_term_agenda,
     merged.tool_access,

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { applyArchivistPatch } from '@/lib/archivist'
 import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
-import type { Character } from '@/lib/db'
+import { db, insertTurn, type Character } from '@/lib/db'
+import { addReveriesForCharacter, getReveriesForCharacter } from '@/lib/reveries'
 import { getFullWorldState } from '@/lib/world-state'
 import { createWorld } from '@/lib/worlds'
 
@@ -81,5 +82,43 @@ describe('getFullWorldState.potentialDuplicates', () => {
     })
     const dup = getFullWorldState(world.id).potentialDuplicates
     expect(dup.some((p) => p.reason === 'descriptor + named at same place')).toBe(true)
+  })
+})
+
+describe('mergeCharacters reveries', () => {
+  it('merges reveries by re-pointing rows, deduped', () => {
+    const world = createWorld({
+      name: `Rev-merge-${Math.random()}`,
+      premise: 'x',
+      initialState: { time: 't', location: 'Cornavin station', identity: 'i', playerName: 'Andrew' },
+    })
+    const turnId = insertTurn(world.id, 'assistant', 'x', null).id
+
+    // Seed two duplicate NPC rows (target "Robert", source "Bob") with
+    // non-overlapping names so the soft-matcher won't auto-merge before we do.
+    applyArchivistPatch(world.id, turnId, {
+      characters: [
+        { name: 'Robert', current_place_name: 'Cornavin station' },
+        { name: 'Bob', current_place_name: 'Cornavin station' },
+      ],
+    })
+    const idOf = (name: string): number =>
+      (db
+        .prepare('SELECT id FROM characters WHERE world_id = ? AND lower(name) = lower(?)')
+        .get(world.id, name) as { id: number }).id
+    const targetId = idOf('Robert')
+    const sourceId = idOf('Bob')
+
+    addReveriesForCharacter(world.id, targetId, [{ text: 'shared' }], turnId)
+    addReveriesForCharacter(world.id, sourceId, [{ text: 'shared' }, { text: 'only-source' }], turnId)
+
+    // Public dedup path: the correction-channel `aliases` field asserts that
+    // "Bob" is the same row as "Robert", driving runAliasMerges -> mergeCharacters.
+    applyArchivistPatch(world.id, turnId, {
+      characters: [{ name: 'Robert', aliases: ['Bob'] }],
+    })
+
+    const texts = getReveriesForCharacter(targetId).map((r) => r.text).sort()
+    expect(texts).toEqual(['only-source', 'shared'])
   })
 })
