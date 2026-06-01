@@ -726,6 +726,50 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE worlds ADD COLUMN archived_at TEXT')
     },
   },
+  {
+    // v0.6.18 — Living NPCs substrate. Reveries move from the overwrite-prone
+    // characters.reveries text column into an append-only, tagged table so they
+    // can flare deterministically and never silently truncate. characters gains
+    // a daily_loop JSON column for time-banded routine. is_cornerstone is
+    // reserved for v0.6.19 (awakening). The old reveries column is left dormant.
+    version: 24,
+    name: 'npc_reveries_and_daily_loop',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE npc_reveries (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id             INTEGER NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+          character_id         INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          text                 TEXT    NOT NULL,
+          match_tags           TEXT    NOT NULL DEFAULT '',
+          intensity            REAL    NOT NULL DEFAULT 0.5
+                                 CHECK (intensity >= 0 AND intensity <= 1),
+          is_cornerstone       INTEGER NOT NULL DEFAULT 0,
+          created_turn_id      INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          last_flared_turn_id  INTEGER REFERENCES turns(id) ON DELETE SET NULL,
+          created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_npc_reveries_character ON npc_reveries(character_id);
+
+        ALTER TABLE characters ADD COLUMN daily_loop TEXT;
+      `)
+
+      // Backfill: split each character's newline reveries into rows. The old
+      // column is then left dormant (no longer read or written by app code).
+      const chars = db
+        .prepare("SELECT id, world_id, reveries FROM characters WHERE reveries IS NOT NULL AND trim(reveries) != ''")
+        .all() as Array<{ id: number; world_id: number; reveries: string }>
+      const insert = db.prepare(
+        `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity)
+         VALUES (?, ?, ?, '', 0.5)`,
+      )
+      for (const c of chars) {
+        for (const line of c.reveries.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)) {
+          insert.run(c.world_id, c.id, line)
+        }
+      }
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run

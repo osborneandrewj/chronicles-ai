@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { runMigrations } from '@/lib/migrations'
+import { migrations, runMigrations } from '@/lib/migrations'
 
 // Builds the v4 schema by hand, populates it with one world + a few turns +
 // a turn_states snapshot, then runs migrations and asserts the v5 outcome.
@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -226,7 +226,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -266,7 +266,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -374,7 +374,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -414,7 +414,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -469,7 +469,7 @@ describe('v13 migration (player_canon_and_corrections)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -539,7 +539,7 @@ describe('v15-v16 migrations (npc_cognition + npc_reveries)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -601,7 +601,7 @@ describe('v17 migration (place_geo_anchors)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -658,7 +658,7 @@ describe('v18 migration (npc_journey_state)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -716,7 +716,7 @@ describe('v19 migration (character_aliases)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -763,7 +763,7 @@ describe('v21 migration (scene_pacing_context)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('scenes')").all() as Array<{
@@ -806,7 +806,7 @@ describe('v23 migration (world_archived_at)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(23)
+    expect(db.pragma('user_version', { simple: true })).toBe(24)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -838,5 +838,53 @@ describe('v23 migration (world_archived_at)', () => {
       archived_at: string | null
     }
     expect(cleared.archived_at).toBeNull()
+  })
+})
+
+function migratedDb(): Database.Database {
+  const db = new Database(':memory:')
+  for (const m of migrations) m.up(db)
+  return db
+}
+
+describe('migration 24 — npc_reveries + daily_loop', () => {
+  it('creates npc_reveries with the expected columns', () => {
+    const db = migratedDb()
+    const cols = (db.prepare("PRAGMA table_info('npc_reveries')").all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    )
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        'id', 'world_id', 'character_id', 'text', 'match_tags', 'intensity',
+        'is_cornerstone', 'created_turn_id', 'last_flared_turn_id', 'created_at',
+      ]),
+    )
+  })
+
+  it('adds characters.daily_loop', () => {
+    const db = migratedDb()
+    const cols = (db.prepare("PRAGMA table_info('characters')").all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    )
+    expect(cols).toContain('daily_loop')
+  })
+
+  it('backfills newline reveries text into one row per line', () => {
+    const db = new Database(':memory:')
+    for (const m of migrations) {
+      if (m.version === 24) {
+        // seed a character with multi-line reveries BEFORE migration 24 runs
+        db.prepare(
+          `INSERT INTO characters (world_id, name, is_player, reveries)
+           VALUES (1, 'Mara', 0, ?)`,
+        ).run('burnt coffee recalls the outage\n\nrain on glass recalls the informant')
+      }
+      m.up(db)
+    }
+    const rows = db.prepare('SELECT text FROM npc_reveries ORDER BY id').all() as Array<{ text: string }>
+    expect(rows.map((r) => r.text)).toEqual([
+      'burnt coffee recalls the outage',
+      'rain on glass recalls the informant',
+    ])
   })
 })
