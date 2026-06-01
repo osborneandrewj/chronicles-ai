@@ -236,6 +236,20 @@ export function repairNpcAgentText(text: string): string | null {
   return changed ? JSON.stringify(obj) : null
 }
 
+// An off-scene NPC with a daily loop, not in transit, and unmentioned in the
+// prior narration needs no LLM tick this turn — its continuity comes from the
+// deterministic loop lookup in the STATE block. Pure + unit-tested.
+export function shouldSkipRoutineTick(
+  npc: { name: string; present_with_protagonist: boolean; in_transit_to_place_id: number | null; daily_loop: string | null },
+  priorNarration: string,
+): boolean {
+  if (npc.present_with_protagonist) return false
+  if (npc.in_transit_to_place_id !== null) return false
+  if (!npc.daily_loop || npc.daily_loop.trim().length === 0) return false
+  if (priorNarration.toLowerCase().includes(npc.name.toLowerCase())) return false
+  return true
+}
+
 export const NPC_AGENT_MODEL = 'claude-haiku-4-5-20251001'
 
 type AgentNpcRow = {
@@ -349,13 +363,39 @@ export async function runNpcAgentTick(
     geo_status: string
   }>
 
+  const priorNarration = recentTurns
+    .filter((t) => t.role === 'assistant')
+    .slice(-1)
+    .map((t) => t.content)
+    .join('\n\n')
+
+  // Skip the LLM tick for off-scene, looped, stationary NPCs not mentioned in
+  // the prior narration — their continuity comes from the deterministic loop
+  // line in the STATE block. The raw `agents` fetch stays intact (used below
+  // for last_agent_tick bookkeeping decisions); `tickable` is the subset we
+  // actually send to the model and update this turn.
+  const playerPlaceId = player?.current_place_id ?? null
+  const tickable = agents.filter(
+    (a) =>
+      !shouldSkipRoutineTick(
+        {
+          name: a.name,
+          present_with_protagonist: a.current_place_id !== null && a.current_place_id === playerPlaceId,
+          in_transit_to_place_id: a.in_transit_to_place_id,
+          daily_loop: a.daily_loop,
+        },
+        priorNarration,
+      ),
+  )
+  if (tickable.length === 0) return null
+
   // Reveries now live in their own table (append-only). Batch-load them once so
   // each NPC's charged memories surface as plain text in the agent context.
-  const reveriesByChar = getReveriesForCharacters(agents.map((a) => a.id))
+  const reveriesByChar = getReveriesForCharacters(tickable.map((a) => a.id))
 
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
-  const npcContext = agents.map((a) => ({
+  const npcContext = tickable.map((a) => ({
     name: a.name,
     description: a.description,
     personal_goals: a.personal_goals,
@@ -399,12 +439,6 @@ export async function runNpcAgentTick(
     })),
   }))
 
-  const priorNarration = recentTurns
-    .filter((t) => t.role === 'assistant')
-    .slice(-1)
-    .map((t) => t.content)
-    .join('\n\n')
-
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
     schema: NpcAgentPatchSchema,
@@ -445,7 +479,7 @@ export async function runNpcAgentTick(
   })
 
   applyNpcAgentPatch(worldId, tickTurnId, object)
-  for (const agent of agents) {
+  for (const agent of tickable) {
     setLastAgentTickStmt.run(tickTurnId, agent.id)
   }
 
@@ -453,7 +487,7 @@ export async function runNpcAgentTick(
   // outside the agent-tier roster are dropped (the schema needs a real
   // character_id, and an unrecognized name should never be reified). The
   // narrator turn id is filled in post-stream by the reconciler.
-  const agentsByLower = new Map(agents.map((a) => [a.name.toLowerCase(), a]))
+  const agentsByLower = new Map(tickable.map((a) => [a.name.toLowerCase(), a]))
   const allCharsForResolve = db
     .prepare<[number]>(
       'SELECT id, name FROM characters WHERE world_id = ?',

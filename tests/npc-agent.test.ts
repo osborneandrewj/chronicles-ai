@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { applyArchivistPatch } from '@/lib/archivist'
 import { parseDailyLoop } from '@/lib/daily-loop'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
-import { applyNpcAgentPatch, NpcAgentPatchSchema, repairNpcAgentText } from '@/lib/npc-agent'
+import { applyNpcAgentPatch, NpcAgentPatchSchema, repairNpcAgentText, shouldSkipRoutineTick } from '@/lib/npc-agent'
 import { getReveriesForCharacter } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 
@@ -71,6 +71,23 @@ describe('repairNpcAgentText', () => {
 
   it('returns null for unparseable text', () => {
     expect(repairNpcAgentText('not json at all')).toBeNull()
+  })
+})
+
+describe('shouldSkipRoutineTick', () => {
+  const base = {
+    present_with_protagonist: false,
+    in_transit_to_place_id: null as number | null,
+    daily_loop: '{"morning":{"activity":"opens shop"}}' as string | null,
+  }
+  it('skips an off-scene, looped, stationary NPC not mentioned in prior narration', () => {
+    expect(shouldSkipRoutineTick({ ...base, name: 'Tomas' }, 'The street was quiet.')).toBe(true)
+  })
+  it('does not skip if present, in transit, loopless, or mentioned', () => {
+    expect(shouldSkipRoutineTick({ ...base, name: 'Tomas', present_with_protagonist: true }, '')).toBe(false)
+    expect(shouldSkipRoutineTick({ ...base, name: 'Tomas', in_transit_to_place_id: 5 }, '')).toBe(false)
+    expect(shouldSkipRoutineTick({ ...base, name: 'Tomas', daily_loop: null }, '')).toBe(false)
+    expect(shouldSkipRoutineTick({ ...base, name: 'Tomas' }, 'Tomas waved from the shop.')).toBe(false)
   })
 })
 

@@ -1,4 +1,5 @@
 import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
+import { activityForBand, parseDailyLoop } from '@/lib/daily-loop'
 import {
   getActiveSceneForWorld,
   getCharactersForWorld,
@@ -17,6 +18,7 @@ import { stripFactProvenance } from '@/lib/memorable-facts'
 import { inferPlaceProfile, type PlaceOccupancy } from '@/lib/place-population'
 import type { ReverieRow } from '@/lib/reveries'
 import { buildTurnNumberMap } from '@/lib/turn-numbers'
+import { worldTimeBand } from '@/lib/world-time'
 
 export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
 
@@ -415,6 +417,15 @@ export function formatStateBlock(
       if (activity) {
         const last = activity.split('\n').filter((l) => l.trim().length > 0).slice(-1)[0]
         if (last) lines.push(`  - last activity: ${limit(last, 180)}`)
+      }
+      // Deterministic loop continuity: a stationary off-scene NPC with a daily
+      // routine surfaces what they'd be doing in this time band, so the narrator
+      // can ground an off-scene reference without an LLM tick this turn.
+      if (!c.in_transit_to_place_id) {
+        const loopActivity = activityForBand(parseDailyLoop(c.daily_loop), worldTimeBand(state.worldTime))
+        if (loopActivity) {
+          lines.push(`  - routine: ${limit(loopActivity.activity, 160)}`)
+        }
       }
     }
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { worldTimeBand } from '@/lib/world-time'
 import { collectSceneTags, formatStateBlock, type NarratorWorldState } from '@/lib/world-state'
 
 function baseState(overrides: Partial<NarratorWorldState>): NarratorWorldState {
@@ -65,5 +66,21 @@ describe('formatStateBlock reverie rendering', () => {
     expect(block).toContain('⚡ REVERIE FLARING')
     expect(block).toContain('burnt coffee recalls the outage')
     expect(block).toContain('rain on glass recalls the informant')
+  })
+})
+
+describe('off-scene loop continuity', () => {
+  it('renders the routine line for a looped, stationary off-scene NPC', () => {
+    const off = {
+      id: 9, world_id: 1, name: 'Tomas', description: null, is_player: 0, status: 'active',
+      agency_level: 'nearby', current_place_id: 2, in_transit_to_place_id: null,
+      last_seen_turn_id: 1, last_known_situation: null, recent_activity: null,
+      daily_loop: '{"morning":{"activity":"opens the shop","place":"Anchor"}}',
+    } as never
+    const block = formatStateBlock(
+      baseState({ worldTime: 'Day 1, 9am', knownCharacters: [off], knownPlaces: [{ id: 2, name: 'Anchor' } as never] }),
+    )
+    expect(worldTimeBand('Day 1, 9am')).toBe('morning')
+    expect(block).toContain('routine: opens the shop')
   })
 })
