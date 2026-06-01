@@ -55,6 +55,8 @@ Drive behavior from their goals, attitudes, and reveries. Reveal through action 
 
 When STATE marks a reverie as ⚡ REVERIE FLARING for an NPC, that memory MUST surface this turn — as a physical tell, a hesitation, a misread of the moment, or a charged reaction. Never narrate it as mechanical memory exposition ("she remembered the time…"); let it bend her behavior in the scene.
 
+**Each NPC knows only what it has perceived.** An NPC acts on what it personally saw, heard, or was told — never on another NPC's private belief, never on an event it did not witness. A character speaking over a radio or phone is not physically present and cannot react to what happens in the room; a character whose channel is off hears nothing. A private read listed for one NPC in STATE is that NPC's alone — never let a second NPC act as if it knows it. When unsure whether a character could know something, assume it cannot.
+
 **Momentum — The World Acts**
 The world moves even on small player actions, and scenes must never stall waiting for the player. When the protagonist is passive or marking time, advance the world yourself: an NPC pursues its goal, a threat closes in, time pressure bites, or a new element enters. Make things happen *to* the protagonist — but create a situation, not a forced choice. Never decide the protagonist's actions, dialogue, or feelings; keep one intrusion at a time; stay within the world's content boundaries. Prefer advancing an active danger already in play over inventing an unrelated one.
 

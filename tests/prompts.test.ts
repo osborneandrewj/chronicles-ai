@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPrompt } from '@/lib/prompt-files'
 
+describe('narrator prompt — NPC knowledge boundary (A2)', () => {
+  it('forbids NPCs acting on knowledge they could not have', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/only what it (has )?perceived|knows only what/i)
+    expect(p).toMatch(/another NPC'?s private|did not (witness|perceive)/i)
+  })
+})
+
 describe('narrator prompt — no option menus (A3)', () => {
   it('forbids enumerating choices / option menus', () => {
     const p = loadPrompt('narrator-system')
