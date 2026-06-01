@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPrompt } from '@/lib/prompt-files'
 
+describe('archivist prompt — perception check (A2)', () => {
+  it('only records observations the NPC could perceive', () => {
+    const p = loadPrompt('archivist-system')
+    expect(p).toMatch(/could (actually )?(sense|perceive|witness|hear|see)/i)
+    expect(p).toMatch(/same place|open (radio|audio) channel/i)
+  })
+})
+
 describe('narrator prompt — NPC knowledge boundary (A2)', () => {
   it('forbids NPCs acting on knowledge they could not have', () => {
     const p = loadPrompt('narrator-system')
