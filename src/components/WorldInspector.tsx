@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { organizePlayerProfileFacts, type PlayerProfileGroup } from "@/lib/player-profile";
+import type { ReverieRow } from "@/lib/reveries";
 import type { FullWorldState } from "@/lib/world-state";
 
 type InspectorTab = "now" | "story" | "wiki" | "archivist";
@@ -229,6 +230,7 @@ function NowView({ state }: { state: FullWorldState }) {
                 places={state.places}
                 turnTimestamps={state.turnTimestamps}
                 turnNumbers={state.turnNumbers}
+                reveries={state.reveriesByCharacter[c.id] ?? []}
               />
             ))}
           </ul>
@@ -400,6 +402,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
                   places={state.places}
                   turnTimestamps={state.turnTimestamps}
                   turnNumbers={state.turnNumbers}
+                  reveries={state.reveriesByCharacter[c.id] ?? []}
                 />
               ))}
             </ul>
@@ -480,11 +483,13 @@ function CharacterCard({
   places,
   turnTimestamps,
   turnNumbers,
+  reveries,
 }: {
   character: FullWorldState["characters"][number];
   places: FullWorldState["places"];
   turnTimestamps: Record<number, string>;
   turnNumbers: Record<number, number>;
+  reveries: ReverieRow[];
 }) {
   const currentPlace = c.current_place_id
     ? places.find((p) => p.id === c.current_place_id)?.name
@@ -498,7 +503,7 @@ function CharacterCard({
     (c.long_term_agenda ||
       c.relationship_to_player ||
       c.private_beliefs ||
-      c.reveries ||
+      reveries.length > 0 ||
       c.tool_access);
   const hasNowFields =
     c.is_player !== 1 &&
@@ -563,9 +568,20 @@ function CharacterCard({
                   <MultiLine value={c.private_beliefs} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
-              {c.reveries && (
+              {reveries.length > 0 && (
                 <CharField label="reveries" tone="violet">
-                  <MultiLine value={c.reveries} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
+                  <ul className="space-y-0.5">
+                    {reveries.map((r) => (
+                      <li key={r.id}>
+                        {r.is_cornerstone ? "★ " : ""}
+                        {r.text}
+                        {r.match_tags.length > 0 ? (
+                          <span className="opacity-60"> · {r.match_tags.join(", ")}</span>
+                        ) : null}
+                        {r.last_flared_turn_id ? <span className="opacity-60"> · flared</span> : null}
+                      </li>
+                    ))}
+                  </ul>
                 </CharField>
               )}
               {c.tool_access && (

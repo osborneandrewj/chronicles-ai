@@ -16,7 +16,7 @@ import {
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 import { inferPlaceProfile, type PlaceOccupancy } from '@/lib/place-population'
-import type { ReverieRow } from '@/lib/reveries'
+import { getReveriesForWorld, type ReverieRow } from '@/lib/reveries'
 import { buildTurnNumberMap } from '@/lib/turn-numbers'
 import { worldTimeBand } from '@/lib/world-time'
 
@@ -115,6 +115,7 @@ export type FullWorldState = {
   turnTimestamps: Record<number, string>
   turnNumbers: Record<number, number>
   potentialDuplicates: DuplicatePair[]
+  reveriesByCharacter: Record<number, ReverieRow[]>
 }
 
 export function getNarratorWorldState(worldId: number): NarratorWorldState {
@@ -175,6 +176,10 @@ export function getFullWorldState(worldId: number): FullWorldState {
   )
   const turnNumbers = buildTurnNumberMap(orderedTurns.map((turn) => turn.id))
   const characters = getCharactersForWorld(worldId)
+  const reveriesByCharacter: Record<number, ReverieRow[]> = {}
+  for (const r of getReveriesForWorld(worldId)) {
+    ;(reveriesByCharacter[r.character_id] ??= []).push(r)
+  }
   return {
     worldTime: cursor.world_time,
     currentSceneId: cursor.current_scene_id,
@@ -185,6 +190,7 @@ export function getFullWorldState(worldId: number): FullWorldState {
     turnTimestamps,
     turnNumbers,
     potentialDuplicates: findLikelyDuplicateCharacters(characters),
+    reveriesByCharacter,
   }
 }
 
