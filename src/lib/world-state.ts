@@ -314,13 +314,15 @@ export function formatStateBlock(
         if (c.relationship_to_player) {
           lines.push(`  - relationship to protagonist: ${limit(c.relationship_to_player, 180)}`)
         }
+        // v0.6.19 (A2): surface at most one private belief, explicitly scoped to
+        // this NPC, so the narrator does not let other NPCs act on it. Reducing
+        // the broadcast also cuts state-block tokens.
         if (c.private_beliefs) {
           const beliefs = c.private_beliefs.split('\n').filter((s) => s.trim().length > 0)
-          if (beliefs.length === 1) {
-            lines.push(`  - private belief: ${limit(beliefs[0], 170)}`)
-          } else {
-            lines.push('  - private beliefs:')
-            for (const b of beliefs.slice(0, 3)) lines.push(`    - ${limit(b, 170)}`)
+          if (beliefs.length > 0) {
+            lines.push(
+              `  - private read (known only to ${c.name}; never let another NPC act on it): ${limit(beliefs[0], 170)}`,
+            )
           }
         }
         const reveryRows = reveryCtx.byCharacter.get(c.id) ?? []

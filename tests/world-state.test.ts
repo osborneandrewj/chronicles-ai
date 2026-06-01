@@ -69,6 +69,21 @@ describe('formatStateBlock reverie rendering', () => {
   })
 })
 
+describe('private-belief scoping (A2)', () => {
+  it('emits only the first belief, scoped to the owning NPC, and never broadcasts the rest', () => {
+    const marcus = {
+      id: 11, world_id: 1, name: 'Marcus', description: null, is_player: 0, status: 'active',
+      agency_level: 'local', current_place_id: 1,
+      private_beliefs: 'Line one.\nLine two.\nLine three.',
+    } as never
+    const block = formatStateBlock(baseState({ presentCharacters: [marcus] }))
+    expect(block).toContain('known only to Marcus')
+    expect(block).toContain('Line one.')
+    expect(block).not.toContain('Line two.')
+    expect(block).not.toContain('Line three.')
+  })
+})
+
 describe('off-scene loop continuity', () => {
   it('renders the routine line for a looped, stationary off-scene NPC', () => {
     const off = {
