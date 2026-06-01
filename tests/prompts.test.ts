@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPrompt } from '@/lib/prompt-files'
 
+describe('prompts — orientation is not a default (characterization)', () => {
+  it('narrator must not invent a character orientation', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/do not invent .*orientation/i)
+    expect(p).toMatch(/player establishes|already establish|deliberately created/i)
+  })
+  it('archivist must not infer orientation from nothing', () => {
+    const a = loadPrompt('archivist-system')
+    expect(a).toMatch(/orientation|same-sex/i)
+    expect(a).toMatch(/only record|explicitly establish/i)
+  })
+})
+
 describe('archivist prompt — perception check (A2)', () => {
   it('only records observations the NPC could perceive', () => {
     const p = loadPrompt('archivist-system')
