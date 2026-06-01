@@ -118,7 +118,7 @@ describe('story dossier state', () => {
       flaring: new Set(),
     })
 
-    expect(block).toContain('private belief: believes the relay fragment was planted as bait')
+    expect(block).toContain('private read (known only to Mara Vale; never let another NPC act on it): believes the relay fragment was planted as bait')
     expect(block).toContain('reverie: rain on wheat recalls the informant')
     expect(block).toContain('relationship to protagonist: trusts Andras with evidence')
     expect(block).toContain('agenda:')

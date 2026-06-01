@@ -63,3 +63,7 @@ backups/
 tmp/
 temp/
 .cache/
+
+# Claude Code harness (per-agent worktrees + scratch memory — never commit)
+.claude/worktrees/
+.claude/agent-memory/

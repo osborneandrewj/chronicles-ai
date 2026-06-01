@@ -1864,6 +1864,11 @@ export function applyArchivistPatch(
     // `current_place_name` (the exact Call-In Case failure).
     const relocatedNpcByPlace = new Map<number, string[]>()
     let playerPlaceFromPatch: number | null = null
+    // v0.6.19 (A1-i): track ALL place ids that NPCs were explicitly assigned to
+    // in this patch (both relocations and no-op restatements). Used at step 3b
+    // to detect the backward "home flip" signature: the patch pins NPCs to the
+    // old scene place while the player heads elsewhere.
+    const npcPlacesInPatch = new Set<number>()
 
     // 1. Places first, so character.current_place_name and scene.open.place_name
     //    can resolve to ids in the same patch.
@@ -1921,6 +1926,10 @@ export function applyArchivistPatch(
             const names = relocatedNpcByPlace.get(placeId) ?? []
             names.push(c.name)
             relocatedNpcByPlace.set(placeId, names)
+            npcPlacesInPatch.add(placeId)
+          } else {
+            // No-op restatement: NPC explicitly named in patch but already at this place.
+            npcPlacesInPatch.add(placeId)
           }
         }
 
@@ -2050,7 +2059,15 @@ export function applyArchivistPatch(
       const scenePlaceId =
         (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
         null
-      if (playerPlaceFromPatch !== scenePlaceId) {
+      // v0.6.19 (A1-i): do not auto-open at the player's new place if it would
+      // abandon the present cast — the patch explicitly assigns non-player NPCs
+      // to the OLD scene place (restatements or relocations to it). That is the
+      // v0.6.10 backward "home flip" signature (Call-In turn 403: hospital NPCs
+      // explicitly pinned to hospital while the player is sent home). Residual
+      // NPCs not mentioned in this patch are not a signal — that is forward travel.
+      const presentNpcsLeftBehind =
+        scenePlaceId !== null && npcPlacesInPatch.has(scenePlaceId)
+      if (playerPlaceFromPatch !== scenePlaceId && !presentNpcsLeftBehind) {
         const cursor = currentSceneIdStmt.get(worldId) as
           | { current_scene_id: number | null }
           | undefined
