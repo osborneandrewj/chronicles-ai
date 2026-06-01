@@ -48,6 +48,7 @@ export type Character = {
   arrival_world_time: string | null
   last_known_situation: string | null
   aliases: string | null
+  daily_loop: string | null
   created_at: string
   updated_at: string
 }

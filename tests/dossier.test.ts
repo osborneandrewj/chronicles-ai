@@ -92,13 +92,18 @@ describe('story dossier state', () => {
         {
           name: 'Mara Vale',
           private_beliefs: 'believes the relay fragment was planted as bait',
-          reveries: 'rain on wheat recalls the informant she lost outside Hive Tarsus',
           relationship_to_player: 'trusts Andras with evidence but not with motives',
           long_term_agenda: 'protect her informant\nforce the spire to reveal its transmitter',
           tool_access: 'can query field records and auspex logs',
         },
       ],
     })
+    // The dossier/state-block still renders the legacy characters.reveries
+    // column; the NPC agent no longer authors into it (reveries moved to their
+    // own append-only table in v0.6.18), so seed the column directly here.
+    db.prepare(
+      `UPDATE characters SET reveries = ? WHERE world_id = ? AND name = 'Mara Vale'`,
+    ).run('rain on wheat recalls the informant she lost outside Hive Tarsus', worldId)
 
     const state = getNarratorWorldState(worldId)
     const block = formatStateBlock(state)

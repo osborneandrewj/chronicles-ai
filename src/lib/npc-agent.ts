@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import { DailyLoopSchema } from '@/lib/daily-loop'
 import { db } from '@/lib/db'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import {
@@ -10,6 +11,8 @@ import {
   type IntentVisibility,
 } from '@/lib/npc-intents'
 import { loadPrompt } from '@/lib/prompt-files'
+import { addReveriesForCharacter, getReveriesForCharacters } from '@/lib/reveries'
+import { worldTimeBand } from '@/lib/world-time'
 
 // Per-NPC update emitted by the NPC agent. Each field is independently
 // optional; only fields named in the patch are touched. Names are matched
@@ -52,13 +55,24 @@ const NpcUpdateSchema = z.object({
       'Replace private_beliefs (newline-separated). What this NPC personally believes, suspects, ' +
         'misunderstands, or knows privately. Include prior beliefs you want to keep. Use only when a belief changes.',
     ),
-  reveries: z
-    .string()
+  reveries_add: z
+    .array(
+      z.object({
+        text: z.string(),
+        match_tags: z.array(z.string()).default([]),
+        intensity: z.number().min(0).max(1).optional(),
+      }),
+    )
     .optional()
     .describe(
-      'Replace reveries (newline-separated). Charged sensory or emotional memories that can flare ' +
-        'when the current scene echoes them. Include prior reveries you want to keep. Use sparingly.',
+      'Add NET-NEW reveries only — never repeat existing ones, they persist on their own. ' +
+        'A reverie is a charged sensory/emotional memory; tag each with concrete anchors ' +
+        '(a smell, an object, a place, a phrase, a failure). Add one rarely, only when something lodges.',
     ),
+  daily_loop: DailyLoopSchema.optional().describe(
+    'Author this NPC\'s time-banded daily routine ONCE if they do not have one yet. ' +
+      'Ignored if a loop already exists.',
+  ),
   relationship_to_player: z
     .string()
     .optional()
@@ -246,12 +260,13 @@ type AgentNpcRow = {
   in_transit_to_name: string | null
   arrival_world_time: string | null
   last_known_situation: string | null
+  daily_loop: string | null
 }
 
 const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
          c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
-         c.reveries,
+         c.reveries, c.daily_loop,
          c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
          c.last_agent_tick_turn_id,
          c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
@@ -334,6 +349,10 @@ export async function runNpcAgentTick(
     geo_status: string
   }>
 
+  // Reveries now live in their own table (append-only). Batch-load them once so
+  // each NPC's charged memories surface as plain text in the agent context.
+  const reveriesByChar = getReveriesForCharacters(agents.map((a) => a.id))
+
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
   const npcContext = agents.map((a) => ({
@@ -341,7 +360,9 @@ export async function runNpcAgentTick(
     description: a.description,
     personal_goals: a.personal_goals,
     private_beliefs: lastNLines(stripFactProvenance(a.private_beliefs), 4),
-    reveries: lastNLines(stripFactProvenance(a.reveries), 4),
+    reveries: (reveriesByChar.get(a.id) ?? []).map((r) => r.text),
+    daily_loop: a.daily_loop ? JSON.parse(a.daily_loop) : null,
+    world_time_band: worldTimeBand(worldTime),
     relationship_to_player: a.relationship_to_player,
     long_term_agenda: lastNLines(stripFactProvenance(a.long_term_agenda), 4),
     tool_access: a.tool_access,
@@ -499,8 +520,9 @@ const setPersonalGoalsStmt = db.prepare<[string, number]>(
 const setPrivateBeliefsStmt = db.prepare<[string, number]>(
   `UPDATE characters SET private_beliefs = ?, updated_at = datetime('now') WHERE id = ?`,
 )
-const setReveriesStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET reveries = ?, updated_at = datetime('now') WHERE id = ?`,
+const setDailyLoopIfEmptyStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET daily_loop = ?, updated_at = datetime('now')
+     WHERE id = ? AND (daily_loop IS NULL OR trim(daily_loop) = '')`,
 )
 const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
   `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -566,8 +588,11 @@ export function applyNpcAgentPatch(
       if (u.private_beliefs !== undefined) {
         setPrivateBeliefsStmt.run(u.private_beliefs, existing.id)
       }
-      if (u.reveries !== undefined) {
-        setReveriesStmt.run(u.reveries, existing.id)
+      if (u.reveries_add !== undefined && u.reveries_add.length > 0) {
+        addReveriesForCharacter(worldId, existing.id, u.reveries_add, narratorTurnId)
+      }
+      if (u.daily_loop !== undefined) {
+        setDailyLoopIfEmptyStmt.run(JSON.stringify(u.daily_loop), existing.id)
       }
       if (u.relationship_to_player !== undefined) {
         setRelationshipToPlayerStmt.run(u.relationship_to_player, existing.id)

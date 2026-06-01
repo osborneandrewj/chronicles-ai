@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { applyArchivistPatch } from '@/lib/archivist'
+import { parseDailyLoop } from '@/lib/daily-loop'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
 import { applyNpcAgentPatch, NpcAgentPatchSchema, repairNpcAgentText } from '@/lib/npc-agent'
+import { getReveriesForCharacter } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 
 function seedWorld(name: string): { worldId: number; turnId: number } {
@@ -179,7 +181,6 @@ describe('applyNpcAgentPatch', () => {
         {
           name: 'Marcus',
           private_beliefs: 'Andrew is hiding why the auth logs changed.',
-          reveries: 'The smell of burnt coffee brings back the night the servers failed.',
           relationship_to_player: 'Wary of Andrew, but owes him for covering the outage.',
           long_term_agenda: 'Get out before the audit closes.\nNever implicate Jordana.',
           tool_access: 'Can query Covenant Security issue trackers and Slack history.',
@@ -189,9 +190,6 @@ describe('applyNpcAgentPatch', () => {
 
     const marcus = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
     expect(marcus.private_beliefs).toBe('Andrew is hiding why the auth logs changed.')
-    expect(marcus.reveries).toBe(
-      'The smell of burnt coffee brings back the night the servers failed.',
-    )
     expect(marcus.relationship_to_player).toBe(
       'Wary of Andrew, but owes him for covering the outage.',
     )
@@ -205,5 +203,37 @@ describe('applyNpcAgentPatch', () => {
     const after = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
     expect(after.current_focus).toBe(before.current_focus)
     expect(after.recent_activity).toBe(before.recent_activity)
+  })
+})
+
+describe('npc agent reverie authoring (append-only)', () => {
+  it('inserts reveries_add as rows and never deletes on omission', () => {
+    const { worldId, turnId } = seedWorld('rev-author')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Mara', 0)").run(worldId)
+    promoteToLocal(worldId, 'Mara')
+    const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Mara'").get(worldId) as { id: number }).id
+
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{ name: 'Mara', reveries_add: [{ text: 'burnt coffee recalls the outage', match_tags: ['coffee'] }] }],
+    })
+    expect(getReveriesForCharacter(charId)).toHaveLength(1)
+
+    applyNpcAgentPatch(worldId, turnId, { npc_updates: [{ name: 'Mara', current_focus: 'waiting' }] })
+    expect(getReveriesForCharacter(charId)).toHaveLength(1) // omission preserved
+  })
+
+  it('authors daily_loop once and does not overwrite it later', () => {
+    const { worldId, turnId } = seedWorld('loop-author')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
+    promoteToLocal(worldId, 'Tomas')
+
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', daily_loop: { morning: { activity: 'opens the shop' } } }],
+    })
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', daily_loop: { morning: { activity: 'DIFFERENT' } } }],
+    })
+    const row = db.prepare("SELECT daily_loop FROM characters WHERE world_id = ? AND name = 'Tomas'").get(worldId) as { daily_loop: string | null }
+    expect(parseDailyLoop(row.daily_loop)?.morning?.activity).toBe('opens the shop')
   })
 })
