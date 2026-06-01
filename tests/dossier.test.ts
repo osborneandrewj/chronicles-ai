@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { applyArchivistPatch } from '@/lib/archivist'
 import { applyNpcAgentPatch } from '@/lib/npc-agent'
 import { db, insertTurn } from '@/lib/db'
+import { addReveriesForCharacter, getReveriesForCharacters } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 import { formatDossierBlock, formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
 
@@ -98,15 +99,24 @@ describe('story dossier state', () => {
         },
       ],
     })
-    // The dossier/state-block still renders the legacy characters.reveries
-    // column; the NPC agent no longer authors into it (reveries moved to their
-    // own append-only table in v0.6.18), so seed the column directly here.
-    db.prepare(
-      `UPDATE characters SET reveries = ? WHERE world_id = ? AND name = 'Mara Vale'`,
-    ).run('rain on wheat recalls the informant she lost outside Hive Tarsus', worldId)
+    // v0.6.18: reveries moved to their own append-only npc_reveries table and
+    // render via the formatStateBlock reverie context, not the legacy
+    // characters.reveries column. Seed one and pass it through the context.
+    const maraId = db
+      .prepare(`SELECT id FROM characters WHERE world_id = ? AND name = 'Mara Vale'`)
+      .get(worldId) as { id: number }
+    addReveriesForCharacter(
+      worldId,
+      maraId.id,
+      [{ text: 'rain on wheat recalls the informant she lost outside Hive Tarsus' }],
+      turnId,
+    )
 
     const state = getNarratorWorldState(worldId)
-    const block = formatStateBlock(state)
+    const block = formatStateBlock(state, [], [], {
+      byCharacter: getReveriesForCharacters([maraId.id]),
+      flaring: new Set(),
+    })
 
     expect(block).toContain('private belief: believes the relay fragment was planted as bait')
     expect(block).toContain('reverie: rain on wheat recalls the informant')

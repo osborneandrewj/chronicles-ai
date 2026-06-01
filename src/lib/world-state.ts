@@ -14,7 +14,8 @@ import {
   type StoryDossier,
 } from '@/lib/db'
 import { stripFactProvenance } from '@/lib/memorable-facts'
-import type { PlaceOccupancy } from '@/lib/place-population'
+import { inferPlaceProfile, type PlaceOccupancy } from '@/lib/place-population'
+import type { ReverieRow } from '@/lib/reveries'
 import { buildTurnNumberMap } from '@/lib/turn-numbers'
 
 export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
@@ -144,6 +145,26 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
   }
 }
 
+// Deterministic scene tags for reverie flare-matching. Sources: the active
+// place's profile match_tags (the same vocabulary the occupancy sim is built
+// from) and the relevance tags of active story threads. Pure read of state.
+export function collectSceneTags(state: NarratorWorldState): string[] {
+  const tags: string[] = []
+  if (state.currentPlace) {
+    tags.push(...inferPlaceProfile({ name: state.currentPlace.name, kind: state.currentPlace.kind }).matchTags)
+  }
+  for (const thread of state.dossier.threads) {
+    if (thread.status !== 'active') continue
+    try {
+      const parsed = JSON.parse(thread.relevance_tags_json ?? '[]')
+      if (Array.isArray(parsed)) tags.push(...parsed.filter((t): t is string => typeof t === 'string'))
+    } catch {
+      // ignore malformed tag json
+    }
+  }
+  return tags
+}
+
 export function getFullWorldState(worldId: number): FullWorldState {
   const cursor = getWorldCursor(worldId)
   const orderedTurns = getTurnTimestampsForWorld(worldId)
@@ -196,10 +217,16 @@ export type NpcPlannedAction = {
   intent_id?: number
 }
 
+export type ReverieRenderContext = {
+  byCharacter: Map<number, ReverieRow[]>
+  flaring: Set<number>
+}
+
 export function formatStateBlock(
   state: NarratorWorldState,
   plannedActions: NpcPlannedAction[] = [],
   recentNarratorProse: string[] = [],
+  reveryCtx: ReverieRenderContext = { byCharacter: new Map(), flaring: new Set() },
 ): string {
   const lines: string[] = [
     '## STATE',
@@ -288,14 +315,19 @@ export function formatStateBlock(
             for (const b of beliefs.slice(0, 3)) lines.push(`    - ${limit(b, 170)}`)
           }
         }
-        if (c.reveries) {
-          const reveries = c.reveries.split('\n').filter((s) => s.trim().length > 0)
-          if (reveries.length === 1) {
-            lines.push(`  - reverie: ${limit(reveries[0], 180)}`)
-          } else {
-            lines.push('  - reveries:')
-            for (const r of reveries.slice(0, 3)) lines.push(`    - ${limit(r, 180)}`)
-          }
+        const reveryRows = reveryCtx.byCharacter.get(c.id) ?? []
+        const flaring = reveryRows.filter((r) => reveryCtx.flaring.has(r.id))
+        const ambient = reveryRows.filter((r) => !reveryCtx.flaring.has(r.id))
+        for (const r of flaring) {
+          lines.push(
+            `  - ⚡ REVERIE FLARING — surface this turn as a physical tell, hesitation, or misread, never as narrated memory: ${limit(r.text, 180)}`,
+          )
+        }
+        if (ambient.length === 1) {
+          lines.push(`  - reverie: ${limit(ambient[0].text, 180)}`)
+        } else if (ambient.length > 1) {
+          lines.push('  - reveries:')
+          for (const r of ambient.slice(0, 3)) lines.push(`    - ${limit(r.text, 180)}`)
         }
         if (c.tool_access) {
           lines.push(`  - diegetic tools: ${limit(c.tool_access, 180)}`)

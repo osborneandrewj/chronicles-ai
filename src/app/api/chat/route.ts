@@ -38,8 +38,10 @@ import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
+import { computeReverieFlares, getReveriesForCharacters, stampFlaredReveries } from '@/lib/reveries'
 import { hasRichStorySignal } from '@/lib/story-signal'
 import {
+  collectSceneTags,
   formatSceneDigestForClassifier,
   formatStateBlock,
   getNarratorWorldState,
@@ -242,7 +244,35 @@ export async function POST(req: Request) {
   const recentNarratorProse = recentForAgents
     .filter((t) => t.role === 'assistant')
     .map((t) => t.content)
-  const stateBlock = formatStateBlock(narratorState, plans, recentNarratorProse)
+
+  // v0.6.18 — deterministic reverie flares. Score each reverie's tag overlap
+  // with the turn's scene tags; the top one per present/off-scene NPC (capped)
+  // flares and must surface as subtext. Pure + free; stamping is best-effort.
+  const sceneTags = collectSceneTags(narratorState)
+  const reverieNpcIds = narratorState.knownCharacters
+    .filter((c) => c.is_player !== 1 && c.status !== 'dead')
+    .map((c) => c.id)
+  const reveriesByCharacter = getReveriesForCharacters(reverieNpcIds)
+  const flareCandidates = [...reveriesByCharacter.values()].flat().map((r) => ({
+    id: r.id,
+    character_id: r.character_id,
+    match_tags: r.match_tags,
+    intensity: r.intensity,
+  }))
+  const presentNpcIds = narratorState.presentCharacters.filter((c) => c.is_player !== 1).map((c) => c.id)
+  const flaringReverieIds = computeReverieFlares(flareCandidates, sceneTags, {
+    presentCharacterIds: presentNpcIds,
+  })
+  try {
+    stampFlaredReveries(flaringReverieIds, playerTurnId)
+  } catch (err) {
+    console.error('[reverie-flare]', err)
+  }
+
+  const stateBlock = formatStateBlock(narratorState, plans, recentNarratorProse, {
+    byCharacter: reveriesByCharacter,
+    flaring: new Set(flaringReverieIds),
+  })
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // Keep the stable narrator instructions and prior turns separate from the
