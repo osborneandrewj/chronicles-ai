@@ -1151,6 +1151,25 @@ describe('sanitizeArchivistPatch', () => {
   })
 })
 
+describe('applyArchivistPatch transit normalization (A1)', () => {
+  it('upserts a transit pseudo-place under its destination name', () => {
+    const world = createWorld({
+      name: 'Transit Norm',
+      premise: 'A heist in Prague.',
+      initialState: { time: 'Night', location: 'The vault', identity: 'A thief.', playerName: 'Reuben' },
+    })
+    const turn = insertTurn(world.id, 'assistant', 'The van pulls away toward the safe house.', null)
+    applyArchivistPatch(world.id, turn.id, {
+      places: [{ name: 'En route to safe house - Prague' }],
+      characters: [{ name: 'Reuben', is_player: true, current_place_name: 'En route to safe house - Prague' }],
+      scene: { action: 'open', title: 'In the van', place_name: 'En route to safe house - Prague' },
+    })
+    const names = getPlacesForWorld(world.id).map((p) => p.name)
+    expect(names).toContain('safe house - Prague')
+    expect(names).not.toContain('En route to safe house - Prague')
+  })
+})
+
 describe('normalizeTransitPlaceName', () => {
   it('strips a leading "en route to" prefix to the destination', () => {
     expect(normalizeTransitPlaceName('En route to safe house')).toBe('safe house')

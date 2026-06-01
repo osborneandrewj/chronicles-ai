@@ -1339,6 +1339,26 @@ export function normalizeTransitPlaceName(name: string): string {
   return trimmed
 }
 
+// Apply normalizeTransitPlaceName to every place name a patch can carry, on a
+// shallow clone so the original (kept in turn metadata for audit) is untouched.
+function normalizeTransitPlacesInPatch(patch: ArchivistPatch): ArchivistPatch {
+  const next: ArchivistPatch = { ...patch }
+  if (next.places) {
+    next.places = next.places.map((p) => ({ ...p, name: normalizeTransitPlaceName(p.name) }))
+  }
+  if (next.characters) {
+    next.characters = next.characters.map((c) =>
+      c.current_place_name === undefined
+        ? c
+        : { ...c, current_place_name: normalizeTransitPlaceName(c.current_place_name) },
+    )
+  }
+  if (next.scene?.action === 'open') {
+    next.scene = { ...next.scene, place_name: normalizeTransitPlaceName(next.scene.place_name) }
+  }
+  return next
+}
+
 function canonicalPlaceKey(value: string): string {
   const withoutRouteNoise = value
     .replace(/\([^)]*\ben route\b[^)]*\)/gi, '')
@@ -1831,8 +1851,11 @@ function upsertStoryResource(
 export function applyArchivistPatch(
   worldId: number,
   narratorTurnId: number,
-  patch: ArchivistPatch,
+  inputPatch: ArchivistPatch,
 ): void {
+  // v0.6.19 (A1): normalize transit pseudo-places before anything resolves an
+  // id, so the scene anchor and player location land on real destinations.
+  const patch = normalizeTransitPlacesInPatch(inputPatch)
   const tx = db.transaction(() => {
     // v0.6.10 scene-transition invariant state, populated in the character loop
     // (step 2) and consumed after the scene-action step (step 3b). Keyed off
