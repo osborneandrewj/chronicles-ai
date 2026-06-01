@@ -1317,6 +1317,28 @@ function placesMatch(requestedName: string, existingName: string, currentPlace: 
   return false
 }
 
+// v0.6.19 (A1): collapse a transit pseudo-place name to its destination. The
+// archivist prompt forbids names like "en route to X" (archivist-system.md),
+// but Haiku produces them anyway (world 13 place 68, "En route to safe house").
+// Such a name as the scene anchor is travel limbo — neither the vehicle nor the
+// destination — which lets the narrator oscillate between them. We normalize the
+// name to the destination so the anchor is a real place. Pure; no DB.
+export function normalizeTransitPlaceName(name: string): string {
+  const trimmed = name.trim()
+  // "X - en route to Y" → Y
+  const dashRoute = trimmed.match(/[-–—]\s*en\s*route\s+to\s+(.+)$/i)
+  if (dashRoute?.[1]) return dashRoute[1].trim()
+  // Leading transit framings → the destination after "to".
+  const prefixed = trimmed.match(
+    /^(?:en\s*route\s+to|heading\s+(?:back\s+)?to|on\s+(?:the\s+)?way\s+to|travel?ling\s+to|on\s+the\s+road\s+to)\s+(.+)$/i,
+  )
+  if (prefixed?.[1]) return prefixed[1].trim()
+  // "not (yet) at X" → X
+  const notAt = trimmed.match(/^not\s+(?:yet\s+)?at\s+(.+)$/i)
+  if (notAt?.[1]) return notAt[1].trim()
+  return trimmed
+}
+
 function canonicalPlaceKey(value: string): string {
   const withoutRouteNoise = value
     .replace(/\([^)]*\ben route\b[^)]*\)/gi, '')

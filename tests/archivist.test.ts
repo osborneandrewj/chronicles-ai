@@ -4,6 +4,7 @@ import {
   applyArchivistPatch,
   buildArchivistUserContent,
   extractDeterministicPatch,
+  normalizeTransitPlaceName,
   PLACE_KIND_DIRECTIVE,
   sanitizeArchivistPatch,
   THREAD_MANDATE_DIRECTIVE,
@@ -1147,5 +1148,25 @@ describe('sanitizeArchivistPatch', () => {
         patch,
       ),
     ).toEqual({})
+  })
+})
+
+describe('normalizeTransitPlaceName', () => {
+  it('strips a leading "en route to" prefix to the destination', () => {
+    expect(normalizeTransitPlaceName('En route to safe house')).toBe('safe house')
+  })
+  it('keeps a city qualifier on the destination', () => {
+    expect(normalizeTransitPlaceName('En route to safe house - Prague')).toBe('safe house - Prague')
+  })
+  it('resolves "X - en route to Y" to Y', () => {
+    expect(normalizeTransitPlaceName('Prague flat - en route to the docks')).toBe('the docks')
+  })
+  it('strips other transit framings', () => {
+    expect(normalizeTransitPlaceName('Heading back to the office')).toBe('the office')
+    expect(normalizeTransitPlaceName('On the way to the bridge')).toBe('the bridge')
+    expect(normalizeTransitPlaceName('Not yet at the vault')).toBe('the vault')
+  })
+  it('leaves a real place name untouched', () => {
+    expect(normalizeTransitPlaceName('The basement vault of the Violet Exchange')).toBe('The basement vault of the Violet Exchange')
   })
 })
