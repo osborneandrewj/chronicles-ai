@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { isDescriptorName } from '@/lib/character-identity'
 import { db } from '@/lib/db'
+import { coerceJsonObject, tolerateNulls } from '@/lib/llm-schema'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import type { PlaceOccupancy } from '@/lib/place-population'
 import { loadPrompt } from '@/lib/prompt-files'
@@ -192,19 +193,19 @@ export const ArchivistPatchSchema = z.object({
     .string()
     .optional()
     .describe('Updated in-world time. Omit if the narration did not advance time.'),
-  scene: SceneActionSchema.optional().describe(
+  scene: coerceJsonObject(SceneActionSchema).optional().describe(
     'Default to omitting (equivalent to keep_open). Use close/open only when a scene clearly ends or starts.',
   ),
   scene_context: SceneContextSchema.optional().describe(
     'Compact mood/pace/focus read for narrator prose control. Update when the latest turn clearly changes the scene\'s rhythm or attention.',
   ),
-  places: z.array(PlacePatchSchema).optional(),
-  characters: z.array(CharacterPatchSchema).optional(),
-  story_threads: z.array(StoryThreadPatchSchema).optional(),
-  story_clues: z.array(StoryCluePatchSchema).optional(),
-  story_objectives: z.array(StoryObjectivePatchSchema).optional(),
-  story_resources: z.array(StoryResourcePatchSchema).optional(),
-  timeline_events: z.array(TimelineEventPatchSchema).optional(),
+  places: z.array(tolerateNulls(PlacePatchSchema)).optional(),
+  characters: z.array(tolerateNulls(CharacterPatchSchema)).optional(),
+  story_threads: z.array(tolerateNulls(StoryThreadPatchSchema)).optional(),
+  story_clues: z.array(tolerateNulls(StoryCluePatchSchema)).optional(),
+  story_objectives: z.array(tolerateNulls(StoryObjectivePatchSchema)).optional(),
+  story_resources: z.array(tolerateNulls(StoryResourcePatchSchema)).optional(),
+  timeline_events: z.array(tolerateNulls(TimelineEventPatchSchema)).optional(),
 })
 
 // Correction-channel response: same patch shape plus a short natural-language

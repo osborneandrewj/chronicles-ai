@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { db } from '@/lib/db'
+import { tolerateNulls } from '@/lib/llm-schema'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
 import {
   getRecentIntentOutcomesForCharacter,
@@ -176,7 +177,7 @@ export type PlannedAction = z.infer<typeof PlannedActionSchema>
 
 export const NpcAgentPatchSchema = z.object({
   npc_updates: z
-    .array(NpcUpdateSchema)
+    .array(tolerateNulls(NpcUpdateSchema))
     .optional()
     .describe(
       'NPCs whose persistent state changed (focus, activity, place, personal goals). ' +
