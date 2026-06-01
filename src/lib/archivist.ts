@@ -2036,21 +2036,54 @@ export function applyArchivistPatch(
       }
     }
 
-    // 3b. Deterministic scene-transition invariant (v0.6.10). The archivist
-    //     agent reliably moves NPCs across a travel boundary but frequently
-    //     drops the protagonist's own location, leaving the scene cursor pinned
-    //     at the origin while recent prose has the cast somewhere else — the
-    //     narrator then snaps the player back to the stale anchor (the Call-In
-    //     Case, world 6 turns 389-403). We can't key off the player's
-    //     `current_place_name` (empty on every travel turn), so we infer the
-    //     move from the NPC cluster the patch relocated this turn. Only runs
-    //     when the patch did NOT itself open/close a scene. This is a logged
-    //     best-guess, not a clean floor — see the false-positive tradeoff in
-    //     docs/plans/milestones/v0.6.10.md (a lone NPC stepping out can drag the
-    //     cursor); recovery is the console.warn + inspector edit, and the
-    //     auto-opened scene is cheaply reversible (synthesised title, no
-    //     summary, prior scene auto-closed not deleted).
-    if ((!patch.scene || patch.scene.action === 'keep_open') && relocatedNpcByPlace.size > 0) {
+    // 3b. Deterministic scene-transition invariant. Two signals, player first.
+    const sceneUnchangedForInvariant = !patch.scene || patch.scene.action === 'keep_open'
+    let invariantFired = false
+
+    // v0.6.19 (A1-i): the protagonist's OWN place change is the most reliable
+    // travel signal. World 13 teleported because the player authored arrival
+    // ("get out of the van and enter the safe house") with no NPC-relocation
+    // cluster, so the v0.6.10 NPC-cluster branch below never fired and the
+    // scene cursor stayed pinned to the transit anchor. If the patch moved the
+    // player to a new place but opened no scene, open one there.
+    if (sceneUnchangedForInvariant && playerPlaceFromPatch !== null) {
+      const scenePlaceId =
+        (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
+        null
+      if (playerPlaceFromPatch !== scenePlaceId) {
+        const cursor = currentSceneIdStmt.get(worldId) as
+          | { current_scene_id: number | null }
+          | undefined
+        if (cursor?.current_scene_id) {
+          autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
+        }
+        const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
+        const placeName =
+          (placeNameByIdStmt.get(playerPlaceFromPatch) as { name: string } | undefined)?.name ??
+          'destination'
+        const newScene = insertSceneStmt.get(
+          worldId,
+          playerPlaceFromPatch,
+          `Arriving at ${placeName}`,
+          n + 1,
+          narratorTurnId,
+        ) as { id: number }
+        setCurrentSceneStmt.run(newScene.id, worldId)
+        setPlayersPlaceStmt.run(playerPlaceFromPatch, worldId)
+        invariantFired = true
+        console.warn('[archivist] player-move scene invariant fired', {
+          world_id: worldId,
+          turn_id: narratorTurnId,
+          prior_scene_place_id: scenePlaceId,
+          player_place_id: playerPlaceFromPatch,
+        })
+      }
+    }
+
+    // v0.6.10: NPC-cluster fallback — infer the move from the relocated NPC
+    // cluster when the player's own location was dropped. Skipped if the
+    // player-move branch already opened a scene this patch.
+    if (!invariantFired && sceneUnchangedForInvariant && relocatedNpcByPlace.size > 0) {
       let inferredPlaceId: number | null = null
       let topCount = 0
       let totalRelocated = 0
@@ -2061,9 +2094,6 @@ export function applyArchivistPatch(
           inferredPlaceId = pid
         }
       }
-      // Clear majority = strictly more than half land at one place. A single
-      // relocated NPC trivially satisfies this (majority-of-one) — intended:
-      // it lets the cursor advance on the first travel turn.
       const clearMajority = inferredPlaceId !== null && topCount * 2 > totalRelocated
       const scenePlaceId =
         (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
@@ -2071,10 +2101,6 @@ export function applyArchivistPatch(
       const playerPlaceId =
         (playerPlaceIdStmt.get(worldId) as { current_place_id: number | null } | undefined)
           ?.current_place_id ?? null
-      // Direction guard: never fire when the patch is moving the protagonist
-      // AWAY from the NPC cluster (the turn-403 home snap-back). On the common
-      // travel turn the player row is omitted entirely, so this is a no-op
-      // there; it only suppresses the explicit backward flip.
       const movingPlayerAway =
         playerPlaceFromPatch !== null && playerPlaceFromPatch !== inferredPlaceId
 

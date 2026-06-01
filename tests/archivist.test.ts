@@ -1151,6 +1151,29 @@ describe('sanitizeArchivistPatch', () => {
   })
 })
 
+describe('applyArchivistPatch player-move scene invariant (A1)', () => {
+  it('opens a scene at the player new place when the patch moves the player without a scene action', () => {
+    const world = createWorld({
+      name: 'Player Move',
+      premise: 'A heist in Prague.',
+      initialState: { time: 'Night', location: 'The vault', identity: 'A thief.', playerName: 'Reuben' },
+    })
+    const t1 = insertTurn(world.id, 'assistant', 'You stand in the vault.', null)
+    applyArchivistPatch(world.id, t1.id, {
+      characters: [{ name: 'Abby', description: 'The driver.', current_place_name: 'The vault' }],
+    })
+    const before = getNarratorWorldState(world.id)
+    const vaultSceneId = before.currentScene?.id
+    const t2 = insertTurn(world.id, 'assistant', 'You step inside the safe house.', null)
+    applyArchivistPatch(world.id, t2.id, {
+      characters: [{ name: 'Reuben', is_player: true, current_place_name: 'Safe house' }],
+    })
+    const after = getNarratorWorldState(world.id)
+    expect(after.currentScene?.id).not.toBe(vaultSceneId)
+    expect(after.currentPlace?.name).toBe('Safe house')
+  })
+})
+
 describe('applyArchivistPatch transit normalization (A1)', () => {
   it('upserts a transit pseudo-place under its destination name', () => {
     const world = createWorld({
