@@ -59,6 +59,7 @@ Milestones live in [`plans/milestones/`](plans/milestones/), one per release, na
 | [example-chat-narrative](reference/example-chat-narrative.md) | Reference narrative used as a fixture/regression target |
 | [narrator-audio-autoplay-debug](reference/narrator-audio-autoplay-debug.md) | iOS autoplay postmortem (Web Audio API fix), v0.5.1 |
 | [npc-narrator-design-evaluation-v2](reference/npc-narrator-design-evaluation-v2.md) | Design evaluation behind the NPC/narrator runtime |
+| [westworld-style-shared-world-design](reference/westworld-style-shared-world-design.md) | Exploration notes for shared parks: world seeding, geography, maps, multiplayer scenes, hidden human/NPC control, and player adaptation |
 
 ## Conventions
 
