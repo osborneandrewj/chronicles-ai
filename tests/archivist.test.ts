@@ -1172,6 +1172,32 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
     expect(after.currentScene?.id).not.toBe(vaultSceneId)
     expect(after.currentPlace?.name).toBe('Safe house')
   })
+
+  it('does NOT auto-open when the player moves while the patch restates an NPC at the old scene place (backward-flip guard)', () => {
+    const world = createWorld({
+      name: 'Flip Guard',
+      premise: 'A heist in Prague.',
+      initialState: { time: 'Night', location: 'The hospital', identity: 'A medic.', playerName: 'Andrew' },
+    })
+    const t1 = insertTurn(world.id, 'assistant', 'You stand in the hospital with Micha.', null)
+    applyArchivistPatch(world.id, t1.id, {
+      characters: [{ name: 'Micha', description: 'A colleague.', current_place_name: 'The hospital' }],
+    })
+    const before = getNarratorWorldState(world.id)
+    const hospitalSceneId = before.currentScene?.id
+    // Backward "home flip": player sent home while Micha is explicitly restated at the hospital.
+    const t2 = insertTurn(world.id, 'assistant', 'The narrator wrongly snaps you home.', null)
+    applyArchivistPatch(world.id, t2.id, {
+      characters: [
+        { name: 'Andrew', is_player: true, current_place_name: 'Home' },
+        { name: 'Micha', current_place_name: 'The hospital' },
+      ],
+    })
+    const after = getNarratorWorldState(world.id)
+    // The invariant must NOT advance the cursor — an NPC pinned at the old scene
+    // place is the backward-flip signature; defer to v0.6.10 logic (which holds).
+    expect(after.currentScene?.id).toBe(hospitalSceneId)
+  })
 })
 
 describe('applyArchivistPatch transit normalization (A1)', () => {
@@ -1207,6 +1233,7 @@ describe('normalizeTransitPlaceName', () => {
     expect(normalizeTransitPlaceName('Heading back to the office')).toBe('the office')
     expect(normalizeTransitPlaceName('On the way to the bridge')).toBe('the bridge')
     expect(normalizeTransitPlaceName('Not yet at the vault')).toBe('the vault')
+    expect(normalizeTransitPlaceName('Heading to the office')).toBe('the office')
   })
   it('leaves a real place name untouched', () => {
     expect(normalizeTransitPlaceName('The basement vault of the Violet Exchange')).toBe('The basement vault of the Violet Exchange')
