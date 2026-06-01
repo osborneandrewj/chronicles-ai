@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPrompt } from '@/lib/prompt-files'
 
+describe('narrator prompt — no option menus (A3)', () => {
+  it('forbids enumerating choices / option menus', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/never (present|offer|enumerate|list).*(option|choice)/i)
+    expect(p).toMatch(/your options are|from here you could|if you choose to/i)
+  })
+})
+
 describe('prompt content guards', () => {
   it('narrator prompt carries the historical-fidelity rule', () => {
     const p = loadPrompt('narrator-system').toLowerCase()
