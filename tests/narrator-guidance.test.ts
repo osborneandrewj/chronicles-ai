@@ -297,6 +297,25 @@ describe('formatNarratorTurnGuidance', () => {
     expect(guidance).toContain('keep the fiction in place')
     expect(guidance).not.toContain('branch the player can pursue')
   })
+
+  describe('dossier pressure is internal-only (A3)', () => {
+    it('labels dossier pressure as never-recite, never-list', () => {
+      const out = formatNarratorTurnGuidance({
+        stance: 'observe',
+        inputMode: 'in-character',
+        playerText: '"Vox, scan for the archives"',
+        recentTurns: [],
+        presentNpcCount: 0,
+        plannedActionCount: 0,
+        worldTime: 'Night',
+        activeObjectiveTitles: ['Reach the bridge'],
+        openClueTitles: ['Coordinates on the onionskin'],
+        activeThreatTitles: [],
+      })
+      expect(out).toMatch(/internal pressure only|do not name|never name these/i)
+      expect(out).not.toMatch(/Dossier pressure if it fits/)
+    })
+  })
 })
 
 describe('observation depth', () => {

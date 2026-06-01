@@ -47,7 +47,9 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
       const parts: string[] = []
       if (objHint) parts.push(`objectives: ${objHint}`)
       if (clueHint) parts.push(`clues: ${clueHint}`)
-      lines.push(`Dossier pressure if it fits — ${parts.join(' | ')}.`)
+      lines.push(
+        `Internal pressure only — do not name these to the player, never list them, never present them as goals or options; let at most one bend the scene through action or subtext if it fits naturally — ${parts.join(' | ')}.`,
+      )
     }
   }
 
