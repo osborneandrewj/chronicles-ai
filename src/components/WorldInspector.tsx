@@ -228,19 +228,23 @@ function NowView({ state }: { state: FullWorldState }) {
           <p className="text-neutral-500">Just the protagonist.</p>
         ) : (
           <ul className="space-y-1">
-            {presentCharacters.map((c) => (
-              <CharacterRow
-                key={c.id}
-                character={c}
-                places={state.places}
-                currentPlaceId={currentPlaceId}
-                turnTimestamps={state.turnTimestamps}
-                turnNumbers={state.turnNumbers}
-                reveries={state.reveriesByCharacter[c.id] ?? []}
-                open={openId === `char-${c.id}`}
-                onToggle={() => toggle(`char-${c.id}`)}
-              />
-            ))}
+            {presentCharacters.map((c) => {
+              const rowId = `now-char-${c.id}`;
+              return (
+                <CharacterRow
+                  key={c.id}
+                  rowId={rowId}
+                  character={c}
+                  places={state.places}
+                  currentPlaceId={currentPlaceId}
+                  turnTimestamps={state.turnTimestamps}
+                  turnNumbers={state.turnNumbers}
+                  reveries={state.reveriesByCharacter[c.id] ?? []}
+                  open={openId === rowId}
+                  onToggle={() => toggle(rowId)}
+                />
+              );
+            })}
           </ul>
         )}
       </section>
@@ -373,6 +377,10 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
     () => sortedScenes.find((s) => s.status === "active")?.id ?? null,
     [sortedScenes],
   );
+  // Initial-only by design: useAccordion seeds the open row from the active
+  // scene on mount and never resyncs. This is deliberate — the inspector
+  // refetches FullWorldState every turn, and resetting open state from data on
+  // each refetch (via an effect) would yank a row the user has opened/closed.
   const sceneAccordion = useAccordion(activeSceneId ? `scene-${activeSceneId}` : null);
   const currentPlaceId = useMemo(
     () => state.scenes.find((s) => s.id === state.currentSceneId)?.place_id ?? null,
@@ -432,19 +440,23 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
             <p className="text-neutral-500">No characters yet.</p>
           ) : (
             <ul className="space-y-1">
-              {state.characters.map((c) => (
-                <CharacterRow
-                  key={c.id}
-                  character={c}
-                  places={state.places}
-                  currentPlaceId={currentPlaceId}
-                  turnTimestamps={state.turnTimestamps}
-                  turnNumbers={state.turnNumbers}
-                  reveries={state.reveriesByCharacter[c.id] ?? []}
-                  open={charAccordion.openId === `char-${c.id}`}
-                  onToggle={() => charAccordion.toggle(`char-${c.id}`)}
-                />
-              ))}
+              {state.characters.map((c) => {
+                const rowId = `wiki-char-${c.id}`;
+                return (
+                  <CharacterRow
+                    key={c.id}
+                    rowId={rowId}
+                    character={c}
+                    places={state.places}
+                    currentPlaceId={currentPlaceId}
+                    turnTimestamps={state.turnTimestamps}
+                    turnNumbers={state.turnNumbers}
+                    reveries={state.reveriesByCharacter[c.id] ?? []}
+                    open={charAccordion.openId === rowId}
+                    onToggle={() => charAccordion.toggle(rowId)}
+                  />
+                );
+              })}
             </ul>
           )}
         </>
@@ -529,6 +541,7 @@ function CharacterRow({
   turnTimestamps,
   turnNumbers,
   reveries,
+  rowId,
   open,
   onToggle,
 }: {
@@ -538,13 +551,14 @@ function CharacterRow({
   turnTimestamps: Record<number, string>;
   turnNumbers: Record<number, number>;
   reveries: ReverieRow[];
+  rowId: string;
   open: boolean;
   onToggle: () => void;
 }) {
   const badges = deriveCharacterBadges(c, currentPlaceId);
   return (
     <Disclosure
-      id={`char-${c.id}`}
+      id={rowId}
       open={open}
       onToggle={onToggle}
       title={<span className="font-medium text-neutral-100">{c.name}</span>}
@@ -822,7 +836,7 @@ function BadgeRow({ badges }: { badges: InspectorBadge[] }) {
     <span className="flex shrink-0 flex-wrap items-center justify-end gap-1">
       {badges.map((b) => (
         <span
-          key={b.label}
+          key={`${b.tone}-${b.label}`}
           className={
             "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] " +
             BADGE_TONE_CLASS[b.tone]
