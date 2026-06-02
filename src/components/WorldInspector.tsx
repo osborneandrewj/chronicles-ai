@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { organizePlayerProfileFacts, type PlayerProfileGroup } from "@/lib/player-profile";
 import type { ReverieRow } from "@/lib/reveries";
+import { deriveCharacterBadges, deriveSceneBadge, type BadgeTone, type InspectorBadge } from "@/lib/inspector-badges";
 import type { FullWorldState } from "@/lib/world-state";
 
 type InspectorTab = "now" | "story" | "wiki" | "archivist";
@@ -343,6 +344,11 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
     () => [...state.scenes].sort((a, b) => b.scene_number - a.scene_number),
     [state.scenes],
   );
+  const activeSceneId = useMemo(
+    () => sortedScenes.find((s) => s.status === "active")?.id ?? null,
+    [sortedScenes],
+  );
+  const sceneAccordion = useAccordion(activeSceneId ? `scene-${activeSceneId}` : null);
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Wiki section" className="flex gap-1.5">
@@ -441,39 +447,34 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
         )
       )}
 
-      {sub === "scenes" && (
-        sortedScenes.length === 0 ? (
+      {sub === "scenes" &&
+        (sortedScenes.length === 0 ? (
           <p className="text-neutral-500">No scenes yet.</p>
         ) : (
-          <ol className="space-y-2">
+          <ol className="space-y-1">
             {sortedScenes.map((s) => (
-              <li
+              <Disclosure
                 key={s.id}
-                className={
-                  "border-l-2 pl-2.5 " +
-                  (s.status === "active" ? "border-amber-500/60" : "border-neutral-800")
-                }
-              >
-                <div className="flex items-baseline gap-2">
+                id={`scene-${s.id}`}
+                open={sceneAccordion.openId === `scene-${s.id}`}
+                onToggle={() => sceneAccordion.toggle(`scene-${s.id}`)}
+                borderClass={s.status === "active" ? "border-amber-500/60" : "border-neutral-800"}
+                title={
                   <span className="font-medium text-neutral-100">
                     {s.scene_number}. {s.title}
                   </span>
-                  <span className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">
-                    {s.status}
-                  </span>
-                </div>
+                }
+                badges={<BadgeRow badges={[deriveSceneBadge(s)]} />}
+              >
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5">
                   <TimestampText label="Opened" value={s.created_at} />
-                  {s.updated_at !== s.created_at && (
-                    <TimestampText label="Updated" value={s.updated_at} />
-                  )}
+                  {s.updated_at !== s.created_at && <TimestampText label="Updated" value={s.updated_at} />}
                 </div>
                 {s.summary && <p className="mt-0.5 text-neutral-400">{s.summary}</p>}
-              </li>
+              </Disclosure>
             ))}
           </ol>
-        )
-      )}
+        ))}
     </div>
   );
 }
@@ -722,6 +723,96 @@ function DossierItem({
       <div className="font-medium text-neutral-100">{title}</div>
       {meta && <div className="text-[11px] text-emerald-400/70">{meta}</div>}
       {children && <p className="mt-0.5 text-neutral-400">{children}</p>}
+    </li>
+  );
+}
+
+function useAccordion(initial: string | null = null) {
+  const [openId, setOpenId] = useState<string | null>(initial);
+  const toggle = useCallback((id: string) => {
+    setOpenId((cur) => (cur === id ? null : id));
+  }, []);
+  return { openId, toggle };
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      aria-hidden
+      className={"shrink-0 text-neutral-500 transition-transform " + (open ? "rotate-90" : "")}
+    >
+      <path d="M3 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const BADGE_TONE_CLASS: Record<BadgeTone, string> = {
+  player: "bg-amber-500/20 text-amber-200",
+  danger: "bg-red-900/50 text-red-300",
+  muted: "bg-neutral-800 text-neutral-400",
+  here: "bg-emerald-900/40 text-emerald-300",
+  agency: "bg-sky-900/40 text-sky-300",
+  active: "bg-amber-500/20 text-amber-300",
+};
+
+function BadgeRow({ badges }: { badges: InspectorBadge[] }) {
+  if (badges.length === 0) return null;
+  return (
+    <span className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+      {badges.map((b) => (
+        <span
+          key={b.label}
+          className={
+            "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] " +
+            BADGE_TONE_CLASS[b.tone]
+          }
+        >
+          {b.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function Disclosure({
+  id,
+  open,
+  onToggle,
+  title,
+  badges,
+  children,
+  borderClass = "border-neutral-800",
+}: {
+  id: string;
+  open: boolean;
+  onToggle: () => void;
+  title: React.ReactNode;
+  badges?: React.ReactNode;
+  children: React.ReactNode;
+  borderClass?: string;
+}) {
+  const bodyId = `disc-${id}`;
+  return (
+    <li className={"border-l-2 " + borderClass}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+        className="flex w-full min-h-11 items-center gap-2 py-1.5 pl-2.5 pr-1 text-left transition hover:bg-neutral-900/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+      >
+        <Chevron open={open} />
+        <span className="min-w-0 flex-1">{title}</span>
+        {badges}
+      </button>
+      {open && (
+        <div id={bodyId} className="pb-2 pl-2.5">
+          {children}
+        </div>
+      )}
     </li>
   );
 }
