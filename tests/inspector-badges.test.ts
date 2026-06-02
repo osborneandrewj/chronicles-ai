@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { deriveCharacterBadges, deriveSceneBadge } from '@/lib/inspector-badges'
+import type { CharacterAgencyLevel } from '@/lib/world-state'
 
 const baseChar = {
   is_player: 0 as number,
   status: 'active' as 'active' | 'inactive' | 'dead',
-  agency_level: 'npc' as 'npc' | 'local' | 'nearby' | 'distant' | 'dormant',
+  agency_level: 'npc' as CharacterAgencyLevel,
   current_place_id: null as number | null,
 }
 
@@ -54,6 +55,19 @@ describe('deriveCharacterBadges', () => {
       { label: 'dead', tone: 'danger' },
       { label: 'here', tone: 'here' },
       { label: 'nearby', tone: 'agency' },
+    ])
+  })
+
+  it('orders all four slots for a player: you, life, presence — agency suppressed', () => {
+    expect(
+      deriveCharacterBadges(
+        { is_player: 1, status: 'dead', agency_level: 'nearby' as CharacterAgencyLevel, current_place_id: 3 },
+        3,
+      ),
+    ).toEqual([
+      { label: 'you', tone: 'player' },
+      { label: 'dead', tone: 'danger' },
+      { label: 'here', tone: 'here' },
     ])
   })
 })

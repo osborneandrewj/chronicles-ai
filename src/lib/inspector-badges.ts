@@ -1,5 +1,6 @@
 import type { Character, Scene } from '@/lib/world-state'
 
+// tone drives the CSS class; label drives the displayed text (they may coincide).
 export type BadgeTone = 'player' | 'danger' | 'muted' | 'here' | 'agency' | 'active'
 
 export interface InspectorBadge {
@@ -29,6 +30,7 @@ export function deriveCharacterBadges(
   return badges
 }
 
+/** Active or done badge for a scene row. */
 export function deriveSceneBadge(s: Pick<Scene, 'status'>): InspectorBadge {
   return s.status === 'active'
     ? { label: 'active', tone: 'active' }
