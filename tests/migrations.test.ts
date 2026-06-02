@@ -1,7 +1,10 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
+import { db } from '@/lib/db'
 import { migrations, runMigrations } from '@/lib/migrations'
+import { getReveriesForCharacter } from '@/lib/reveries'
+import { createWorld } from '@/lib/worlds'
 
 // Builds the v4 schema by hand, populates it with one world + a few turns +
 // a turn_states snapshot, then runs migrations and asserts the v5 outcome.
@@ -73,7 +76,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -226,7 +229,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -266,7 +269,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -374,7 +377,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -414,7 +417,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -469,7 +472,7 @@ describe('v13 migration (player_canon_and_corrections)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -539,7 +542,7 @@ describe('v15-v16 migrations (npc_cognition + npc_reveries)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -601,7 +604,7 @@ describe('v17 migration (place_geo_anchors)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -658,7 +661,7 @@ describe('v18 migration (npc_journey_state)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -716,7 +719,7 @@ describe('v19 migration (character_aliases)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -763,7 +766,7 @@ describe('v21 migration (scene_pacing_context)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('scenes')").all() as Array<{
@@ -806,7 +809,7 @@ describe('v23 migration (world_archived_at)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(24)
+    expect(db.pragma('user_version', { simple: true })).toBe(25)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -842,9 +845,9 @@ describe('v23 migration (world_archived_at)', () => {
 })
 
 function migratedDb(): Database.Database {
-  const db = new Database(':memory:')
-  for (const m of migrations) m.up(db)
-  return db
+  const dbMem = new Database(':memory:')
+  for (const m of migrations) m.up(dbMem)
+  return dbMem
 }
 
 describe('migration 24 — npc_reveries + daily_loop', () => {
@@ -870,21 +873,62 @@ describe('migration 24 — npc_reveries + daily_loop', () => {
   })
 
   it('backfills newline reveries text into one row per line', () => {
-    const db = new Database(':memory:')
+    const dbMem = new Database(':memory:')
     for (const m of migrations) {
       if (m.version === 24) {
         // seed a character with multi-line reveries BEFORE migration 24 runs
-        db.prepare(
+        dbMem.prepare(
           `INSERT INTO characters (world_id, name, is_player, reveries)
            VALUES (1, 'Mara', 0, ?)`,
         ).run('burnt coffee recalls the outage\n\nrain on glass recalls the informant')
       }
-      m.up(db)
+      m.up(dbMem)
     }
-    const rows = db.prepare('SELECT text FROM npc_reveries ORDER BY id').all() as Array<{ text: string }>
+    const rows = dbMem.prepare('SELECT text FROM npc_reveries ORDER BY id').all() as Array<{ text: string }>
     expect(rows.map((r) => r.text)).toEqual([
       'burnt coffee recalls the outage',
       'rain on glass recalls the informant',
     ])
+  })
+})
+
+describe('migration 25 prune_reveries_to_three (ranked delete)', () => {
+  it('keeps the top 3 by intensity, then recency of flaring, then newest', () => {
+    const world = createWorld({
+      name: 'Prune25',
+      premise: 'Test.',
+      initialState: { time: 'Day', location: 'Room', identity: 'X', playerName: 'P' },
+    })
+    const charId = db
+      .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Vex', 0, 'active')`)
+      .run(world.id).lastInsertRowid as number
+    // Insert sentinel turns so last_flared_turn_id FK references are valid.
+    const insertTurnSql = db.prepare(
+      `INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x')`,
+    )
+    const t10 = insertTurnSql.run(world.id).lastInsertRowid as number
+    const t15 = insertTurnSql.run(world.id).lastInsertRowid as number
+    const t20 = insertTurnSql.run(world.id).lastInsertRowid as number
+    const ins = db.prepare(
+      `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity, last_flared_turn_id)
+       VALUES (?, ?, ?, '', ?, ?)`,
+    )
+    ins.run(world.id, charId, 'r-weakest', 0.1, null)
+    ins.run(world.id, charId, 'r-mid-old', 0.5, t10)
+    ins.run(world.id, charId, 'r-mid-new', 0.5, t20)
+    ins.run(world.id, charId, 'r-strong', 0.9, null)
+    ins.run(world.id, charId, 'r-mid-mid', 0.5, t15)
+
+    const ranked = db
+      .prepare(
+        `SELECT id FROM npc_reveries WHERE character_id = ?
+         ORDER BY intensity DESC, COALESCE(last_flared_turn_id, -1) DESC, id DESC`,
+      )
+      .all(charId) as Array<{ id: number }>
+    const del = db.prepare('DELETE FROM npc_reveries WHERE id = ?')
+    for (const { id } of ranked.slice(3)) del.run(id)
+
+    const kept = getReveriesForCharacter(charId).map((r) => r.text).sort()
+    expect(kept).toEqual(['r-mid-mid', 'r-mid-new', 'r-strong'])
   })
 })

@@ -770,6 +770,29 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    // v0.6.x — reverie cap lowered 6 → 3. Trim every character already over the
+    // cap down to its top 3 by the same ranking the app's pruneReveriesForCharacter
+    // uses: intensity desc, then most-recently-flared desc, then newest id desc.
+    version: 25,
+    name: 'prune_reveries_to_three',
+    up: (db) => {
+      const overCap = db
+        .prepare(
+          'SELECT character_id FROM npc_reveries GROUP BY character_id HAVING COUNT(*) > 3',
+        )
+        .all() as Array<{ character_id: number }>
+      const rankedFor = db.prepare(
+        `SELECT id FROM npc_reveries WHERE character_id = ?
+         ORDER BY intensity DESC, COALESCE(last_flared_turn_id, -1) DESC, id DESC`,
+      )
+      const del = db.prepare('DELETE FROM npc_reveries WHERE id = ?')
+      for (const { character_id } of overCap) {
+        const ids = (rankedFor.all(character_id) as Array<{ id: number }>).map((r) => r.id)
+        for (const id of ids.slice(3)) del.run(id)
+      }
+    },
+  },
 ]
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run
