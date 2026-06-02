@@ -286,59 +286,77 @@ function StoryView({ state }: { state: FullWorldState }) {
   return (
     <div className="space-y-4">
       {threads.length > 0 && (
-        <DossierGroup label={`Threads (${threads.length})`}>
-          {threads.map((t) => (
-            <DossierItem
-              key={t.id}
-              title={t.title}
-              meta={[
-                t.kind,
-                t.stakes ? `stakes: ${t.stakes}` : null,
-                t.rewards ? `rewards: ${t.rewards}` : null,
-                t.consequences ? `consequences: ${t.consequences}` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || null}
-            >
-              {t.summary}
-            </DossierItem>
-          ))}
-        </DossierGroup>
+        <DossierGroup
+          label={`Threads (${threads.length})`}
+          items={threads.map((t) => {
+            const meta = [
+              t.stakes ? `stakes: ${t.stakes}` : null,
+              t.rewards ? `rewards: ${t.rewards}` : null,
+              t.consequences ? `consequences: ${t.consequences}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return {
+              id: `thread-${t.id}`,
+              title: t.title,
+              tag: t.kind,
+              body: (
+                <>
+                  {meta && <div className="text-[11px] text-emerald-400/70">{meta}</div>}
+                  {t.summary && <p className="mt-0.5 text-neutral-400">{t.summary}</p>}
+                </>
+              ),
+            };
+          })}
+        />
       )}
       {objectives.length > 0 && (
-        <DossierGroup label={`Objectives (${objectives.length})`}>
-          {objectives.map((o) => (
-            <DossierItem
-              key={o.id}
-              title={o.title}
-              meta={o.status === "blocked" ? `blocked: ${o.blocker ?? "unknown"}` : null}
-            >
-              {o.detail}
-            </DossierItem>
-          ))}
-        </DossierGroup>
+        <DossierGroup
+          label={`Objectives (${objectives.length})`}
+          items={objectives.map((o) => ({
+            id: `obj-${o.id}`,
+            title: o.title,
+            tag: o.status === "blocked" ? "blocked" : null,
+            body: (
+              <>
+                {o.status === "blocked" && (
+                  <div className="text-[11px] text-emerald-400/70">blocked: {o.blocker ?? "unknown"}</div>
+                )}
+                {o.detail && <p className="mt-0.5 text-neutral-400">{o.detail}</p>}
+              </>
+            ),
+          }))}
+        />
       )}
       {clues.length > 0 && (
-        <DossierGroup label={`Clues (${clues.length})`}>
-          {clues.map((c) => (
-            <DossierItem key={c.id} title={c.title} meta={c.thread_title ?? c.implication}>
-              {c.detail}
-            </DossierItem>
-          ))}
-        </DossierGroup>
+        <DossierGroup
+          label={`Clues (${clues.length})`}
+          items={clues.map((c) => {
+            const meta = c.thread_title ?? c.implication;
+            return {
+              id: `clue-${c.id}`,
+              title: c.title,
+              tag: null,
+              body: (
+                <>
+                  {meta && <div className="text-[11px] text-emerald-400/70">{meta}</div>}
+                  {c.detail && <p className="mt-0.5 text-neutral-400">{c.detail}</p>}
+                </>
+              ),
+            };
+          })}
+        />
       )}
       {resources.length > 0 && (
-        <DossierGroup label={`Resources (${resources.length})`}>
-          {resources.map((r) => (
-            <DossierItem
-              key={r.id}
-              title={r.owner_name ? `${r.owner_name}: ${r.name}` : r.name}
-              meta={[r.kind, r.status].filter(Boolean).join(" · ") || null}
-            >
-              {r.detail}
-            </DossierItem>
-          ))}
-        </DossierGroup>
+        <DossierGroup
+          label={`Resources (${resources.length})`}
+          items={resources.map((r) => ({
+            id: `res-${r.id}`,
+            title: r.owner_name ? `${r.owner_name}: ${r.name}` : r.name,
+            tag: [r.kind, r.status].filter(Boolean).join(" · ") || null,
+            body: r.detail ? <p className="text-neutral-400">{r.detail}</p> : null,
+          }))}
+        />
       )}
     </div>
   );
@@ -736,38 +754,34 @@ function NpcAgencySummary({
   );
 }
 
-function DossierGroup({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+type DossierEntry = {
+  id: string;
+  title: string;
+  tag: string | null;
+  body: React.ReactNode;
+};
+
+function DossierGroup({ label, items }: { label: string; items: DossierEntry[] }) {
+  const { openId, toggle } = useAccordion();
   return (
     <div>
-      <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
-        {label}
-      </div>
-      <ul className="space-y-1.5">{children}</ul>
+      <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-neutral-600">{label}</div>
+      <ul className="space-y-1">
+        {items.map((it) => (
+          <Disclosure
+            key={it.id}
+            id={it.id}
+            open={openId === it.id}
+            onToggle={() => toggle(it.id)}
+            borderClass="border-emerald-900/60"
+            title={<span className="font-medium text-neutral-100">{it.title}</span>}
+            badges={it.tag ? <BadgeRow badges={[{ label: it.tag, tone: "muted" }]} /> : null}
+          >
+            {it.body}
+          </Disclosure>
+        ))}
+      </ul>
     </div>
-  );
-}
-
-function DossierItem({
-  title,
-  meta,
-  children,
-}: {
-  title: string;
-  meta: string | null;
-  children: React.ReactNode;
-}) {
-  return (
-    <li className="border-l-2 border-emerald-900/60 pl-2.5">
-      <div className="font-medium text-neutral-100">{title}</div>
-      {meta && <div className="text-[11px] text-emerald-400/70">{meta}</div>}
-      {children && <p className="mt-0.5 text-neutral-400">{children}</p>}
-    </li>
   );
 }
 
