@@ -12,7 +12,12 @@ import {
   type IntentVisibility,
 } from '@/lib/npc-intents'
 import { loadPrompt } from '@/lib/prompt-files'
-import { addReveriesForCharacter, getReveriesForCharacters } from '@/lib/reveries'
+import {
+  addReveriesForCharacter,
+  canMintReverie,
+  getReveriesForCharacters,
+  reverieMintState,
+} from '@/lib/reveries'
 import { worldTimeBand } from '@/lib/world-time'
 
 // Per-NPC update emitted by the NPC agent. Each field is independently
@@ -624,7 +629,12 @@ export function applyNpcAgentPatch(
         setPrivateBeliefsStmt.run(u.private_beliefs, existing.id)
       }
       if (u.reveries_add !== undefined && u.reveries_add.length > 0) {
-        addReveriesForCharacter(worldId, existing.id, u.reveries_add, narratorTurnId)
+        // v0.6.x: throttle creation — at most one new reverie per tick, and only
+        // once the per-NPC cooldown has elapsed. Deterministic; the prompt's
+        // "rarely" is just a nudge. addReveriesForCharacter still dedups + caps.
+        if (canMintReverie(reverieMintState(worldId, existing.id))) {
+          addReveriesForCharacter(worldId, existing.id, [u.reveries_add[0]], narratorTurnId)
+        }
       }
       if (u.daily_loop !== undefined) {
         setDailyLoopIfEmptyStmt.run(JSON.stringify(u.daily_loop), existing.id)
