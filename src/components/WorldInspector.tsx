@@ -349,6 +349,11 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
     [sortedScenes],
   );
   const sceneAccordion = useAccordion(activeSceneId ? `scene-${activeSceneId}` : null);
+  const currentPlaceId = useMemo(
+    () => state.scenes.find((s) => s.id === state.currentSceneId)?.place_id ?? null,
+    [state.scenes, state.currentSceneId],
+  );
+  const charAccordion = useAccordion();
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Wiki section" className="flex gap-1.5">
@@ -400,15 +405,18 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
           {state.characters.length === 0 ? (
             <p className="text-neutral-500">No characters yet.</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-1">
               {state.characters.map((c) => (
-                <CharacterCard
+                <CharacterRow
                   key={c.id}
                   character={c}
                   places={state.places}
+                  currentPlaceId={currentPlaceId}
                   turnTimestamps={state.turnTimestamps}
                   turnNumbers={state.turnNumbers}
                   reveries={state.reveriesByCharacter[c.id] ?? []}
+                  open={charAccordion.openId === `char-${c.id}`}
+                  onToggle={() => charAccordion.toggle(`char-${c.id}`)}
                 />
               ))}
             </ul>
@@ -479,7 +487,46 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
   );
 }
 
-function CharacterCard({
+function CharacterRow({
+  character: c,
+  places,
+  currentPlaceId,
+  turnTimestamps,
+  turnNumbers,
+  reveries,
+  open,
+  onToggle,
+}: {
+  character: FullWorldState["characters"][number];
+  places: FullWorldState["places"];
+  currentPlaceId: number | null;
+  turnTimestamps: Record<number, string>;
+  turnNumbers: Record<number, number>;
+  reveries: ReverieRow[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const badges = deriveCharacterBadges(c, currentPlaceId);
+  return (
+    <Disclosure
+      id={`char-${c.id}`}
+      open={open}
+      onToggle={onToggle}
+      title={<span className="font-medium text-neutral-100">{c.name}</span>}
+      badges={<BadgeRow badges={badges} />}
+    >
+      <CharacterDetail
+        character={c}
+        places={places}
+        turnTimestamps={turnTimestamps}
+        turnNumbers={turnNumbers}
+        reveries={reveries}
+      />
+    </Disclosure>
+  );
+}
+
+function CharacterDetail({
   character: c,
   places,
   turnTimestamps,
@@ -509,24 +556,10 @@ function CharacterCard({
   const hasNowFields =
     c.is_player !== 1 &&
     (c.personal_goals || c.active_goal || c.current_focus || c.current_attitude);
-  const hasHistoryFields =
-    c.is_player !== 1 &&
-    (c.recent_activity || c.observations);
-  const hasAgencyFields =
-    hasMindFields || hasNowFields || hasHistoryFields;
+  const hasHistoryFields = c.is_player !== 1 && (c.recent_activity || c.observations);
+  const hasAgencyFields = hasMindFields || hasNowFields || hasHistoryFields;
   return (
-    <li className="border-l-2 border-neutral-800 pl-2.5">
-      <div className="flex items-baseline gap-2">
-        <span className="font-medium text-neutral-100">{c.name}</span>
-        <span className="text-[10px] uppercase tracking-[0.12em] text-neutral-500">
-          {c.is_player === 1 ? "player" : c.status}
-        </span>
-        {c.is_player !== 1 && c.agency_level !== "npc" && (
-          <span className="rounded bg-sky-900/40 px-1 text-[10px] uppercase tracking-[0.12em] text-sky-300">
-            {c.agency_level}
-          </span>
-        )}
-      </div>
+    <>
       <TimestampText label="Updated" value={c.updated_at} />
       {currentPlace && (
         <div className="mt-0.5 text-[11px] text-neutral-500">
@@ -599,15 +632,9 @@ function CharacterCard({
                   <MultiLine value={c.personal_goals} turnTimestamps={turnTimestamps} turnNumbers={turnNumbers} />
                 </CharField>
               )}
-              {c.active_goal && (
-                <CharField label="goal" tone="amber">{c.active_goal}</CharField>
-              )}
-              {c.current_focus && (
-                <CharField label="focus" tone="sky">{c.current_focus}</CharField>
-              )}
-              {c.current_attitude && (
-                <CharField label="attitude" tone="amber">{c.current_attitude}</CharField>
-              )}
+              {c.active_goal && <CharField label="goal" tone="amber">{c.active_goal}</CharField>}
+              {c.current_focus && <CharField label="focus" tone="sky">{c.current_focus}</CharField>}
+              {c.current_attitude && <CharField label="attitude" tone="amber">{c.current_attitude}</CharField>}
             </CharacterStateGroup>
           )}
           {hasHistoryFields && (
@@ -638,7 +665,7 @@ function CharacterCard({
           collapsedLabel="updates"
         />
       )}
-    </li>
+    </>
   );
 }
 
