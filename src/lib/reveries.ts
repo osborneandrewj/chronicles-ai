@@ -118,6 +118,12 @@ const stampFlaredStmt = db.prepare<[number, number]>(
 const repointReverieStmt = db.prepare<[number, number]>(
   'UPDATE npc_reveries SET character_id = ? WHERE id = ?',
 )
+const reverieMintInfoStmt = db.prepare<[number]>(
+  'SELECT MAX(created_turn_id) AS lastTurn, COUNT(*) AS n FROM npc_reveries WHERE character_id = ?',
+)
+const playerTurnsSinceStmt = db.prepare<[number, number]>(
+  "SELECT COUNT(*) AS n FROM turns WHERE world_id = ? AND role = 'user' AND id > ?",
+)
 
 type RawReverieRow = Omit<ReverieRow, 'match_tags'> & { match_tags: string }
 
@@ -164,6 +170,23 @@ function pruneReveriesForCharacter(characterId: number, max = MAX_REVERIES_PER_N
     return b.id - a.id
   })
   for (const row of ranked.slice(max)) deleteReverieStmt.run(row.id)
+}
+
+// Inputs for canMintReverie. playerTurnsSinceLast is the number of this world's
+// player turns inserted after the NPC's most recent minted reverie; Infinity
+// when the NPC has no reverie carrying a created_turn_id (none, or only
+// backfilled rows) so the cooldown does not block the next mint.
+export function reverieMintState(
+  worldId: number,
+  characterId: number,
+): { hasAny: boolean; playerTurnsSinceLast: number } {
+  const info = reverieMintInfoStmt.get(characterId) as { lastTurn: number | null; n: number }
+  const hasAny = info.n > 0
+  if (info.lastTurn === null) {
+    return { hasAny, playerTurnsSinceLast: Number.POSITIVE_INFINITY }
+  }
+  const since = playerTurnsSinceStmt.get(worldId, info.lastTurn) as { n: number }
+  return { hasAny, playerTurnsSinceLast: since.n }
 }
 
 export function addReveriesForCharacter(

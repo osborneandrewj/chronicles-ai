@@ -10,6 +10,7 @@ import {
   normalizeReverieTag,
   repointReveries,
   REVERIE_COOLDOWN_TURNS,
+  reverieMintState,
 } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 
@@ -109,5 +110,37 @@ describe('npc_reveries persistence', () => {
     const texts = getReveriesForCharacter(charId).map((r) => r.text).sort()
     expect(texts).toEqual(['shared', 'unique'])
     expect(getReveriesForCharacter(otherId)).toHaveLength(0)
+  })
+})
+
+describe('reverieMintState', () => {
+  it('reports no reveries for a fresh NPC', () => {
+    const world = createWorld({
+      name: 'Mint State A',
+      premise: 'Test.',
+      initialState: { time: 'Day', location: 'Room', identity: 'X', playerName: 'P' },
+    })
+    const charId = db
+      .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Nyx', 0, 'active')`)
+      .run(world.id).lastInsertRowid as number
+    expect(reverieMintState(world.id, charId)).toEqual({ hasAny: false, playerTurnsSinceLast: Number.POSITIVE_INFINITY })
+  })
+
+  it('counts world player-turns since the NPC last minted a reverie', () => {
+    const world = createWorld({
+      name: 'Mint State B',
+      premise: 'Test.',
+      initialState: { time: 'Day', location: 'Room', identity: 'X', playerName: 'P' },
+    })
+    const charId = db
+      .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Nyx', 0, 'active')`)
+      .run(world.id).lastInsertRowid as number
+    const mintTurn = insertTurn(world.id, 'assistant', 'narration', null)
+    addReveriesForCharacter(world.id, charId, [{ text: 'a smell of rain' }], mintTurn.id)
+    insertTurn(world.id, 'user', 'p1', null)
+    insertTurn(world.id, 'user', 'p2', null)
+    const state = reverieMintState(world.id, charId)
+    expect(state.hasAny).toBe(true)
+    expect(state.playerTurnsSinceLast).toBe(2)
   })
 })
