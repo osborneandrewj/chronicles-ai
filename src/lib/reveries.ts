@@ -2,6 +2,20 @@ import { db } from '@/lib/db'
 
 export const MAX_REVERIES_PER_NPC = 3
 
+// v0.6.x: how many of this world's player turns must pass between an NPC
+// minting one reverie and the next. Deterministic rate throttle; the agent
+// prompt's "rarely" is only a nudge. Tunable.
+export const REVERIE_COOLDOWN_TURNS = 15
+
+// Pure decision: may this NPC mint a new reverie this tick? The first one (no
+// reveries yet) is always free; afterwards a full cooldown must have elapsed.
+export function canMintReverie(
+  state: { hasAny: boolean; playerTurnsSinceLast: number },
+  cooldown = REVERIE_COOLDOWN_TURNS,
+): boolean {
+  return !state.hasAny || state.playerTurnsSinceLast >= cooldown
+}
+
 export type ReverieRow = {
   id: number
   world_id: number

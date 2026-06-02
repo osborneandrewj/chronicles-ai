@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { db, insertTurn } from '@/lib/db'
 import {
   addReveriesForCharacter,
+  canMintReverie,
   computeReverieFlares,
   getReveriesForCharacter,
   MAX_REVERIES_PER_NPC,
   normalizeReverieTag,
   repointReveries,
+  REVERIE_COOLDOWN_TURNS,
 } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 
@@ -42,6 +44,18 @@ describe('computeReverieFlares', () => {
     const flaring = computeReverieFlares(candidates, ['x'], { perTurnCap: 2, presentCharacterIds: [12] })
     expect(flaring).toContain(3) // present NPC always included
     expect(flaring).toHaveLength(2)
+  })
+})
+
+describe('canMintReverie', () => {
+  it('allows the first reverie when the NPC has none', () => {
+    expect(canMintReverie({ hasAny: false, playerTurnsSinceLast: 0 })).toBe(true)
+  })
+  it('blocks a new reverie within the cooldown window', () => {
+    expect(canMintReverie({ hasAny: true, playerTurnsSinceLast: REVERIE_COOLDOWN_TURNS - 1 })).toBe(false)
+  })
+  it('allows a new reverie once the cooldown has elapsed', () => {
+    expect(canMintReverie({ hasAny: true, playerTurnsSinceLast: REVERIE_COOLDOWN_TURNS })).toBe(true)
   })
 })
 
