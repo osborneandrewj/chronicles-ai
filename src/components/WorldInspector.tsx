@@ -361,6 +361,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
     [state.scenes, state.currentSceneId],
   );
   const charAccordion = useAccordion();
+  const placeAccordion = useAccordion();
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Wiki section" className="flex gap-1.5">
@@ -431,14 +432,24 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
         </>
       )}
 
-      {sub === "places" && (
-        state.places.length === 0 ? (
+      {sub === "places" &&
+        (state.places.length === 0 ? (
           <p className="text-neutral-500">No places yet.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {state.places.map((p) => (
-              <li key={p.id} className="border-l-2 border-neutral-800 pl-2.5">
-                <div className="font-medium text-neutral-100">{p.name}</div>
+              <Disclosure
+                key={p.id}
+                id={`place-${p.id}`}
+                open={placeAccordion.openId === `place-${p.id}`}
+                onToggle={() => placeAccordion.toggle(`place-${p.id}`)}
+                title={<span className="font-medium text-neutral-100">{p.name}</span>}
+                badges={
+                  p.id === currentPlaceId ? (
+                    <BadgeRow badges={[{ label: "current", tone: "active" }]} />
+                  ) : null
+                }
+              >
                 <TimestampText label="Updated" value={p.updated_at} />
                 {p.description && <p className="mt-0.5 text-neutral-400">{p.description}</p>}
                 {p.player_notes && (
@@ -456,11 +467,10 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
                     </ul>
                   </div>
                 )}
-              </li>
+              </Disclosure>
             ))}
           </ul>
-        )
-      )}
+        ))}
 
       {sub === "scenes" &&
         (sortedScenes.length === 0 ? (
