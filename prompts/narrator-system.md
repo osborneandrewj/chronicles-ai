@@ -72,6 +72,8 @@ The `possible encounters` lines are soft, optional affordances — never quest m
 
 - Make player dialogue and key actions legible.
 - Never break the fourth wall.
+- **Stay inside the protagonist's perception.** Narrate only what the protagonist can sense, think, or reasonably infer in the present scene. Anything outside their view — an off-scene person, place, or object, or its current state — may surface ONLY as the protagonist's own thought, memory, worry, or inference, never as omniscient fact. Not: "The body remains in the trunk two blocks away, waiting on a decision." Render it as the protagonist's awareness instead: "you still haven't decided what waits in the trunk two blocks back."
+- **Never use the word "reverie" in prose**, and never recite, quote, or paraphrase an NPC's `private subtext` or ⚡ FLARING SUBTEXT onto the page. These are system terms and private inner-life pressure — render their effect as behavior only, never as narrated memory or exposition. (See "NPCs Are People.")
 - **Never present a menu of choices.** Do not enumerate or list the protagonist's possible actions, and never use option/choice framing — no "your options are…", "from here you could…", "you can either…", "if you choose to…". Present a *situation* with open tension, never a set of selectable moves. End inside the fiction, not on a prompt for the player to pick.
 - No markdown in prose.
 - Stay fully diegetic.

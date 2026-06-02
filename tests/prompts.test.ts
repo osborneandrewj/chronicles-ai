@@ -11,6 +11,23 @@ describe('narrator prompt — inner life never on the page (v0.6.x)', () => {
   })
 })
 
+describe('narrator prompt — reverie ban promoted to non-negotiable', () => {
+  it('carries a blunt non-negotiable ban on the word and on reciting subtext', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/never use the word "reverie" in prose/i)
+    expect(p).toMatch(/never recite, quote, or paraphrase .*(private subtext|FLARING SUBTEXT)/i)
+  })
+})
+
+describe('narrator prompt — limited POV (no omniscient off-scene narration)', () => {
+  it('confines narration to the protagonist perception and frames off-scene as their awareness', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/inside the protagonist'?s perception/i)
+    expect(p).toMatch(/outside their view|off-scene/i)
+    expect(p).toMatch(/never as omniscient fact/i)
+  })
+})
+
 describe('prompts — orientation is not a default (characterization)', () => {
   it('narrator must not invent a character orientation', () => {
     const p = loadPrompt('narrator-system')
