@@ -1,10 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { db } from '@/lib/db'
 import { migrations, runMigrations } from '@/lib/migrations'
-import { getReveriesForCharacter } from '@/lib/reveries'
-import { createWorld } from '@/lib/worlds'
 
 // Builds the v4 schema by hand, populates it with one world + a few turns +
 // a turn_states snapshot, then runs migrations and asserts the v5 outcome.
@@ -893,42 +890,64 @@ describe('migration 24 — npc_reveries + daily_loop', () => {
 })
 
 describe('migration 25 prune_reveries_to_three (ranked delete)', () => {
-  it('keeps the top 3 by intensity, then recency of flaring, then newest', () => {
-    const world = createWorld({
-      name: 'Prune25',
-      premise: 'Test.',
-      initialState: { time: 'Day', location: 'Room', identity: 'X', playerName: 'P' },
-    })
-    const charId = db
+  it('is registered with the correct version and name', () => {
+    const m25 = migrations.find((m) => m.version === 25)
+    expect(m25).toBeDefined()
+    expect(m25?.name).toBe('prune_reveries_to_three')
+  })
+
+  it('keeps the top 3 by intensity, then recency of flaring, then newest — via real up()', () => {
+    // Build a DB migrated through version 24 only, then seed >3 reveries,
+    // then invoke migration 25's real up() directly.
+    const dbMem = new Database(':memory:')
+    dbMem.pragma('journal_mode = MEMORY')
+    dbMem.pragma('foreign_keys = OFF')
+    for (const m of migrations) {
+      if (m.version >= 25) break
+      m.up(dbMem)
+      dbMem.pragma(`user_version = ${m.version}`)
+    }
+    dbMem.pragma('foreign_keys = ON')
+
+    // Seed a world + character into the now-v24 DB.
+    const worldId = (
+      dbMem
+        .prepare(
+          `INSERT INTO worlds (name, premise, initial_state_json) VALUES ('Prune25', 'Test.', ?) RETURNING id`,
+        )
+        .get(JSON.stringify({ time: 'Day', location: 'Room', identity: 'X', playerName: 'P' })) as { id: number }
+    ).id
+    const charId = dbMem
       .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Vex', 0, 'active')`)
-      .run(world.id).lastInsertRowid as number
+      .run(worldId).lastInsertRowid as number
+
     // Insert sentinel turns so last_flared_turn_id FK references are valid.
-    const insertTurnSql = db.prepare(
-      `INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x')`,
+    const insertTurnSql = dbMem.prepare(
+      `INSERT INTO turns (world_id, role, content, scene_id) VALUES (?, 'assistant', 'x', NULL)`,
     )
-    const t10 = insertTurnSql.run(world.id).lastInsertRowid as number
-    const t15 = insertTurnSql.run(world.id).lastInsertRowid as number
-    const t20 = insertTurnSql.run(world.id).lastInsertRowid as number
-    const ins = db.prepare(
+    const t10 = insertTurnSql.run(worldId).lastInsertRowid as number
+    const t15 = insertTurnSql.run(worldId).lastInsertRowid as number
+    const t20 = insertTurnSql.run(worldId).lastInsertRowid as number
+
+    const ins = dbMem.prepare(
       `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity, last_flared_turn_id)
        VALUES (?, ?, ?, '', ?, ?)`,
     )
-    ins.run(world.id, charId, 'r-weakest', 0.1, null)
-    ins.run(world.id, charId, 'r-mid-old', 0.5, t10)
-    ins.run(world.id, charId, 'r-mid-new', 0.5, t20)
-    ins.run(world.id, charId, 'r-strong', 0.9, null)
-    ins.run(world.id, charId, 'r-mid-mid', 0.5, t15)
+    ins.run(worldId, charId, 'r-weakest', 0.1, null)
+    ins.run(worldId, charId, 'r-mid-old', 0.5, t10)
+    ins.run(worldId, charId, 'r-mid-new', 0.5, t20)
+    ins.run(worldId, charId, 'r-strong', 0.9, null)
+    ins.run(worldId, charId, 'r-mid-mid', 0.5, t15)
 
-    const ranked = db
-      .prepare(
-        `SELECT id FROM npc_reveries WHERE character_id = ?
-         ORDER BY intensity DESC, COALESCE(last_flared_turn_id, -1) DESC, id DESC`,
-      )
-      .all(charId) as Array<{ id: number }>
-    const del = db.prepare('DELETE FROM npc_reveries WHERE id = ?')
-    for (const { id } of ranked.slice(3)) del.run(id)
+    // Run the real migration 25 up().
+    const m25 = migrations.find((m) => m.version === 25)!
+    dbMem.pragma('foreign_keys = OFF')
+    m25.up(dbMem)
+    dbMem.pragma('foreign_keys = ON')
 
-    const kept = getReveriesForCharacter(charId).map((r) => r.text).sort()
+    const kept = (
+      dbMem.prepare('SELECT text FROM npc_reveries WHERE character_id = ? ORDER BY text').all(charId) as Array<{ text: string }>
+    ).map((r) => r.text)
     expect(kept).toEqual(['r-mid-mid', 'r-mid-new', 'r-strong'])
   })
 })

@@ -143,4 +143,36 @@ describe('reverieMintState', () => {
     expect(state.hasAny).toBe(true)
     expect(state.playerTurnsSinceLast).toBe(2)
   })
+
+  it('treats an NPC with only backfilled (NULL created_turn_id) reveries as mintable', () => {
+    const world = createWorld({
+      name: 'Mint State C',
+      premise: 'Test.',
+      initialState: { time: 'Day', location: 'Room', identity: 'X', playerName: 'P' },
+    })
+    const charId = db
+      .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Nyx', 0, 'active')`)
+      .run(world.id).lastInsertRowid as number
+    // Backfilled row: no created_turn_id.
+    db.prepare(
+      `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity) VALUES (?, ?, 'old memory', '', 0.5)`,
+    ).run(world.id, charId)
+    const state = reverieMintState(world.id, charId)
+    expect(state.hasAny).toBe(true)
+    expect(state.playerTurnsSinceLast).toBe(Number.POSITIVE_INFINITY)
+    expect(canMintReverie(state)).toBe(true)
+  })
+
+  it('counts only this world player turns since the last reverie', () => {
+    const a = createWorld({ name: 'Scope A', premise: 'T', initialState: { time: 'Day', location: 'R', identity: 'X', playerName: 'P' } })
+    const b = createWorld({ name: 'Scope B', premise: 'T', initialState: { time: 'Day', location: 'R', identity: 'X', playerName: 'P' } })
+    const charId = db
+      .prepare(`INSERT INTO characters (world_id, name, is_player, status) VALUES (?, 'Nyx', 0, 'active')`)
+      .run(a.id).lastInsertRowid as number
+    const mintTurn = insertTurn(a.id, 'assistant', 'narration', null)
+    addReveriesForCharacter(a.id, charId, [{ text: 'a smell of rain' }], mintTurn.id)
+    insertTurn(b.id, 'user', 'other world turn', null) // must NOT count
+    insertTurn(a.id, 'user', 'this world turn', null)   // counts
+    expect(reverieMintState(a.id, charId).playerTurnsSinceLast).toBe(1)
+  })
 })

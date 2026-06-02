@@ -633,6 +633,9 @@ export function applyNpcAgentPatch(
         // v0.6.x: throttle creation — at most one new reverie per tick, and only
         // once the per-NPC cooldown has elapsed. Deterministic; the prompt's
         // "rarely" is just a nudge. addReveriesForCharacter still dedups + caps.
+        // NOTE: the schema allows an array, but we deliberately persist at most
+        // one per tick (cooldown throttle) and silently drop extras rather than
+        // failing the whole patch.
         if (canMintReverie(reverieMintState(worldId, existing.id))) {
           addReveriesForCharacter(worldId, existing.id, [u.reveries_add[0]], narratorTurnId)
         }

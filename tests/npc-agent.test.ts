@@ -223,6 +223,64 @@ describe('applyNpcAgentPatch', () => {
   })
 })
 
+describe('reveries_add cooldown gate', () => {
+  it('no-prior accept: first reverie mints when NPC has zero reveries', () => {
+    const { worldId, turnId } = seedWorld(`rev-gate-accept-${Math.random()}`)
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
+    promoteToLocal(worldId, 'Nyx')
+    const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
+
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'the hum of servers in an empty office', match_tags: ['servers'] }] }],
+    })
+
+    expect(getReveriesForCharacter(charId)).toHaveLength(1)
+  })
+
+  it('within-cooldown drop: new reverie is dropped when cooldown has not elapsed', () => {
+    const { worldId, turnId } = seedWorld(`rev-gate-cooldown-${Math.random()}`)
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
+    promoteToLocal(worldId, 'Nyx')
+    const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
+
+    // Mint the first reverie
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'first memory', match_tags: [] }] }],
+    })
+    expect(getReveriesForCharacter(charId)).toHaveLength(1)
+
+    // Attempt a second mint on the very next turn (no player turns have elapsed)
+    const nextTurn = insertTurn(worldId, 'assistant', 'another narration', null)
+    applyNpcAgentPatch(worldId, nextTurn.id, {
+      npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'second memory blocked by cooldown', match_tags: [] }] }],
+    })
+
+    // Still only 1 — the cooldown gate dropped the second
+    expect(getReveriesForCharacter(charId)).toHaveLength(1)
+  })
+
+  it('multi-emit clamp: only the first of multiple reveries_add items is persisted', () => {
+    const { worldId, turnId } = seedWorld(`rev-gate-clamp-${Math.random()}`)
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
+    promoteToLocal(worldId, 'Nyx')
+    const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
+
+    applyNpcAgentPatch(worldId, turnId, {
+      npc_updates: [{
+        name: 'Nyx',
+        reveries_add: [
+          { text: 'first item — persisted', match_tags: [] },
+          { text: 'second item — dropped', match_tags: [] },
+        ],
+      }],
+    })
+
+    const rows = getReveriesForCharacter(charId)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe('first item — persisted')
+  })
+})
+
 describe('npc agent reverie authoring (append-only)', () => {
   it('inserts reveries_add as rows and never deletes on omission', () => {
     const { worldId, turnId } = seedWorld('rev-author')

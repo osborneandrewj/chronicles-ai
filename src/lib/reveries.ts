@@ -118,6 +118,9 @@ const stampFlaredStmt = db.prepare<[number, number]>(
 const repointReverieStmt = db.prepare<[number, number]>(
   'UPDATE npc_reveries SET character_id = ? WHERE id = ?',
 )
+// MAX(created_turn_id) is the NPC's last *minted* turn because turns.id is
+// autoincrement (monotone) — the newest reverie has the highest created_turn_id.
+// NULL (no minted rows, or backfilled rows with NULL) is handled by the caller.
 const reverieMintInfoStmt = db.prepare<[number]>(
   'SELECT MAX(created_turn_id) AS lastTurn, COUNT(*) AS n FROM npc_reveries WHERE character_id = ?',
 )
