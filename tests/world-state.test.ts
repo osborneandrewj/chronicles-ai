@@ -63,9 +63,12 @@ describe('formatStateBlock reverie rendering', () => {
         flaring: new Set([1]),
       },
     )
-    expect(block).toContain('⚡ REVERIE FLARING')
+    expect(block).toContain('⚡ FLARING SUBTEXT')
     expect(block).toContain('burnt coffee recalls the outage')
     expect(block).toContain('rain on glass recalls the informant')
+    // Regression (v0.6.x): the word "reverie" must never appear in the STATE
+    // block — it was an injected label the narrator parroted into prose.
+    expect(block).not.toMatch(/reverie/i)
   })
 })
 

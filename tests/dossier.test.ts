@@ -119,7 +119,7 @@ describe('story dossier state', () => {
     })
 
     expect(block).toContain('private read (known only to Mara Vale; never let another NPC act on it): believes the relay fragment was planted as bait')
-    expect(block).toContain('reverie: rain on wheat recalls the informant')
+    expect(block).toContain('private subtext (backstory pressure; color tone and choices only, never state on the page): rain on wheat recalls the informant')
     expect(block).toContain('relationship to protagonist: trusts Andras with evidence')
     expect(block).toContain('agenda:')
     expect(block).toContain('diegetic tools: can query field records and auspex logs')

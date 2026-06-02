@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import { loadPrompt } from '@/lib/prompt-files'
 
+describe('narrator prompt — inner life never on the page (v0.6.x)', () => {
+  it('forbids naming/stating an NPC reverie and bans the word "reverie" in prose', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toContain('FLARING SUBTEXT')
+    expect(p).toMatch(/never use the word "reverie"/i)
+    expect(p).toMatch(/"reverie"/)
+  })
+})
+
 describe('prompts — orientation is not a default (characterization)', () => {
   it('narrator must not invent a character orientation', () => {
     const p = loadPrompt('narrator-system')

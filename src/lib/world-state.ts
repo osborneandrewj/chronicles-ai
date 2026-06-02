@@ -328,15 +328,23 @@ export function formatStateBlock(
         const reveryRows = reveryCtx.byCharacter.get(c.id) ?? []
         const flaring = reveryRows.filter((r) => reveryCtx.flaring.has(r.id))
         const ambient = reveryRows.filter((r) => !reveryCtx.flaring.has(r.id))
+        // v0.6.x: never put the word "reverie" or the raw memory on the page.
+        // These are private inner-life pressure for the NPC; the labels are
+        // framed as do-not-state directives and avoid the token "reverie"
+        // entirely, so the narrator can't parrot it into prose (the leak this
+        // fixes). The memory text stays as context so the narrator can render
+        // its *effect* as behavior — never as exposition.
         for (const r of flaring) {
           lines.push(
-            `  - ⚡ REVERIE FLARING — surface this turn as a physical tell, hesitation, or misread, never as narrated memory: ${limit(r.text, 180)}`,
+            `  - ⚡ FLARING SUBTEXT (private; render ONLY as a physical tell, hesitation, misread, or charged choice this turn — never name, quote, paraphrase, or describe it on the page): ${limit(r.text, 180)}`,
           )
         }
         if (ambient.length === 1) {
-          lines.push(`  - reverie: ${limit(ambient[0].text, 180)}`)
+          lines.push(
+            `  - private subtext (backstory pressure; color tone and choices only, never state on the page): ${limit(ambient[0].text, 180)}`,
+          )
         } else if (ambient.length > 1) {
-          lines.push('  - reveries:')
+          lines.push('  - private subtext (color tone and choices only, never state on the page):')
           for (const r of ambient.slice(0, 3)) lines.push(`    - ${limit(r.text, 180)}`)
         }
         if (c.tool_access) {
