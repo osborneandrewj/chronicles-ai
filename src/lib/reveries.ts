@@ -1,6 +1,6 @@
 import { db } from '@/lib/db'
 
-export const MAX_REVERIES_PER_NPC = 6
+export const MAX_REVERIES_PER_NPC = 3
 
 export type ReverieRow = {
   id: number
