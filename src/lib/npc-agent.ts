@@ -71,9 +71,10 @@ const NpcUpdateSchema = z.object({
     )
     .optional()
     .describe(
-      'Add NET-NEW reveries only — never repeat existing ones, they persist on their own. ' +
+      'Add a NET-NEW reverie only — never repeat existing ones, they persist on their own. ' +
         'A reverie is a charged sensory/emotional memory; tag each with concrete anchors ' +
-        '(a smell, an object, a place, a phrase, a failure). Add one rarely, only when something lodges.',
+        '(a smell, an object, a place, a phrase, a failure). Add one very rarely: an NPC holds at ' +
+        'most 3, and the system enforces a long cooldown, so most ticks add none.',
     ),
   daily_loop: DailyLoopSchema.optional().describe(
     'Author this NPC\'s time-banded daily routine ONCE if they do not have one yet. ' +
