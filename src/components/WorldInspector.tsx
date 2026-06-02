@@ -195,11 +195,15 @@ function NowView({ state }: { state: FullWorldState }) {
   const presentCharacters = useMemo(() => {
     if (!activeScene) return state.characters.filter((c) => c.is_player === 1);
     const here = activeScene.place_id;
-    return state.characters.filter((c) => c.is_player === 1 || (here != null && c.current_place_id === here));
+    return state.characters.filter(
+      (c) => c.is_player === 1 || (here != null && c.current_place_id === here),
+    );
   }, [activeScene, state.characters]);
   const currentPlace = activeScene
     ? state.places.find((p) => p.id === activeScene.place_id) ?? null
     : null;
+  const currentPlaceId = activeScene ? activeScene.place_id : null;
+  const { openId, toggle } = useAccordion();
 
   return (
     <div className="space-y-5">
@@ -223,15 +227,18 @@ function NowView({ state }: { state: FullWorldState }) {
         {presentCharacters.length === 0 ? (
           <p className="text-neutral-500">Just the protagonist.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {presentCharacters.map((c) => (
-              <CharacterCard
+              <CharacterRow
                 key={c.id}
                 character={c}
                 places={state.places}
+                currentPlaceId={currentPlaceId}
                 turnTimestamps={state.turnTimestamps}
                 turnNumbers={state.turnNumbers}
                 reveries={state.reveriesByCharacter[c.id] ?? []}
+                open={openId === `char-${c.id}`}
+                onToggle={() => toggle(`char-${c.id}`)}
               />
             ))}
           </ul>
