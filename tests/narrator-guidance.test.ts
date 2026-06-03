@@ -177,7 +177,11 @@ describe('formatNarratorTurnGuidance', () => {
     expect(guidance).toContain('Change the shape')
   })
 
-  it('flags repeated short tool-response structure on movement beats', () => {
+  it('cues movement beats to breathe without false-flagging varied prose as restatement', () => {
+    // Same two-paragraph "You [move] / Vox [scans]" shape but lexically distinct
+    // prose. The narrow shape detector that used to flag this only ever fired for
+    // tool-vocab worlds; it was removed. The beat cue still fires, and the
+    // similarity-based restatement check correctly stays silent (low overlap).
     const guidance = formatNarratorTurnGuidance({
       stance: 'do',
       inputMode: 'in-character',
@@ -203,8 +207,8 @@ describe('formatNarratorTurnGuidance', () => {
     })
 
     expect(guidance).toContain('Let the beat breathe')
-    expect(guidance).toContain('repeating its architecture')
     expect(guidance).toContain('arrival')
+    expect(guidance).not.toContain('restating itself')
   })
 
   it('flags repeated ambient closers', () => {
@@ -315,6 +319,56 @@ describe('formatNarratorTurnGuidance', () => {
       expect(out).toMatch(/internal pressure only|do not name|never name these/i)
       expect(out).not.toMatch(/Dossier pressure if it fits/)
     })
+  })
+})
+
+describe('restatement loop (verbatim repetition)', () => {
+  // Drawn from prod world 12 turns 1387/1389: identical opening sentence and
+  // near-identical scaffolding, only the central action beat changes. None of
+  // the older keyword/shape detectors caught this; the similarity check must.
+  const turn1387 =
+    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you with the silver brooch extended in her open palm, her woolen cloak the color of dried blood still against the morning air. Marcus shield remains angled at your left shoulder. The centurion vine staff stays raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
+  const turn1389 =
+    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you, her empty palm still extended, the silver brooch now resting in your fingers. Marcus shield stays angled at your left shoulder. The centurion vine staff remains raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
+
+  it('flags a near-verbatim restatement of the previous turn', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I slip the brooch into my pouch',
+        recentTurns: [
+          { role: 'assistant', content: turn1387 },
+          { role: 'user', content: 'I take the brooch' },
+          { role: 'assistant', content: turn1389 },
+        ],
+      }),
+    )
+    expect(out).toContain('restating itself')
+    expect(out).toContain('Do NOT re-establish the standing setting')
+    expect(out).toContain('Two hours later')
+  })
+
+  it('does not flag restatement on a genuinely varied pair', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I push open the door',
+        recentTurns: [
+          {
+            role: 'assistant',
+            content:
+              'You drive your fist into the door. Metal buckles. The man grins through blood.',
+          },
+          { role: 'user', content: 'I step over him' },
+          {
+            role: 'assistant',
+            content:
+              'Rain hammers the tin roof as Aldric slides the ledger across the table, ink still wet, his jaw tight with something he will not say.',
+          },
+        ],
+      }),
+    )
+    expect(out).not.toContain('restating itself')
   })
 })
 
