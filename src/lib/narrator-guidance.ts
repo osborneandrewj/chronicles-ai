@@ -109,7 +109,7 @@ function pickBeatCue(ctx: GuidanceContext): string | null {
 }
 
 function isLowAgencyMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   // Short observation / waiting / bare continuation — the player is marking time.
   if (isAttentionOnlyMove(text)) return true
   return (
@@ -152,12 +152,21 @@ function pickMomentumCue(ctx: GuidanceContext): string | null {
 }
 
 function pickContinuityNudge(turns: RecentTurn[]): string | null {
+  if (restatesPriorTurn(turns)) {
+    return (
+      'Recent narration is restating itself — the last turn reopened with the previous turn’s ' +
+      'scene and cast positions almost verbatim. Do NOT re-establish the standing setting, ' +
+      'restate where each character is positioned, or repeat a one-time time-transition (e.g. ' +
+      '"Two hours later"). Open from the new action already in motion and advance; bring a ' +
+      'character onto the page only when they do something new this turn.'
+    )
+  }
   const anchors = repeatedAmbientAnchors(turns)
   if (anchors.length > 0) {
     const list = joinList(anchors)
     return `Recent narration has leaned on ${list} as an ambient closer — return to ${list} only if it changes, becomes evidence, or the protagonist interacts with it.`
   }
-  if (recentNarrationIsStalled(turns) || recentNarrationUsesSameShortShape(turns)) {
+  if (recentNarrationIsStalled(turns)) {
     return 'Recent narration is repeating its architecture. Change the shape — start in motion, lead with consequence, add dialogue, advance time, or land on a concrete new choice.'
   }
   return null
@@ -178,12 +187,12 @@ function needsBranch(ctx: GuidanceContext): boolean {
 }
 
 function isAttentionOnlyMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   return /\b(i )?(look|stare|glance|watch|listen)\b/.test(compact) && compact.length <= 90
 }
 
 function isInvestigativeMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasAnalysisVerb =
     /\b(pattern match|match|scan|analy[sz]e|identify|inspect|examine|read|check|search|compare|diagnose|translate|decode|look up|trace|sample)\b/.test(
       compact,
@@ -198,7 +207,7 @@ function isInvestigativeMove(text: string): boolean {
 }
 
 function isTimeCheckMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasCheckVerb = /\b(check|look at|look|glance at|read|consult|see|inspect)\b/.test(compact)
   const hasTimeQuestion = /\bwhat time\b|\btime is it\b|\bcurrent time\b/.test(compact)
   const hasTimeDevice =
@@ -209,7 +218,7 @@ function isTimeCheckMove(text: string): boolean {
 }
 
 function isMediaFeedMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasOpenOrCheckVerb =
     /\b(open|opens|check|checks|look at|looks at|look through|scroll|scrolls|read|reads|watch|watches|listen|listens|turn on|turns on|browse|browses|refresh|refreshes)\b/.test(
       compact,
@@ -223,21 +232,21 @@ function isMediaFeedMove(text: string): boolean {
 }
 
 function isTransitionMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   return /\b(go|goes|walk|walks|run|runs|head|heads|travel|travels|cross|crosses|enter|enters|leave|leaves|return|returns|approach|approaches|make my way|move|moves|climb|climbs|drive|drives)\b/.test(
     compact,
   )
 }
 
 function isDangerMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   return /\b(explosion|blast|crater|blood|corpse|dead|wound|weapon|gun|knife|attack|threat|danger|fire|smoke|scream|alarm|soldier|body)\b/.test(
     compact,
   )
 }
 
 function isSpectacleMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasPowerVerb =
     /\b(crush|crumple|fold|tear|rip|burst|explode|ignite|burn|shatter|collapse|detonate|blast|throw|hurl|levitate|lift|split|peel|melt)\b/.test(
       compact,
@@ -251,7 +260,7 @@ function isSpectacleMove(text: string): boolean {
 }
 
 function isChargedRecognitionMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const takesStock = /\b(take stock|listen for|look around|situation)\b/.test(compact)
   const alteredCalm =
     /\b(don'?t feel|do not feel|feel great|feel calm|not alarmed|not stressed|strange|almost pleasant)\b/.test(
@@ -265,7 +274,7 @@ function isChargedRecognitionMove(text: string): boolean {
 }
 
 function isChargedConfrontationMove(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasDialogue = /["“][^"”]{2,}["”]/.test(text)
   const hasPressureVerb =
     /\b(command|threaten|warn|demand|interrogate|accuse|confront|approach|smile|bring me|if you value your life|not being honest|lie|lying|answer me)\b/.test(
@@ -275,7 +284,7 @@ function isChargedConfrontationMove(text: string): boolean {
 }
 
 function detectMarkedSpokenLanguage(text: string): string | null {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const match = compact.match(
     /\b(?:speak|say|ask|answer|reply|call|whisper|shout|tell|murmur|mutter)s?\s+(?:to\s+\w+\s+)?in\s+(russian|spanish|french|german|italian|japanese|mandarin|cantonese|korean|arabic|hindi|latin)\b/,
   )
@@ -283,6 +292,48 @@ function detectMarkedSpokenLanguage(text: string): string | null {
 
   const language = match[1]
   return language.charAt(0).toUpperCase() + language.slice(1)
+}
+
+// The dominant repetition failure (prod world 12): the narrator re-renders the
+// previous turn's opening sentence, per-character status lines, and ambient
+// closer almost verbatim, varying only the central action beat. Token-Jaccard
+// over the last two narrator turns catches this directly — the older
+// keyword/shape detectors miss it because the overlap is lexical, not a fixed
+// noun or a 2-paragraph shape. Thresholds are tuned high (real restatement
+// scores open≈1.0 / body≈0.78 / tail≈0.84; genuinely varied turns score <0.25)
+// so legitimate same-place continuation does not trip it.
+function restatesPriorTurn(turns: RecentTurn[]): boolean {
+  const recent = turns
+    .filter((t) => t.role === 'assistant')
+    .slice(-2)
+    .map((t) => t.content)
+  if (recent.length < 2) return false
+  const [prev, last] = recent
+
+  const openSim = jaccard(tokenize(firstSentence(prev)), tokenize(firstSentence(last)))
+  const tailSim = jaccard(tokenize(prev.slice(-260)), tokenize(last.slice(-260)))
+  const bodySim = jaccard(tokenize(prev), tokenize(last))
+
+  return openSim >= 0.8 || bodySim >= 0.6 || tailSim >= 0.7
+}
+
+function normalize(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(normalize(text).match(/[a-z']+/g) ?? [])
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  for (const token of a) if (b.has(token)) intersection += 1
+  return intersection / (a.size + b.size - intersection)
+}
+
+function firstSentence(text: string): string {
+  return (text.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? text).slice(0, 160)
 }
 
 function recentNarrationIsStalled(turns: RecentTurn[]): boolean {
@@ -329,29 +380,8 @@ function repeatedAmbientAnchors(turns: RecentTurn[]): string[] {
     .slice(0, 3)
 }
 
-function recentNarrationUsesSameShortShape(turns: RecentTurn[]): boolean {
-  const recentAssistant = turns
-    .filter((t) => t.role === 'assistant')
-    .slice(-3)
-    .map((t) => t.content)
-
-  if (recentAssistant.length < 2) return false
-
-  const shaped = recentAssistant.map((text) => ({
-    paragraphs: text.split(/\n\s*\n/).filter((p) => p.trim().length > 0).length,
-    startsWithYou: /^\s*(?:"[^"]+"\s*)?you\b/i.test(text),
-    mentionsTool:
-      /\b(vox|auspex|scanner|sensor|cogitator|servo|beam|query|pulse|scan)\b/i.test(text),
-    short: text.length < 900,
-  }))
-
-  return shaped.every(
-    (s) => s.short && s.paragraphs === 2 && s.startsWithYou && s.mentionsTool,
-  )
-}
-
 function isReactionOnlyNarration(text: string): boolean {
-  const compact = text.toLowerCase().replace(/\s+/g, ' ').trim()
+  const compact = normalize(text)
   const hasMotion =
     /\b(enters?|arrives?|leaves?|walks?|runs?|calls?|phones?|texts?|offers?|asks?|demands?|warns?|reveals?|opens?|closes?|brings?|hands?|takes?|sets off|rings?|knocks?)\b/.test(
       compact,
