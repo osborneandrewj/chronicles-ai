@@ -1,36 +1,18 @@
+import type {
+  IntentDisposition,
+  IntentVisibility,
+  NpcIntentRow,
+} from '@/domain/entities'
 import { db } from '@/lib/db'
 
 // v0.6.9 — durable record of NPC plans and how the narrator handled them.
 // Insert is split from the agent call so npc-agent.ts can persist before the
 // narrator runs and the post-narrator reconciliation step can update the same
 // row with the narrator turn id, a disposition label, and an interpretation.
-
-export type IntentVisibility = 'public' | 'narrator' | 'npc_private' | 'narrator_blind'
-export type IntentDisposition = 'staged' | 'modified' | 'ignored' | 'contradicted'
-
-export type NpcIntentRow = {
-  id: number
-  world_id: number
-  character_id: number
-  player_turn_id: number
-  narrator_turn_id: number | null
-  agency_level: string
-  intent_text: string
-  planned_action: string
-  intent_type: string | null
-  target_character_id: number | null
-  target_place_id: number | null
-  private_rationale: string | null
-  expected_visibility: IntentVisibility
-  narrator_disposition: IntentDisposition | null
-  narrator_interpretation: string | null
-  outcome_summary: string | null
-  resolved_outcome: string | null
-  reconciliation_confidence: number | null
-  archived_patch: string | null
-  created_at: string
-  updated_at: string
-}
+//
+// The NpcIntentRow row TYPE def + the visibility/disposition enums now live in
+// `domain/entities/npc-intent.ts` (spec §3.3); re-exported here for back-compat.
+export type { IntentDisposition, IntentVisibility, NpcIntentRow }
 
 export type InsertNpcIntent = {
   worldId: number

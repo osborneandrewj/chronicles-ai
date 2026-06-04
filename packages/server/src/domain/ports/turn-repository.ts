@@ -3,7 +3,7 @@ import type {
   Turn,
   TurnRole,
   TurnTimestamp,
-} from '@/lib/db'
+} from '@/domain/entities'
 
 // TurnRepository (spec §3.4) — APPEND-ONLY. There is deliberately NO general
 // `update` / clobbering `setMetadata`: turns are immutable once written. The only

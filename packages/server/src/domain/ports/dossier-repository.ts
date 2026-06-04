@@ -1,4 +1,4 @@
-import type { StoryDossier } from '@/lib/db'
+import type { StoryDossier } from '@/domain/entities'
 
 // DossierRepository (spec §3.4, "StoryDossierRepository") — dumb CRUD read of
 // the per-world story dossier (threads / clues / objectives / resources /

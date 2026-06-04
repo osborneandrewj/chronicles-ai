@@ -1,34 +1,11 @@
+import type { InitialState, World, WorldSummary } from '@/domain/entities'
 import { db } from '@/lib/db'
 import { classifyPlaceKind } from '@/lib/place-population'
 import { extractSettingRegion } from '@/lib/region-extractor'
 
-export type World = {
-  id: number
-  name: string
-  premise: string
-  initial_state_json: string
-  setting_region: string | null
-  created_at: string
-}
-
-export type WorldSummary = {
-  id: number
-  name: string
-  premise: string
-  created_at: string
-  archived_at: string | null
-  turn_count: number
-}
-
-// Initial-state shape supplied by the new-world form. After v0.5 this still
-// seeds the first character/place/scene rows; the legacy initial_state_json
-// column is also written for audit and as a fallback for any future migration.
-export type InitialState = {
-  time: string
-  location: string
-  identity: string
-  playerName?: string
-}
+// World / WorldSummary / InitialState row TYPE defs now live in
+// `domain/entities/world.ts` (spec §3.3); re-exported here for back-compat.
+export type { InitialState, World, WorldSummary }
 
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)

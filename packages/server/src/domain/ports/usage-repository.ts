@@ -1,4 +1,4 @@
-import type { UsageTotals } from '@/lib/db'
+import type { UsageTotals } from '@/domain/entities'
 
 // UsageRepository (spec §3.4, §5.1-P1, §5.3) — token-accounting reads. The
 // `SUM(json_extract(...))` cost aggregation lives inside the adapter; the

@@ -2,7 +2,7 @@ import type {
   OccupancySnapshotRow,
   PlaceProfileRow,
   PopulationTemplateRow,
-} from '@/lib/db'
+} from '@/domain/entities'
 
 // OccupancyRepository (spec §3.4) — dumb CRUD over place profiles, population
 // templates, and append-only occupancy snapshots. The occupancy *simulation* is

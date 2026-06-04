@@ -3,147 +3,54 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { runMigrations } from '@/lib/migrations'
-import type { Character, Place, Scene } from '@/lib/world-state'
+// Row TYPE defs now live in `domain/entities/*` (spec §3.3). Imported here for
+// local use in the repository functions, and re-exported (below) for back-compat
+// with the many call sites that still import them from `db.ts`; those importers
+// move off `db.ts` incrementally in P4/P5.
+import type {
+  AssistantTurnMetadata,
+  CachedTtsAudio,
+  Character,
+  OccupancySnapshotRow,
+  Place,
+  PlaceProfileRow,
+  PopulationTemplateRow,
+  Scene,
+  StoryClue,
+  StoryDossier,
+  StoryObjective,
+  StoryResource,
+  StoryThread,
+  TimelineEvent,
+  Turn,
+  TurnRole,
+  TurnTimestamp,
+  UsageTotals,
+  WorldCorrectionRow,
+} from '@/domain/entities'
 
-export type { Character }
-
-export type TurnRole = 'user' | 'assistant'
-
-export type Turn = {
-  id: number
-  world_id: number
-  role: TurnRole
-  content: string
-  scene_id: number | null
-  created_at: string
-}
-
-export type TurnTimestamp = { id: number; created_at: string }
-
-export type StoryThread = {
-  id: number
-  world_id: number
-  title: string
-  kind: 'quest' | 'mystery' | 'threat' | 'relationship' | 'background'
-  status: 'active' | 'resolved' | 'failed' | 'dormant'
-  summary: string | null
-  stakes: string | null
-  rewards: string | null
-  consequences: string | null
-  hidden: string | null
-  relevance_tags_json: string
-  source_turn_id: number | null
-  resolved_turn_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export type StoryClue = {
-  id: number
-  world_id: number
-  thread_id: number | null
-  thread_title: string | null
-  title: string
-  detail: string | null
-  implication: string | null
-  status: 'open' | 'interpreted' | 'spent' | 'false_lead'
-  source_turn_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export type StoryObjective = {
-  id: number
-  world_id: number
-  thread_id: number | null
-  thread_title: string | null
-  title: string
-  status: 'active' | 'blocked' | 'completed' | 'failed'
-  detail: string | null
-  blocker: string | null
-  source_turn_id: number | null
-  completed_turn_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export type StoryResource = {
-  id: number
-  world_id: number
-  owner_character_id: number | null
-  owner_name: string | null
-  name: string
-  kind: string | null
-  status: string | null
-  detail: string | null
-  source_turn_id: number | null
-  created_at: string
-  updated_at: string
-}
-
-export type TimelineEvent = {
-  id: number
-  world_id: number
-  turn_id: number | null
-  thread_id: number | null
-  thread_title: string | null
-  world_time: string | null
-  title: string
-  summary: string
-  importance: number
-  created_at: string
-}
-
-export type StoryDossier = {
-  threads: StoryThread[]
-  clues: StoryClue[]
-  objectives: StoryObjective[]
-  resources: StoryResource[]
-  timeline: TimelineEvent[]
-}
-
-export type PlaceProfileRow = {
-  id: number
-  world_id: number
-  place_id: number
-  profile_kind: string
-  capacity_min: number
-  capacity_max: number
-  typical_roles_json: string
-  open_hours_json: string | null
-  traffic_level: 'none' | 'low' | 'medium' | 'high' | 'surge'
-  ambience_tags_json: string
-  match_tags_json: string
-  encounter_rules_json: string
-  created_at: string
-  updated_at: string
-}
-
-export type PopulationTemplateRow = {
-  id: number
-  world_id: number
-  place_profile_kind: string | null
-  role: string
-  label: string
-  description: string | null
-  behavior_tags_json: string
-  match_tags_json: string
-  seed_premise: string | null
-  promotable: number
-  weight: number
-  created_at: string
-  updated_at: string
-}
-
-export type OccupancySnapshotRow = {
-  id: number
-  world_id: number
-  place_id: number
-  scene_id: number | null
-  source_turn_id: number | null
-  world_time: string | null
-  occupancy_json: string
-  created_at: string
+// Re-export the row TYPE defs for back-compat with call sites that still import
+// them from `db.ts`. Those importers move off `db.ts` incrementally in P4/P5.
+export type {
+  AssistantTurnMetadata,
+  CachedTtsAudio,
+  Character,
+  OccupancySnapshotRow,
+  Place,
+  PlaceProfileRow,
+  PopulationTemplateRow,
+  Scene,
+  StoryClue,
+  StoryDossier,
+  StoryObjective,
+  StoryResource,
+  StoryThread,
+  TimelineEvent,
+  Turn,
+  TurnRole,
+  TurnTimestamp,
+  UsageTotals,
+  WorldCorrectionRow,
 }
 
 type Globals = typeof globalThis & { __chroniclesDb?: Database.Database }
@@ -547,12 +454,6 @@ export function addTtsChars(worldId: number, turnId: number, chars: number): voi
   addTtsCharsStmt.run(Math.max(0, Math.round(chars)), turnId, worldId)
 }
 
-export type CachedTtsAudio = {
-  contentType: string
-  audio: Buffer
-  byteLength: number
-}
-
 export function getCachedTtsAudio(
   worldId: number,
   turnId: number,
@@ -603,16 +504,6 @@ export function storeCachedTtsAudio({
   })()
 }
 
-export type UsageTotals = {
-  turns: number
-  narratorInput: number
-  narratorOutput: number
-  archivistInput: number
-  archivistOutput: number
-  npcAgentInput: number
-  npcAgentOutput: number
-}
-
 export function getUsageTotals(worldId: number): UsageTotals {
   return usageTotalsStmt.get(worldId) as UsageTotals
 }
@@ -628,8 +519,6 @@ export function getLatestMetadata(
     return null
   }
 }
-
-export type AssistantTurnMetadata = { id: number; metadata: Record<string, unknown> }
 
 function parseMetadataRows(
   rows: Array<{ id: number; metadata: string }>,
@@ -796,17 +685,8 @@ export function getLatestOccupancySnapshotRow(
 // /api/world-correction route after the patch has been applied; read back by
 // the inspector's Archivist tab for the in-tab scrollback. `applied_patch` is
 // the serialized ArchivistPatch JSON so a row is self-describing without
-// joining against the entity tables.
-export type WorldCorrectionRow = {
-  id: number
-  world_id: number
-  turn_id: number | null
-  player_text: string
-  archivist_reply: string
-  applied_patch: string
-  created_at: string
-}
-
+// joining against the entity tables. (The row TYPE def now lives in
+// `domain/entities/correction.ts`.)
 export function insertWorldCorrection(
   worldId: number,
   turnId: number | null,

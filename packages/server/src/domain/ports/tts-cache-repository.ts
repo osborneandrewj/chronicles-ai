@@ -1,4 +1,4 @@
-import type { CachedTtsAudio } from '@/lib/db'
+import type { CachedTtsAudio } from '@/domain/entities'
 
 // TtsCacheRepository (spec §3.4, "TtsAudioCacheRepository") — dumb CRUD over the
 // synthesized-audio cache. Turn-based retention pruning runs inside the same

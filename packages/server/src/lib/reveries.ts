@@ -1,4 +1,9 @@
+import type { FlareCandidate, ReverieInput, ReverieRow } from '@/domain/entities'
 import { db } from '@/lib/db'
+
+// ReverieRow / ReverieInput / FlareCandidate row TYPE defs now live in
+// `domain/entities/reverie.ts` (spec §3.3); re-exported here for back-compat.
+export type { FlareCandidate, ReverieInput, ReverieRow }
 
 export const MAX_REVERIES_PER_NPC = 3
 
@@ -14,32 +19,6 @@ export function canMintReverie(
   cooldown = REVERIE_COOLDOWN_TURNS,
 ): boolean {
   return !state.hasAny || state.playerTurnsSinceLast >= cooldown
-}
-
-export type ReverieRow = {
-  id: number
-  world_id: number
-  character_id: number
-  text: string
-  match_tags: string[]
-  intensity: number
-  is_cornerstone: number
-  created_turn_id: number | null
-  last_flared_turn_id: number | null
-  created_at: string
-}
-
-export type ReverieInput = {
-  text: string
-  match_tags?: string[]
-  intensity?: number
-}
-
-export type FlareCandidate = {
-  id: number
-  character_id: number
-  match_tags: string[]
-  intensity: number
 }
 
 export function normalizeReverieTag(tag: string): string {
