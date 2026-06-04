@@ -1,3 +1,4 @@
+import { summarizeUsage, WorldNotFoundError } from '@/application/use-cases/summarize-usage'
 import { getContainer } from '@/composition/container'
 import { summarizeTurn } from '@/lib/turn-cost'
 
@@ -10,12 +11,19 @@ export async function GET(req: Request) {
   if (!Number.isInteger(worldId) || worldId <= 0) {
     return new Response('Missing or invalid worldId', { status: 400 })
   }
+
   const { worlds, turns: turnRepo } = getContainer()
-  const world = await worlds.getWorld(worldId)
-  if (!world) {
-    return new Response(`World ${worldId} not found`, { status: 404 })
+  let result
+  try {
+    result = await summarizeUsage({ worldId }, { worlds, turns: turnRepo })
+  } catch (err) {
+    if (err instanceof WorldNotFoundError) {
+      return new Response(err.message, { status: 404 })
+    }
+    throw err
   }
-  const turns = (await turnRepo.allAssistantMetadata(worldId)).map(({ id, metadata }) =>
+
+  const turns = result.assistantMetadata.map(({ id, metadata }) =>
     summarizeTurn(id, metadata),
   )
   const total = turns.reduce((sum, t) => sum + t.total, 0)
