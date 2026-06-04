@@ -9,6 +9,7 @@ import {
 } from 'ai'
 import { z } from 'zod'
 
+import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
   applyArchivistPatch,
@@ -48,7 +49,6 @@ import {
 } from '@/lib/world-state'
 import { getWorld } from '@/lib/worlds'
 
-const NARRATOR_MODEL = 'grok-4.3'
 const NARRATOR_HISTORY_TURNS = 13
 const FULL_HISTORY_TURNS = 6
 

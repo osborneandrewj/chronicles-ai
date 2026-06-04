@@ -2,13 +2,15 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
+
 // One-shot Haiku call run at world creation. Reads the world premise and
 // returns a Nominatim-friendly region string (e.g. "Hayden, Idaho, USA") used
 // to bias real-world geocoding for that world's places. Returns null when the
 // premise describes a fictional/secondary setting — geocoding bias only helps
 // for real places, and a junk region string would degrade lookups elsewhere.
 
-const REGION_EXTRACTOR_MODEL = 'claude-haiku-4-5-20251001'
+const REGION_EXTRACTOR_MODEL = HAIKU_MODEL
 
 const SettingRegionSchema = z.object({
   is_real_world: z

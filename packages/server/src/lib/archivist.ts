@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { isDescriptorName } from '@/lib/character-identity'
 import { db } from '@/lib/db'
 import { coerceJsonObject, tolerateNulls } from '@/lib/llm-schema'
@@ -230,7 +231,7 @@ type StoryCluePatch = NonNullable<ArchivistPatch['story_clues']>[number]
 type StoryObjectivePatch = NonNullable<ArchivistPatch['story_objectives']>[number]
 type StoryResourcePatch = NonNullable<ArchivistPatch['story_resources']>[number]
 
-export const ARCHIVIST_MODEL = 'claude-haiku-4-5-20251001'
+export const ARCHIVIST_MODEL = HAIKU_MODEL
 
 export function extractDeterministicPatch(
   prior: NarratorWorldState,

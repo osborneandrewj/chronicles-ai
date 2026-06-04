@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { db } from '@/lib/db'
 import { tolerateNulls } from '@/lib/llm-schema'
@@ -257,7 +258,7 @@ export function shouldSkipRoutineTick(
   return true
 }
 
-export const NPC_AGENT_MODEL = 'claude-haiku-4-5-20251001'
+export const NPC_AGENT_MODEL = HAIKU_MODEL
 
 type AgentNpcRow = {
   id: number

@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { db } from '@/lib/db'
 import {
   attachIntentsToNarratorTurn,
@@ -20,7 +21,7 @@ import {
 // archivist already extracts world state from the same prose; intent
 // classification is narrower and benefits from a dedicated prompt.
 
-export const RECONCILER_MODEL = 'claude-haiku-4-5-20251001'
+export const RECONCILER_MODEL = HAIKU_MODEL
 
 const DispositionEnum = z.enum(['staged', 'modified', 'ignored', 'contradicted'])
 

@@ -1,4 +1,4 @@
-import { costForTts, costForUsage, type UsageLike } from '@/lib/pricing'
+import { costForTts, costForUsage, type UsageLike } from '@/infrastructure/llm/pricing'
 
 type AgentMeta = { model?: string; usage?: UsageLike } | undefined
 type TtsMeta = { chars?: number } | undefined

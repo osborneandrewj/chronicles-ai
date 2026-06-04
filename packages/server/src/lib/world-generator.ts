@@ -2,6 +2,8 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
+
 // One-shot Haiku call run when a player uses the Quick start creator. Given a
 // genre label (+ optional player name) it synthesizes a complete starting
 // world: title, premise, opening location, opening time, and a character
@@ -10,7 +12,7 @@ import { z } from 'zod'
 // region-extractor.ts. Throws on failure — unlike region extraction, a failed
 // synthesis means there is nothing to create, so the caller must surface it.
 
-const WORLD_GENERATOR_MODEL = 'claude-haiku-4-5-20251001'
+const WORLD_GENERATOR_MODEL = HAIKU_MODEL
 
 export const GeneratedWorldSchema = z.object({
   name: z

@@ -8,6 +8,7 @@ import {
   STANCES,
   classifyWithRules,
 } from '@/domain/services/action-classifier-rules'
+import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 
 // The pure rule-based classifier core (`classifyWithRules` + heuristics + the
 // stance/input-mode enums) moved to domain/services/action-classifier-rules.ts
@@ -22,7 +23,7 @@ export {
   type Stance,
 } from '@/domain/services/action-classifier-rules'
 
-export const CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001'
+export const CLASSIFIER_MODEL = HAIKU_MODEL
 
 export type ClassificationResult = {
   stance: (typeof STANCES)[number]

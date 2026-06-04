@@ -1,13 +1,12 @@
 import { xai } from '@ai-sdk/xai'
 import { generateText } from 'ai'
 
+import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { isOverDailyLimit } from '@/lib/cost-cap'
 import { getActiveSceneForWorld, insertTurn, updateTurnMetadata } from '@/lib/db'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
-
-const NARRATOR_MODEL = 'grok-4.3'
 
 // Trailing directive that nudges the narrator into the "Opening a new world"
 // branch of NARRATOR_BASE. The system prompt already carries the length /
