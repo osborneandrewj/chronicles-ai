@@ -1,6 +1,7 @@
 import 'server-only'
 
 import type {
+  BackgroundTasks,
   CharacterRepository,
   Clock,
   CorrectionRepository,
@@ -18,6 +19,7 @@ import type {
   UsageRepository,
   WorldRepository,
 } from '@/domain/ports'
+import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { ConsoleLogger } from '@/infrastructure/logging/console-logger'
 import { SqliteCharacterRepository } from '@/infrastructure/persistence/sqlite/character-repository.sqlite'
@@ -59,6 +61,7 @@ export type Container = {
   corrections: CorrectionRepository
   usage: UsageRepository
   speech: SpeechSynthesizer
+  backgroundTasks: BackgroundTasks
 }
 
 let cached: Container | undefined
@@ -81,6 +84,7 @@ function build(): Container {
     corrections: new SqliteCorrectionRepository(),
     usage: new SqliteUsageRepository(),
     speech: new XaiSpeechSynthesizer(),
+    backgroundTasks: new ProcessBackgroundTasks(),
   }
 }
 
