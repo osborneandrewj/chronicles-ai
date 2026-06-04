@@ -150,12 +150,12 @@ export async function POST(req: Request) {
 
   // Daily shared cost cap. Gated before any LLM call (classifier or narrator)
   // so an exhausted budget never starts a stream we'd have to error mid-flight.
-  if (isOverDailyLimit()) {
+  if (await isOverDailyLimit()) {
     return Response.json(
       {
         error: 'daily_token_limit_reached',
         message: 'The shared daily LLM budget is spent. Try again after UTC midnight.',
-        used: todaysTokens(),
+        used: await todaysTokens(),
         limit: dailyTokenLimit(),
       },
       { status: 429 },

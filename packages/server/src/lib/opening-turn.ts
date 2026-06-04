@@ -25,7 +25,7 @@ const OPENING_DIRECTIVE =
 // creation entirely; the player can send their own first turn if the opening
 // never lands. Console-logs surface in Railway logs for diagnosis.
 export async function generateOpeningTurn(worldId: number, premise: string): Promise<void> {
-  if (isOverDailyLimit()) {
+  if (await isOverDailyLimit()) {
     console.warn('[opening-turn] daily token cap reached; skipping opening for world', worldId)
     return
   }

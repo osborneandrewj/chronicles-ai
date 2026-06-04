@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { getCachedTtsAudio, storeCachedTtsAudio } from '@/lib/db'
+import { getContainer } from '@/composition/container'
 import { normalizeVoiceId, streamSpeech, TTS_MODEL_KEY, TtsError, warmConnection } from '@/lib/tts'
 
 export const runtime = 'nodejs'
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
   const textHash = hashText(text)
 
   if (cacheRef) {
-    const cached = getCachedTtsAudio(
+    const cached = await getContainer().ttsCache.get(
       cacheRef.worldId,
       cacheRef.turnId,
       TTS_MODEL_KEY,
@@ -142,7 +142,7 @@ async function cacheAudioStream(
   try {
     const arrayBuffer = await new Response(audio).arrayBuffer()
     if (arrayBuffer.byteLength > MAX_CACHED_AUDIO_BYTES) return
-    storeCachedTtsAudio({
+    await getContainer().ttsCache.store({
       ...cache,
       audio: Buffer.from(arrayBuffer),
       turnsPerWorld: CACHE_TURNS_PER_WORLD,

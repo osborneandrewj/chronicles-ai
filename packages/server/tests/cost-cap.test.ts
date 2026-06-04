@@ -37,74 +37,74 @@ describe('todaysTokens', () => {
   let worldId: number
   let baseline: number
 
-  beforeEach(() => {
+  beforeEach(async () => {
     worldId = seedWorld()
-    baseline = todaysTokens()
+    baseline = await todaysTokens()
   })
 
-  it('sums narrator input + output for today', () => {
+  it('sums narrator input + output for today', async () => {
     insertTurnWithMetadata(worldId, {
       narrator: { usage: { inputTokens: 10, outputTokens: 20 } },
     })
-    expect(todaysTokens() - baseline).toBe(30)
+    expect((await todaysTokens()) - baseline).toBe(30)
   })
 
-  it('sums archivist input + output (post-v0.5 key)', () => {
+  it('sums archivist input + output (post-v0.5 key)', async () => {
     insertTurnWithMetadata(worldId, {
       archivist: { usage: { inputTokens: 100, outputTokens: 50 } },
     })
-    expect(todaysTokens() - baseline).toBe(150)
+    expect((await todaysTokens()) - baseline).toBe(150)
   })
 
-  it('sums extractor input + output (pre-v0.5 key)', () => {
+  it('sums extractor input + output (pre-v0.5 key)', async () => {
     insertTurnWithMetadata(worldId, {
       extractor: { usage: { inputTokens: 7, outputTokens: 3 } },
     })
-    expect(todaysTokens() - baseline).toBe(10)
+    expect((await todaysTokens()) - baseline).toBe(10)
   })
 
-  it('sums classifier input + output', () => {
+  it('sums classifier input + output', async () => {
     insertTurnWithMetadata(worldId, {
       classifier: { usage: { inputTokens: 5, outputTokens: 5 } },
     })
-    expect(todaysTokens() - baseline).toBe(10)
+    expect((await todaysTokens()) - baseline).toBe(10)
   })
 
-  it('sums all four keys together when present on a mixed row', () => {
+  it('sums all four keys together when present on a mixed row', async () => {
     insertTurnWithMetadata(worldId, {
       narrator: { usage: { inputTokens: 1, outputTokens: 2 } },
       archivist: { usage: { inputTokens: 4, outputTokens: 8 } },
       extractor: { usage: { inputTokens: 16, outputTokens: 32 } },
       classifier: { usage: { inputTokens: 64, outputTokens: 128 } },
     })
-    expect(todaysTokens() - baseline).toBe(1 + 2 + 4 + 8 + 16 + 32 + 64 + 128)
+    expect((await todaysTokens()) - baseline).toBe(1 + 2 + 4 + 8 + 16 + 32 + 64 + 128)
   })
 
-  it('ignores rows whose metadata is missing the usage keys', () => {
+  it('ignores rows whose metadata is missing the usage keys', async () => {
     insertTurnWithMetadata(worldId, { tts: { chars: 1234 } })
-    expect(todaysTokens() - baseline).toBe(0)
+    expect((await todaysTokens()) - baseline).toBe(0)
   })
 
-  it('ignores rows with NULL metadata entirely', () => {
+  it('ignores rows with NULL metadata entirely', async () => {
     insertTurn(worldId, 'assistant', 'no metadata', null)
-    expect(todaysTokens() - baseline).toBe(0)
+    expect((await todaysTokens()) - baseline).toBe(0)
   })
 
-  it('excludes rows whose created_at is not today (UTC)', () => {
+  it('excludes rows whose created_at is not today (UTC)', async () => {
     insertTurnWithMetadata(
       worldId,
       { archivist: { usage: { inputTokens: 9_999, outputTokens: 9_999 } } },
       "datetime('now', '-2 days')",
     )
-    expect(todaysTokens() - baseline).toBe(0)
+    expect((await todaysTokens()) - baseline).toBe(0)
   })
 
-  it('regression: a 200k archivist row alone trips the default 200k cap', () => {
+  it('regression: a 200k archivist row alone trips the default 200k cap', async () => {
     insertTurnWithMetadata(worldId, {
       archivist: { usage: { inputTokens: 150_000, outputTokens: 50_000 } },
     })
-    expect(todaysTokens() - baseline).toBe(200_000)
+    expect((await todaysTokens()) - baseline).toBe(200_000)
     expect(dailyTokenLimit()).toBe(200_000)
-    expect(isOverDailyLimit()).toBe(true)
+    expect(await isOverDailyLimit()).toBe(true)
   })
 })

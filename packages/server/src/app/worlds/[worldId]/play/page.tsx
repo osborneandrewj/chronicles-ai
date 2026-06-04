@@ -1,9 +1,8 @@
 import { notFound } from 'next/navigation'
 
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
-import { assistantMetadataSince, hasTurnBefore, latestTurns } from '@/lib/db'
+import { getContainer } from '@/composition/container'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
-import { getWorld } from '@/lib/worlds'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,10 +19,11 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   const worldId = Number(rawId)
   if (!Number.isInteger(worldId) || worldId <= 0) notFound()
 
-  const world = getWorld(worldId)
+  const { worlds, turns: turnRepo } = getContainer()
+  const world = await worlds.getWorld(worldId)
   if (!world) notFound()
 
-  const turns = latestTurns(worldId, INITIAL_TURN_LIMIT)
+  const turns = await turnRepo.latestTurns(worldId, INITIAL_TURN_LIMIT)
   const initialMessages: ChroniclesMessage[] = turns.map((t) => ({
     id: String(t.id),
     role: t.role,
@@ -34,11 +34,11 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   // Metadata only for the rendered slice. Older slices fetch their own
   // metadata via /api/turns alongside the turns themselves.
   const oldestVisibleId = turns[0]?.id ?? Number.MAX_SAFE_INTEGER
-  const initialUsage: TurnCost[] = assistantMetadataSince(worldId, oldestVisibleId).map(
-    ({ id, metadata }) => summarizeTurn(id, metadata),
-  )
+  const initialUsage: TurnCost[] = (
+    await turnRepo.assistantMetadataSince(worldId, oldestVisibleId)
+  ).map(({ id, metadata }) => summarizeTurn(id, metadata))
 
-  const hasOlder = turns.length > 0 ? hasTurnBefore(worldId, turns[0].id) : false
+  const hasOlder = turns.length > 0 ? await turnRepo.hasTurnBefore(worldId, turns[0].id) : false
 
   return (
     <Chat

@@ -1,12 +1,6 @@
-import {
-  assistantMetadataInRange,
-  hasTurnBefore,
-  turnsBefore,
-  type Turn,
-  type AssistantTurnMetadata,
-} from '@/lib/db'
+import { getContainer } from '@/composition/container'
+import type { AssistantTurnMetadata, Turn } from '@/lib/db'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
-import { getWorld } from '@/lib/worlds'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,7 +24,8 @@ export async function GET(req: Request) {
   if (!Number.isInteger(worldId) || worldId <= 0) {
     return new globalThis.Response('Missing or invalid worldId', { status: 400 })
   }
-  if (!getWorld(worldId)) {
+  const { worlds, turns: turnRepo } = getContainer()
+  if (!(await worlds.getWorld(worldId))) {
     return new globalThis.Response(`World ${worldId} not found`, { status: 404 })
   }
 
@@ -43,7 +38,7 @@ export async function GET(req: Request) {
   const limit =
     Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, MAX_LIMIT) : DEFAULT_LIMIT
 
-  const turns = turnsBefore(worldId, before, limit)
+  const turns = await turnRepo.turnsBefore(worldId, before, limit)
   if (turns.length === 0) {
     const body: Response = { turns: [], usage: [], hasMore: false }
     return globalThis.Response.json(body)
@@ -52,13 +47,17 @@ export async function GET(req: Request) {
   // Metadata scoped to the just-loaded slice. min = the slice's first turn id,
   // maxExclusive = the original `before` so we don't double-fetch anything the
   // client already has.
-  const meta: AssistantTurnMetadata[] = assistantMetadataInRange(worldId, turns[0].id, before)
+  const meta: AssistantTurnMetadata[] = await turnRepo.assistantMetadataInRange(
+    worldId,
+    turns[0].id,
+    before,
+  )
   const usage = meta.map(({ id, metadata }) => summarizeTurn(id, metadata))
 
   const body: Response = {
     turns,
     usage,
-    hasMore: hasTurnBefore(worldId, turns[0].id),
+    hasMore: await turnRepo.hasTurnBefore(worldId, turns[0].id),
   }
   return globalThis.Response.json(body)
 }

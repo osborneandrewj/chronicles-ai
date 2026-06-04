@@ -1,15 +1,8 @@
 import { z } from 'zod'
 
 import { applyArchivistPatch, extractCorrectionPatch } from '@/lib/archivist'
-import {
-  getLatestMetadata,
-  insertWorldCorrection,
-  latestTurn,
-  recentTurns,
-  updateTurnMetadata,
-} from '@/lib/db'
+import { getContainer } from '@/composition/container'
 import { getNarratorWorldState } from '@/lib/world-state'
-import { getWorld } from '@/lib/worlds'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,11 +25,12 @@ export async function POST(req: Request) {
     return new Response(message, { status: 400 })
   }
 
-  const world = getWorld(body.worldId)
+  const { worlds, turns, corrections } = getContainer()
+  const world = await worlds.getWorld(body.worldId)
   if (!world) return new Response(`World ${body.worldId} not found`, { status: 404 })
 
   const prior = getNarratorWorldState(body.worldId)
-  const recent = recentTurns(body.worldId, RECENT_TURNS_FOR_CONTEXT)
+  const recent = (await turns.recentTurns(body.worldId, RECENT_TURNS_FOR_CONTEXT))
     // recentTurns returns DESC by id; the prompt wants chronological order.
     .slice()
     .reverse()
@@ -50,7 +44,7 @@ export async function POST(req: Request) {
     return new Response('Correction extraction failed', { status: 502 })
   }
 
-  const latest = latestTurn(body.worldId)
+  const latest = await turns.latestTurn(body.worldId)
   // turn_id pins the correction to the narrative moment it was made at — so
   // the scrollback can render "made after turn N" later, and so [t:N][edit]
   // tagging on any memorable_facts the model writes lands on a real id. May
@@ -64,7 +58,7 @@ export async function POST(req: Request) {
     return new Response('Correction apply failed', { status: 500 })
   }
 
-  const row = insertWorldCorrection(
+  const row = await corrections.insert(
     body.worldId,
     turnId,
     body.text,
@@ -75,15 +69,13 @@ export async function POST(req: Request) {
   // Stash the cost on the latest turn's metadata so the existing usage
   // dashboard accumulates correction calls under the archivist bucket.
   if (latest) {
-    const existing = getLatestMetadata(body.worldId)?.metadata ?? {}
+    const existing = (await turns.latestMetadata(body.worldId))?.metadata ?? {}
     const prior = (existing as { archivist?: { usage?: { inputTokens?: number; outputTokens?: number } } })
       .archivist?.usage ?? { inputTokens: 0, outputTokens: 0 }
-    updateTurnMetadata(latest.id, {
-      archivist: {
-        usage: {
-          inputTokens: (prior.inputTokens ?? 0) + (result.usage.inputTokens ?? 0),
-          outputTokens: (prior.outputTokens ?? 0) + (result.usage.outputTokens ?? 0),
-        },
+    await turns.mergeMetadata(latest.id, 'archivist', {
+      usage: {
+        inputTokens: (prior.inputTokens ?? 0) + (result.usage.inputTokens ?? 0),
+        outputTokens: (prior.outputTokens ?? 0) + (result.usage.outputTokens ?? 0),
       },
     })
   }

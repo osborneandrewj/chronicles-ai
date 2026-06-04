@@ -50,16 +50,16 @@ Spec: §2.3, §5.1-P0. **Goal:** move the app under `packages/server` verbatim; 
 ## P1 — Repository ports over SQLite (strangler-fig)
 Spec: §3.4, §5.1-P1. **Highest-leverage, lowest-risk. Must precede Mongo.** Wrap SQL only — do NOT extract decisions (that's P4).
 
-- [ ] Define `domain/ports/`: `WorldRepository, TurnRepository, CharacterRepository, PlaceRepository, SceneRepository, DossierRepository, ReverieRepository, NpcIntentRepository, OccupancyRepository, TtsCacheRepository, CorrectionRepository, UsageRepository, UnitOfWork, Clock, Logger`
-- [ ] **All ports `async`** even on sync SQLite adapter (wrap in `Promise.resolve`) so P2 is signature-neutral
-- [ ] `TurnRepository` is append-only: `insert`, `recentTurns`, `turnsBefore`, `latestUserTurnId`, `mergeMetadata(turnId, agentKey, block)`, `incTtsChars(turnId, n)` — **no general `update`/`setMetadata`**
-- [ ] `Clock` port; route the ~6 files' `datetime('now')` reads through `clock.now()`
-- [ ] Single SQLite impl in `infrastructure/persistence/sqlite/` implementing all ports
-- [ ] `composition/container.ts` wires adapters
-- [ ] Migrate ~23 `import { db }` / named-fn importers off `@/lib/db` one module at a time, each green
-- [ ] `cost-cap.ts` `SUM(json_extract(...))` → `UsageRepository.todaysTokenTotal(clock.today())` (SQL stays in adapter)
-- [ ] Add `import "server-only"` to every infra/repo module
-- **Gate:** zero `import ... from '@/lib/db'` outside `infrastructure/persistence/sqlite/` (guard-grep test); full suite green.
+- [x] Define `domain/ports/`: all 14 ports + Clock + Logger present in `packages/server/src/domain/ports/` (`index.ts` barrel)
+- [x] **All ports `async`** — every method returns a `Promise`; SQLite adapters wrap sync calls in `Promise.resolve`
+- [x] `TurnRepository` is append-only: `insert`/`recentTurns`/`turnsBefore`/`latestUserTurnId` + `mergeMetadata(turnId, agentKey, block)` + `incTtsChars(worldId, turnId, n)`; **no general `update`/`setMetadata`** — verified in `domain/ports/turn-repository.ts`
+- [x] `Clock` port present (`now()`/`today()`); `cost-cap` reads today via `clock.today()`. `[~]` remaining `datetime('now')` is still emitted inside the SQLite adapter/db.ts (allowed per spec §5.1-P1 — interface exists; full app-level routing is incremental)
+- [x] Single SQLite impl in `infrastructure/persistence/sqlite/` implementing all ports (14 `*.sqlite.ts` + unit-of-work)
+- [x] `composition/container.ts` wires adapters (the only infra importer)
+- [~] Migrate `import { db }` / named-fn importers off `@/lib/db` — **partial.** Done: `cost-cap.ts` (fully strangled → container). Migrated route handlers from prior P0/P1 work (turns/usage/tts/world-correction(s)/play page) use the container. **Remaining VALUE importers** (SQL-owning lib modules whose SQL is already wrapped behind adapters that delegate to them, + the P5 god endpoint): `archivist.ts`, `intent-reconciler.ts`, `meta-commands.ts`, `npc-agent.ts`, `npc-intents.ts`, `npc-promotion.ts`, `opening-turn.ts`, `place-resolver.ts`, `reveries.ts`, `world-state.ts`, `worlds.ts`, `app/api/chat/route.ts`. Type-only db.ts imports remain in ports + a few libs (row types live in db.ts until P4 moves them to `domain/entities/`).
+- [x] `cost-cap.ts` `SUM(json_extract(...))` → `UsageRepository.todaysTokenTotal(clock.today())` (SQL lives in `usage-repository.sqlite.ts`); `cost-cap.ts` now imports the container, not `db` — fully strangled. Callers (`chat/route.ts`, `opening-turn.ts`, `cost-cap.test.ts`) made async.
+- [x] `import "server-only"` on every infra/repo module + container (verified present)
+- [~] **Gate:** full suite green (323). Guard-grep test NOT added — strangling is not complete (SQL-owning lib modules + the chat god endpoint still import `db`), so the `zero @/lib/db outside sqlite` invariant does not yet hold. Adding the guard now would fail. Deferred until the remaining importers land (overlaps P4 SQL-relocation + P5 AdvanceTurn carve).
 
 ## P2 — Mongo + Mongoose adapter behind a flag
 Spec: §4 (whole), §5.1-P2. Default `PERSISTENCE=sqlite`. Mongoose forbidden outside `infrastructure/persistence/mongo/`.
@@ -152,6 +152,9 @@ Spec: §2.5, §3.7, §5.1-P7.
 ## Status Log
 _(newest first — agents append a line per phase gate with real command output)_
 
+- 2026-06-04 — **P1 PARTIAL, GATE GREEN.** Recovered an uncommitted prior-session P1 build that had left the suite RED: `tts-route-warm.test.ts` failed because the migrated route → container → infra chain pulls `import 'server-only'`, whose default export throws outside an RSC boundary (Vitest has none). Fixed by aliasing `server-only` → its no-op `empty.js` in `packages/server/vitest.config.ts` (the same file Next resolves under the `react-server` condition). That restored 323. Then fully strangled `cost-cap.ts`: its raw `SUM(json_extract(...))` over `db` now goes through `UsageRepository.todaysTokenTotal(clock.today())` (SQL already lived in `usage-repository.sqlite.ts`); `todaysTokens`/`isOverDailyLimit` became async; updated 3 callers (`chat/route.ts` cap gate, `opening-turn.ts`, `cost-cap.test.ts`). Ports (14 + Clock/Logger), all-async signatures, append-only `TurnRepository`, single SQLite adapter set, `composition/container.ts`, and `server-only` guards were all present from prior work and verified. **NOT done:** the remaining 12 VALUE importers of `@/lib/db` (SQL-owning lib modules — archivist/reveries/npc-*/world-state/worlds/place-resolver/intent-reconciler/meta-commands/opening-turn — whose SQL is wrapped behind adapters that delegate back into them, plus the P5 `chat/route.ts` god endpoint). The exit-criterion guard-grep was deliberately NOT added because the invariant it asserts does not yet hold; adding it would fail the suite. Real gate output from repo root:
+  - `npm run type-check` → `tsc --noEmit` clean (no errors)
+  - `npm test` → `Test Files 32 passed | 1 skipped (33)` / `Tests 322 passed | 1 skipped (323)` — baseline preserved (the 1 skip is pre-existing)
 - 2026-06-04 — **P0 GATE GREEN.** App moved verbatim under `packages/server/` via `git mv` (history-preserving renames); npm workspaces stood up (`packages/*`, `apps/*`), root scripts delegate to `@chronicles/server`; `tsconfig.base.json` added, server tsconfig extends it (keeps `@/*`, Next plugin, `serverExternalPackages: ['better-sqlite3']`); cwd coupling removed in `db.ts` + `prompt-files.ts` (module-relative via `import.meta.url`). Real gate output from repo root after `npm install`:
   - `npm run type-check` → `tsc --noEmit` clean (no errors)
   - `npm test` → `Test Files 32 passed | 1 skipped (33)` / `Tests 322 passed | 1 skipped (323)` — matches baseline 33 files / 323 tests

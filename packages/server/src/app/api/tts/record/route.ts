@@ -1,4 +1,4 @@
-import { addTtsChars } from '@/lib/db'
+import { getContainer } from '@/composition/container'
 
 export const runtime = 'nodejs'
 
@@ -33,6 +33,6 @@ export async function POST(req: Request) {
     return new Response('Missing or invalid chars', { status: 400 })
   }
 
-  addTtsChars(worldId, turnId, chars)
+  await getContainer().turns.incTtsChars(worldId, turnId, chars)
   return new Response(null, { status: 204 })
 }
