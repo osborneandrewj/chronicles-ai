@@ -27,5 +27,10 @@ export default defineConfig({
       DATABASE_PATH: ':memory:',
     },
     include: ['tests/**/*.test.ts'],
+    // The Mongo adapter suite (P2) runs against a MongoMemoryReplSet and is the
+    // explicit job of `npm run test:mongo` (vitest.mongo.config.ts). It is
+    // excluded from the default run so `npm test` stays the SQLite-default
+    // regression gate (byte-identical count) and never pulls a Mongo binary.
+    exclude: ['tests/mongo/**', '**/node_modules/**'],
   },
 })

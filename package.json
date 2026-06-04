@@ -13,6 +13,7 @@
     "lint": "npm -w @chronicles/server run lint",
     "type-check": "npm -w @chronicles/server run type-check",
     "test": "npm -w @chronicles/server run test",
+    "test:mongo": "npm -w @chronicles/server run test:mongo",
     "test:watch": "npm -w @chronicles/server run test:watch"
   }
 }

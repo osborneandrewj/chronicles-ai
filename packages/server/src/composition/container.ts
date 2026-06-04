@@ -7,6 +7,7 @@ import type {
   CorrectionRepository,
   DossierRepository,
   Logger,
+  MemoryRepository,
   NpcIntentRepository,
   OccupancyRepository,
   PlaceRepository,
@@ -33,17 +34,23 @@ import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene
 import { SqliteTtsCacheRepository } from '@/infrastructure/persistence/sqlite/tts-cache-repository.sqlite'
 import { SqliteTurnRepository } from '@/infrastructure/persistence/sqlite/turn-repository.sqlite'
 import { SqliteUnitOfWork } from '@/infrastructure/persistence/sqlite/unit-of-work.sqlite'
+import { SqliteMemoryRepository } from '@/infrastructure/persistence/sqlite/memory-repository.sqlite'
 import { SqliteUsageRepository } from '@/infrastructure/persistence/sqlite/usage-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 
-// Composition root (spec §3.7, §5.1-P1) — the ONLY module that constructs
-// concrete infrastructure adapters. Everything else depends on the port types
-// and reaches the implementations through this container. Swapping SQLite for
-// Mongo in P2 is a change here and nowhere else.
+// Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
+// constructs concrete infrastructure adapters. Everything else depends on the
+// port types and reaches the implementations through this container.
 //
-// Repositories are stateless wrappers over the process-wide DB singleton, so a
-// single shared instance per repo is correct and cheap.
+// Persistence is selected by `PERSISTENCE=sqlite|mongo` (default `sqlite`).
+// Nothing else in the codebase knows which store is live: both adapter sets
+// satisfy the same ports (spec §5.1-P2). The SQLite path is synchronous (the
+// engine is in-process); the Mongo path is async (connect + replica-set probe +
+// index build) and must be bootstrapped once at boot via `initContainer()`.
+//
+// Repositories are stateless wrappers over a process-wide handle, so a single
+// shared instance per repo is correct and cheap.
 export type Container = {
   clock: Clock
   logger: Logger
@@ -60,13 +67,18 @@ export type Container = {
   ttsCache: TtsCacheRepository
   corrections: CorrectionRepository
   usage: UsageRepository
+  memory: MemoryRepository
   speech: SpeechSynthesizer
   backgroundTasks: BackgroundTasks
 }
 
 let cached: Container | undefined
 
-function build(): Container {
+function persistenceMode(): 'sqlite' | 'mongo' {
+  return process.env.PERSISTENCE === 'mongo' ? 'mongo' : 'sqlite'
+}
+
+function buildSqlite(): Container {
   return {
     clock: new SystemClock(),
     logger: new ConsoleLogger(),
@@ -83,11 +95,58 @@ function build(): Container {
     ttsCache: new SqliteTtsCacheRepository(),
     corrections: new SqliteCorrectionRepository(),
     usage: new SqliteUsageRepository(),
+    memory: new SqliteMemoryRepository(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
   }
 }
 
+/**
+ * Synchronous accessor. On the default SQLite path this lazily builds the
+ * container. When PERSISTENCE=mongo, the Mongo adapter set must already have
+ * been constructed by `initContainer()` at boot — calling this before that is a
+ * programmer error (the Mongo connection is async and cannot be opened lazily
+ * inside a sync getter).
+ */
 export function getContainer(): Container {
-  return (cached ??= build())
+  if (cached) return cached
+  if (persistenceMode() === 'mongo') {
+    throw new Error(
+      'PERSISTENCE=mongo requires `await initContainer()` at boot before ' +
+        'getContainer() — the Mongo connection is async (spec §5.1-P2).',
+    )
+  }
+  return (cached = buildSqlite())
+}
+
+/**
+ * Async bootstrap. Idempotent. On SQLite this is a thin wrapper over the sync
+ * builder; on Mongo it connects (replica-set + build-phase guarded), builds the
+ * indexes, and wires the Mongo repository set behind the same ports. Call once
+ * at process start when PERSISTENCE=mongo.
+ */
+export async function initContainer(): Promise<Container> {
+  if (cached) return cached
+  if (persistenceMode() === 'sqlite') {
+    return (cached = buildSqlite())
+  }
+  // Dynamic import so the default SQLite path never loads mongoose.
+  const { buildMongoRepositories } = await import(
+    '@/infrastructure/persistence/mongo/build-mongo-repositories'
+  )
+  const databaseUrl = process.env.DATABASE_URL ?? ''
+  const repos = await buildMongoRepositories(databaseUrl)
+  cached = {
+    clock: new SystemClock(),
+    logger: new ConsoleLogger(),
+    speech: new XaiSpeechSynthesizer(),
+    backgroundTasks: new ProcessBackgroundTasks(),
+    ...repos,
+  }
+  return cached
+}
+
+/** For tests: drop the cached container so the next call rebuilds it. */
+export function __resetContainerForTests(): void {
+  cached = undefined
 }
