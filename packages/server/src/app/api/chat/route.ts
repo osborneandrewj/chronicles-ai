@@ -12,6 +12,7 @@ import {
   WorldNotFoundError,
   type CannedResponse,
 } from '@/application/use-cases/advance-turn'
+import { appendDbTurnId } from '@/app/api/chat/append-db-turn-id'
 import { getContainer } from '@/composition/container'
 import { narrateTurn } from '@/infrastructure/narrator/narrate-turn'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
@@ -125,22 +126,7 @@ export async function POST(req: Request) {
   // once `completion` resolves — which the narrator adapter settles only after
   // the source stream drains (post-onFinish), so the metadata always lands last.
   const { chunks, completion } = result.stream
-  const dbTurnIdStream = (chunks as ReadableStream<UIMessageChunk>).pipeThrough(
-    new TransformStream<UIMessageChunk, UIMessageChunk>({
-      transform(chunk, controller) {
-        controller.enqueue(chunk)
-      },
-      async flush(controller) {
-        const dbTurnId = await completion
-        if (dbTurnId != null) {
-          controller.enqueue({
-            type: 'message-metadata',
-            messageMetadata: { dbTurnId },
-          })
-        }
-      },
-    }),
-  )
+  const dbTurnIdStream = appendDbTurnId(chunks as ReadableStream<UIMessageChunk>, completion)
 
   return createUIMessageStreamResponse({ stream: dbTurnIdStream })
 }
