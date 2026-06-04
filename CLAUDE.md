@@ -8,6 +8,8 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 - `docs/specs/system-architecture.md` — overall structure, project layout
 - `docs/specs/database-design.md` — full schema
 - `docs/specs/agent-system-design.md` — agent roster, prompts, context flow
+- `docs/specs/hexagonal-architecture-blueprint.md` — **binding architecture**: ports & adapters, layering rules, the turn pipeline as a use case, the incremental migration path. Read before any non-trivial code change.
+- `docs/specs/system-design-rebuild-spec.md` — architecture-neutral spec of every behavior (full schema, agents + prompts, deterministic algorithms, API contracts)
 - `docs/specs/memory-architecture.md` — memory chunks, retrieval, embeddings
 - `docs/plans/roadmap.md` — phased plan, current phase
 
@@ -23,6 +25,30 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 - **Define "done" before starting.** A narrator change isn't done until you've streamed a turn end-to-end in the browser. A schema change isn't done until `db:generate` + `db:migrate` succeed and queries still typecheck. A new agent isn't done until its prompt template is in `prompts/` and a real call returns valid output.
 - **Stay in your lane.** Each agent has its own prompt, context, and Zod schema. Don't merge them, don't share full prompts, don't let the narrator see what the archivist sees.
 - **Respect the budget.** Context assembler enforces 8K input / 1K output per narrator call. System prompt, authoritative state, and player action are pinned; recent turns + retrieved memories drop first. Don't bypass it.
+
+## Architecture & separation of concerns
+
+This project is organized as a **hexagonal architecture (ports & adapters)**. The full design and rationale live in `docs/specs/hexagonal-architecture-blueprint.md` — read it before non-trivial work. The rules below are the short, binding form, and they override convenience.
+
+**The one rule: dependencies point inward.** The domain depends on nothing; everything depends on the domain. This is the *target* layout — today most logic still lives in `src/lib/`; new and refactored code adopts the layered layout below and moves violating code toward it.
+
+- `src/domain/` — **pure.** Entities, value objects, pure domain services (context assembly, reverie flaring, occupancy sim, NPC promotion, patch sanitization, classifier rules, world clock, dedup), and **ports** (interfaces). No `import` of `next`, `ai`, `@ai-sdk/*`, `better-sqlite3`, `fs`, `fetch`, or a wall-clock. Deterministic, no I/O.
+- `src/application/` — **use cases** (`AdvanceTurn`, `CreateWorld`, `ApplyCorrection`, `LoadHistory`, …). Orchestration and transaction boundaries only. May import `domain/`; never SQL, an SDK, or a framework.
+- `src/infrastructure/` — **driven adapters** implementing ports: repositories (SQLite today; Postgres a sibling), LLM providers, embeddings, geocoder, TTS, clock, logger. **All model IDs and pricing live here.**
+- `src/app/` + `src/components/` — **driving adapters.** A route handler / Server Action parses input, calls a use case, pipes the result, and owns no logic. React renders and reads via a query port; it never writes SQL.
+- `src/composition/` — the **only** place adapters meet use cases (the dependency-injection wiring root).
+
+**Separation-of-concerns rules — one concern per module:**
+
+- **Repositories are dumb CRUD.** Any rule that *decides* something (name resolution, alias merge, `reveals_name_of` rename, sticky-scene / scene-open-on-move, freshest-field-wins) is a pure domain service the use case runs before handing flat rows to a repository. A `merge`/resolution branch inside `infrastructure/` is a leaked concern.
+- **Structure ≠ rendering.** The domain emits structured values (`ContextBundle`, `ArchivistPatch`); turning them into a prompt string or an HTTP payload is an adapter's job. The domain never knows the narrator's markdown dialect or an HTTP status code.
+- **One agent per port; don't fuse a vertical slice in one file.** Prompt-building + inference + parsing + sanitization + persistence are five concerns with five homes (the old `archivist.ts` is the anti-pattern).
+- **Untrusted input crosses a boundary once.** Player text and LLM output are validated/sanitized at the adapter→domain edge, then trusted inward.
+- **Errors are domain types** (`WorldNotFound`, `BudgetExceeded`, `ContextOverflowError`), mapped to HTTP/UI **only** in the inbound adapter.
+
+**The leak test:** if adding one feature forces you to edit two layers at once, a concern has leaked — re-cut the boundary before writing the feature.
+
+**Mid-migration discipline.** Some shipped code still violates this — the 594-line `src/app/api/chat/route.ts` god endpoint, and `src/lib/db.ts` imported directly everywhere. **Do not add to them.** New logic goes in a domain service or a use case; new persistence goes behind a repository port; new modules must not `import` `db.ts` or an SDK directly. When you touch a violating file, move it one step toward the layering (blueprint §10). Cross-layer imports are forbidden and should fail CI (`dependency-cruiser` / `import/no-restricted-paths`) — don't introduce them.
 
 ## Tech Stack
 
@@ -49,6 +75,8 @@ Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (
 - Functional React components only, hooks for state/effects
 - Server Components by default, `"use client"` only when interactivity is required
 - Server Actions for mutations, Route Handlers only for streaming endpoints
+- Respect layer boundaries (see Architecture): `domain/` imports nothing outward, `application/` imports only `domain/`, adapters import inward only, wiring lives in `composition/`. No cross-layer imports.
+- Keep SQL, SDK calls, model IDs, and pricing in `infrastructure/` only — never as literals in domain or application code
 
 ## Key Design Rules
 
@@ -61,6 +89,9 @@ Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (
 - Token usage tracked in `turns.metadata` on every LLM call
 - Treat LLM output as untrusted — sanitize before rendering
 - Prompt templates live in `prompts/*.md` — git-diffable, loaded at runtime
+- Dependencies point inward — the domain (entities, pure services, ports) depends on nothing; adapters depend on the domain; they meet only in the composition root
+- Keep deciding logic out of adapters — repositories are dumb CRUD; merges, name resolution, and invariants are pure domain services run by the use case
+- Separate structure from rendering — the domain emits structured values; turning them into prompt text or HTTP payloads is an adapter's job
 
 ## Environment
 
