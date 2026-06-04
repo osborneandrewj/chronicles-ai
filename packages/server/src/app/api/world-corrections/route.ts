@@ -1,3 +1,4 @@
+import { listCorrections, WorldNotFoundError } from '@/application/use-cases/list-corrections'
 import { getContainer } from '@/composition/container'
 
 export const runtime = 'nodejs'
@@ -10,17 +11,22 @@ export async function GET(req: Request) {
     return new Response('Missing or invalid worldId', { status: 400 })
   }
   const limitParam = url.searchParams.get('limit')
-  const limit = limitParam ? Math.max(1, Math.min(200, Number(limitParam))) : 50
-  if (!Number.isFinite(limit)) {
+  if (limitParam !== null && !Number.isFinite(Number(limitParam))) {
     return new Response('Invalid limit', { status: 400 })
   }
+  const limit = limitParam !== null ? Number(limitParam) : undefined
+
   const { worlds, corrections } = getContainer()
-  if (!(await worlds.getWorld(worldId))) {
-    return new Response(`World ${worldId} not found`, { status: 404 })
+  let rows
+  try {
+    rows = await listCorrections({ worldId, limit }, { worlds, corrections })
+  } catch (err) {
+    if (err instanceof WorldNotFoundError) {
+      return new Response(err.message, { status: 404 })
+    }
+    throw err
   }
-  // DESC from the DB; reverse to chronological so the UI can append-render
-  // and scroll the newest to the bottom without a client-side sort.
-  const rows = (await corrections.forWorld(worldId, limit)).slice().reverse()
+
   return Response.json({
     corrections: rows.map((row) => ({
       id: row.id,
