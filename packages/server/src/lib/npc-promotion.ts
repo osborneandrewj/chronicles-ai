@@ -1,11 +1,10 @@
+import {
+  AUTO_PROMOTE_THRESHOLD,
+  isTransientServiceNpc,
+  nextAgencyTier,
+} from '@/domain/services/npc-promotion'
 import { db } from '@/lib/db'
 import type { Character, CharacterAgencyLevel } from '@/lib/world-state'
-
-// An NPC becomes agent-tier after this many distinct turns in scene with the
-// protagonist. Three is enough to filter out one-shot walk-ons (the bartender
-// who pours one drink) while catching recurring characters. Counted
-// deterministically by code, not the LLM — predictable and free.
-const AUTO_PROMOTE_THRESHOLD = 3
 
 const bumpAppearanceStmt = db.prepare<[number, number]>(
   `UPDATE characters
@@ -118,12 +117,7 @@ export function recordAppearancesAndAutoPromote(
       const lastSeen = c.last_seen_turn_id
       const turnsAway = lastSeen === null ? Number.POSITIVE_INFINITY : turnId - lastSeen
       const hasOpenThread = !!(c.active_goal || c.personal_goals || c.current_focus)
-      let next: CharacterAgencyLevel
-
-      if (turnsAway <= 3) next = 'nearby'
-      else if (turnsAway <= 10) next = 'distant'
-      else if (turnsAway <= 20 || (hasOpenThread && turnsAway <= 40)) next = 'dormant'
-      else next = 'npc'
+      const next: CharacterAgencyLevel = nextAgencyTier(turnsAway, hasOpenThread)
 
       if (c.agency_level === next) continue
       setAgencyLevelStmt.run(next, c.id)
@@ -137,24 +131,3 @@ export function recordAppearancesAndAutoPromote(
 }
 
 export const NPC_AUTO_PROMOTE_THRESHOLD = AUTO_PROMOTE_THRESHOLD
-
-function isTransientServiceNpc(c: {
-  name: string
-  description: string | null
-  active_goal?: string | null
-  personal_goals?: string | null
-  current_focus?: string | null
-}): boolean {
-  const text = `${c.name} ${c.description ?? ''}`.toLowerCase()
-  const serviceRole =
-    /\b(usps|postal|mail carrier|mailman|mailwoman|courier|delivery driver|package driver|parcel carrier|fedex|ups|doordash|rideshare|taxi driver|cashier|receptionist|clerk|server|barista)\b/.test(
-      text,
-    )
-
-  if (!serviceRole) return false
-
-  const durableSignals = `${c.personal_goals ?? ''} ${c.current_focus ?? ''} ${c.active_goal ?? ''}`.toLowerCase()
-  return !/\b(minerva|black cloak|caesar|threat|follow|stalk|watch|spy|warn|secret|conspiracy|murder|missing|romance|debt|promise|protect|investigate)\b/.test(
-    durableSignals,
-  )
-}
