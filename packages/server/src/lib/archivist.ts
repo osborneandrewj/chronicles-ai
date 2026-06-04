@@ -20,6 +20,7 @@ import {
   normalizeTransitPlacesInPatch,
   sanitizeArchivistPatch,
 } from '@/domain/services/patch-sanitizer'
+import { decideSceneTransition } from '@/domain/services/scene-transition'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { isDescriptorName } from '@/lib/character-identity'
 import { db } from '@/lib/db'
@@ -1532,113 +1533,60 @@ export function applyArchivistPatch(
       }
     }
 
-    // 3b. Deterministic scene-transition invariant. Two signals, player first.
+    // 3b. Deterministic scene-transition invariant. The pure decision lives in
+    // domain/services/scene-transition.ts (it weighs the player's own move
+    // first, then the relocated-NPC cluster, with the backward "home flip"
+    // guard). Here we read the current scene/player place ids inside the
+    // transaction, ask the pure service for an intent, and apply it — the same
+    // write sequence (auto-close prior scene → open "Arriving at …" → drag the
+    // player along) both branches always shared.
     const sceneUnchangedForInvariant = !patch.scene || patch.scene.action === 'keep_open'
-    let invariantFired = false
-
-    // v0.6.19 (A1-i): the protagonist's OWN place change is the most reliable
-    // travel signal. World 13 teleported because the player authored arrival
-    // ("get out of the van and enter the safe house") with no NPC-relocation
-    // cluster, so the v0.6.10 NPC-cluster branch below never fired and the
-    // scene cursor stayed pinned to the transit anchor. If the patch moved the
-    // player to a new place but opened no scene, open one there.
-    if (sceneUnchangedForInvariant && playerPlaceFromPatch !== null) {
-      const scenePlaceId =
-        (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
-        null
-      // v0.6.19 (A1-i): do not auto-open at the player's new place if it would
-      // abandon the present cast — the patch explicitly assigns non-player NPCs
-      // to the OLD scene place (restatements or relocations to it). That is the
-      // v0.6.10 backward "home flip" signature (Call-In turn 403: hospital NPCs
-      // explicitly pinned to hospital while the player is sent home). Residual
-      // NPCs not mentioned in this patch are not a signal — that is forward travel.
-      const presentNpcsLeftBehind =
-        scenePlaceId !== null && npcPlacesInPatch.has(scenePlaceId)
-      if (playerPlaceFromPatch !== scenePlaceId && !presentNpcsLeftBehind) {
-        const cursor = currentSceneIdStmt.get(worldId) as
-          | { current_scene_id: number | null }
-          | undefined
-        if (cursor?.current_scene_id) {
-          autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
-        }
-        const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
-        const placeName =
-          (placeNameByIdStmt.get(playerPlaceFromPatch) as { name: string } | undefined)?.name ??
-          'destination'
-        const newScene = insertSceneStmt.get(
-          worldId,
-          playerPlaceFromPatch,
-          `Arriving at ${placeName}`,
-          n + 1,
-          narratorTurnId,
-        ) as { id: number }
-        setCurrentSceneStmt.run(newScene.id, worldId)
-        setPlayersPlaceStmt.run(playerPlaceFromPatch, worldId)
-        invariantFired = true
+    const sceneTransition = decideSceneTransition({
+      sceneUnchanged: sceneUnchangedForInvariant,
+      playerPlaceFromPatch,
+      relocatedNpcByPlace,
+      npcPlacesInPatch,
+      scenePlaceId:
+        (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)
+          ?.place_id ?? null,
+      playerPlaceId:
+        (playerPlaceIdStmt.get(worldId) as { current_place_id: number | null } | undefined)
+          ?.current_place_id ?? null,
+    })
+    if (sceneTransition) {
+      const { placeId, reason, priorScenePlaceId } = sceneTransition
+      const cursor = currentSceneIdStmt.get(worldId) as
+        | { current_scene_id: number | null }
+        | undefined
+      if (cursor?.current_scene_id) {
+        autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
+      }
+      const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
+      const placeName =
+        (placeNameByIdStmt.get(placeId) as { name: string } | undefined)?.name ?? 'destination'
+      const newScene = insertSceneStmt.get(
+        worldId,
+        placeId,
+        `Arriving at ${placeName}`,
+        n + 1,
+        narratorTurnId,
+      ) as { id: number }
+      setCurrentSceneStmt.run(newScene.id, worldId)
+      setPlayersPlaceStmt.run(placeId, worldId)
+      if (reason === 'player-move') {
         console.warn('[archivist] player-move scene invariant fired', {
           world_id: worldId,
           turn_id: narratorTurnId,
-          prior_scene_place_id: scenePlaceId,
-          player_place_id: playerPlaceFromPatch,
+          prior_scene_place_id: priorScenePlaceId,
+          player_place_id: placeId,
         })
-      }
-    }
-
-    // v0.6.10: NPC-cluster fallback — infer the move from the relocated NPC
-    // cluster when the player's own location was dropped. Skipped if the
-    // player-move branch already opened a scene this patch.
-    if (!invariantFired && sceneUnchangedForInvariant && relocatedNpcByPlace.size > 0) {
-      let inferredPlaceId: number | null = null
-      let topCount = 0
-      let totalRelocated = 0
-      for (const [pid, names] of relocatedNpcByPlace) {
-        totalRelocated += names.length
-        if (names.length > topCount) {
-          topCount = names.length
-          inferredPlaceId = pid
-        }
-      }
-      const clearMajority = inferredPlaceId !== null && topCount * 2 > totalRelocated
-      const scenePlaceId =
-        (currentScenePlaceIdStmt.get(worldId) as { place_id: number | null } | undefined)?.place_id ??
-        null
-      const playerPlaceId =
-        (playerPlaceIdStmt.get(worldId) as { current_place_id: number | null } | undefined)
-          ?.current_place_id ?? null
-      const movingPlayerAway =
-        playerPlaceFromPatch !== null && playerPlaceFromPatch !== inferredPlaceId
-
-      if (
-        clearMajority &&
-        inferredPlaceId !== scenePlaceId &&
-        inferredPlaceId !== playerPlaceId &&
-        !movingPlayerAway
-      ) {
-        const placeName =
-          (placeNameByIdStmt.get(inferredPlaceId!) as { name: string } | undefined)?.name ??
-          'destination'
-        const cursor = currentSceneIdStmt.get(worldId) as
-          | { current_scene_id: number | null }
-          | undefined
-        if (cursor?.current_scene_id) {
-          autoCloseSceneStmt.run(narratorTurnId, cursor.current_scene_id)
-        }
-        const { n } = maxSceneNumberStmt.get(worldId) as { n: number }
-        const newScene = insertSceneStmt.get(
-          worldId,
-          inferredPlaceId!,
-          `Arriving at ${placeName}`,
-          n + 1,
-          narratorTurnId,
-        ) as { id: number }
-        setCurrentSceneStmt.run(newScene.id, worldId)
-        setPlayersPlaceStmt.run(inferredPlaceId!, worldId)
+      } else {
         console.warn('[archivist] scene-transition invariant fired', {
           world_id: worldId,
           turn_id: narratorTurnId,
-          prior_scene_place_id: scenePlaceId,
-          inferred_place_id: inferredPlaceId,
-          npcs: relocatedNpcByPlace.get(inferredPlaceId!) ?? [],
+          prior_scene_place_id: priorScenePlaceId,
+          inferred_place_id: placeId,
+          npcs: relocatedNpcByPlace.get(placeId) ?? [],
         })
       }
     }
