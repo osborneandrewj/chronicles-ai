@@ -1,3 +1,4 @@
+import { recordTtsUsage } from '@/application/use-cases/record-tts-usage'
 import { getContainer } from '@/composition/container'
 
 export const runtime = 'nodejs'
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
     return new Response('Missing or invalid chars', { status: 400 })
   }
 
-  await getContainer().turns.incTtsChars(worldId, turnId, chars)
+  const { turns } = getContainer()
+  await recordTtsUsage({ worldId, turnId, chars }, { turns })
   return new Response(null, { status: 204 })
 }

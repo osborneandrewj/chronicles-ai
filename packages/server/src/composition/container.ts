@@ -11,6 +11,7 @@ import type {
   PlaceRepository,
   ReverieRepository,
   SceneRepository,
+  SpeechSynthesizer,
   TtsCacheRepository,
   TurnRepository,
   UnitOfWork,
@@ -32,6 +33,7 @@ import { SqliteTurnRepository } from '@/infrastructure/persistence/sqlite/turn-r
 import { SqliteUnitOfWork } from '@/infrastructure/persistence/sqlite/unit-of-work.sqlite'
 import { SqliteUsageRepository } from '@/infrastructure/persistence/sqlite/usage-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
+import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 
 // Composition root (spec §3.7, §5.1-P1) — the ONLY module that constructs
 // concrete infrastructure adapters. Everything else depends on the port types
@@ -56,6 +58,7 @@ export type Container = {
   ttsCache: TtsCacheRepository
   corrections: CorrectionRepository
   usage: UsageRepository
+  speech: SpeechSynthesizer
 }
 
 let cached: Container | undefined
@@ -77,6 +80,7 @@ function build(): Container {
     ttsCache: new SqliteTtsCacheRepository(),
     corrections: new SqliteCorrectionRepository(),
     usage: new SqliteUsageRepository(),
+    speech: new XaiSpeechSynthesizer(),
   }
 }
 

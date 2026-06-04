@@ -1,14 +1,14 @@
-import { createHash } from 'node:crypto'
-
+import {
+  synthesizeNarration,
+  type CacheRef,
+} from '@/application/use-cases/synthesize-narration'
 import { getContainer } from '@/composition/container'
-import { normalizeVoiceId, streamSpeech, TTS_MODEL_KEY, TtsError, warmConnection } from '@/lib/tts'
+import { TtsError } from '@/lib/tts'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
 const MAX_TEXT_CHARS = 12000
-const MAX_CACHED_AUDIO_BYTES = 8 * 1024 * 1024
-const CACHE_TURNS_PER_WORLD = 2
 
 interface TtsRequestBody {
   text?: unknown
@@ -18,11 +18,13 @@ interface TtsRequestBody {
 }
 
 export async function POST(req: Request) {
+  const { speech, ttsCache } = getContainer()
+
   // Pre-warm path: fired on player submit to overlap xAI's DNS/TLS/cold-start
-  // tax with narrator generation. Non-billable — warmConnection never reaches
-  // synthesis. Returns 204 immediately; the warm runs detached.
+  // tax with narrator generation. Non-billable — never reaches synthesis.
+  // Returns 204 immediately; the warm runs detached.
   if (new URL(req.url).searchParams.get('warm') === '1') {
-    void warmConnection()
+    void speech.warm()
     return new Response(null, { status: 204 })
   }
 
@@ -42,54 +44,11 @@ export async function POST(req: Request) {
   }
 
   const voice = typeof body.voice === 'string' && body.voice ? body.voice : undefined
-  const voiceId = normalizeVoiceId(voice)
   const cacheRef = parseCacheRef(body)
-  const textHash = hashText(text)
 
-  if (cacheRef) {
-    const cached = await getContainer().ttsCache.get(
-      cacheRef.worldId,
-      cacheRef.turnId,
-      TTS_MODEL_KEY,
-      voiceId,
-      textHash,
-    )
-    if (cached) {
-      return new Response(new Uint8Array(cached.audio), {
-        status: 200,
-        headers: {
-          'Content-Type': cached.contentType,
-          'Content-Length': String(cached.byteLength),
-          'Cache-Control': 'no-store',
-          'X-TTS-Cache': 'HIT',
-          'X-TTS-Voice': voiceId,
-          'X-TTS-Model': TTS_MODEL_KEY,
-        },
-      })
-    }
-  }
-
+  let result
   try {
-    const { audio, contentType } = await streamSpeech(text, voiceId)
-    const responseAudio = cacheRef ? teeAudioForCache(audio, {
-      worldId: cacheRef.worldId,
-      turnId: cacheRef.turnId,
-      modelKey: TTS_MODEL_KEY,
-      voiceId,
-      textHash,
-      contentType,
-    }) : audio
-
-    return new Response(responseAudio, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'no-store',
-        'X-TTS-Cache': 'MISS',
-        'X-TTS-Voice': voiceId,
-        'X-TTS-Model': TTS_MODEL_KEY,
-      },
-    })
+    result = await synthesizeNarration({ text, voice, cacheRef }, { speech, ttsCache })
   } catch (err) {
     if (err instanceof TtsError) {
       console.error('[tts] xAI error', err.status, err.message)
@@ -98,9 +57,37 @@ export async function POST(req: Request) {
     console.error('[tts] unexpected error', err)
     return new Response('TTS failed', { status: 500 })
   }
+
+  if (result.kind === 'hit') {
+    return new Response(new Uint8Array(result.cached.audio), {
+      status: 200,
+      headers: {
+        'Content-Type': result.cached.contentType,
+        'Content-Length': String(result.cached.byteLength),
+        'Cache-Control': 'no-store',
+        'X-TTS-Cache': 'HIT',
+        'X-TTS-Voice': result.voiceId,
+        'X-TTS-Model': result.modelKey,
+      },
+    })
+  }
+
+  const { audio, contentType } = result.synthesis
+  const responseAudio = teeAudioForCache(audio, contentType, result.persist)
+
+  return new Response(responseAudio, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store',
+      'X-TTS-Cache': 'MISS',
+      'X-TTS-Voice': result.voiceId,
+      'X-TTS-Model': result.modelKey,
+    },
+  })
 }
 
-function parseCacheRef(body: TtsRequestBody): { worldId: number; turnId: number } | null {
+function parseCacheRef(body: TtsRequestBody): CacheRef | null {
   const worldId = typeof body.worldId === 'number' ? body.worldId : NaN
   const turnId = typeof body.turnId === 'number' ? body.turnId : NaN
   if (!Number.isInteger(worldId) || worldId <= 0) return null
@@ -108,46 +95,23 @@ function parseCacheRef(body: TtsRequestBody): { worldId: number; turnId: number 
   return { worldId, turnId }
 }
 
-function hashText(text: string): string {
-  return createHash('sha256').update(text).digest('hex')
-}
-
+// Tee the synthesized stream: one copy streams to the client, the other is
+// buffered and handed to the use case's `persist` callback (which owns the
+// size cap + cache write). Best-effort: a cache-write failure never affects the
+// client response.
 function teeAudioForCache(
   audio: ReadableStream<Uint8Array>,
-  cache: {
-    worldId: number
-    turnId: number
-    modelKey: string
-    voiceId: string
-    textHash: string
-    contentType: string
-  },
+  contentType: string,
+  persist: (audio: Buffer, contentType: string) => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const [clientAudio, cacheAudio] = audio.tee()
-  void cacheAudioStream(cacheAudio, cache)
+  void (async () => {
+    try {
+      const arrayBuffer = await new Response(cacheAudio).arrayBuffer()
+      await persist(Buffer.from(arrayBuffer), contentType)
+    } catch (err) {
+      console.error('[tts] audio cache write failed', err)
+    }
+  })()
   return clientAudio
-}
-
-async function cacheAudioStream(
-  audio: ReadableStream<Uint8Array>,
-  cache: {
-    worldId: number
-    turnId: number
-    modelKey: string
-    voiceId: string
-    textHash: string
-    contentType: string
-  },
-): Promise<void> {
-  try {
-    const arrayBuffer = await new Response(audio).arrayBuffer()
-    if (arrayBuffer.byteLength > MAX_CACHED_AUDIO_BYTES) return
-    await getContainer().ttsCache.store({
-      ...cache,
-      audio: Buffer.from(arrayBuffer),
-      turnsPerWorld: CACHE_TURNS_PER_WORLD,
-    })
-  } catch (err) {
-    console.error('[tts] audio cache write failed', err)
-  }
 }
