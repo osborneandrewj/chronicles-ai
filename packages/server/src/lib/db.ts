@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { runMigrations } from '@/lib/migrations'
 import type { Character, Place, Scene } from '@/lib/world-state'
@@ -156,9 +157,16 @@ function open(): Database.Database {
   // DATABASE_PATH points at the mounted volume in prod (Railway). Dev falls
   // back to cwd/chronicles.sqlite so local workflows are unchanged.
   const isBuild = process.env.NEXT_PHASE === 'phase-production-build'
+  // Default DB path is resolved relative to this module (not process.cwd()) so
+  // the process runs correctly regardless of which directory it starts from.
+  // From packages/server/src/lib/db.ts the repo root is four levels up, which
+  // is where chronicles.sqlite has always lived for local dev. DATABASE_PATH
+  // (the Railway mounted volume) overrides this.
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const defaultDbPath = path.resolve(moduleDir, '../../../..', 'chronicles.sqlite')
   const dbPath = isBuild
     ? ':memory:'
-    : (process.env.DATABASE_PATH ?? path.join(process.cwd(), 'chronicles.sqlite'))
+    : (process.env.DATABASE_PATH ?? defaultDbPath)
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')

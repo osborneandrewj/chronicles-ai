@@ -38,14 +38,14 @@ P2/P3 (Mongo) and P4/P5/P6 (carve+split) can run in parallel **after P1**.
 ## P0 — Monorepo skeleton (no logic moves)
 Spec: §2.3, §5.1-P0. **Goal:** move the app under `packages/server` verbatim; stand up workspaces; keep build/test green.
 
-- [ ] Root `package.json`: `"workspaces": ["packages/*", "apps/*"]`, `private: true`, root scripts delegate to workspaces
-- [ ] `tsconfig.base.json` at root with shared compilerOptions (`composite`, `declaration`, strict, bundler resolution)
-- [ ] Move `src/`, `tests/`, `prompts/`, `next.config.ts`, `vitest.config.ts`, `eslint.config.mjs`, tailwind/postcss config → `packages/server/`
-- [ ] `packages/server/package.json` (`@chronicles/server`) with current deps; `@/*` alias → `packages/server/src/*` (unchanged for now)
-- [ ] Fix cwd coupling: `prompt-files.ts` + `db.ts` resolve via `import.meta.url`, not `process.cwd()` (prereq for everything after)
-- [ ] Keep `serverExternalPackages: ['better-sqlite3']` in server `next.config.ts`
-- [ ] Document version-of-record (still `packages/server/package.json` until P6)
-- **Gate:** `npm run build && npm test && npm run type-check` green from repo root via workspace scripts.
+- [x] Root `package.json`: `"workspaces": ["packages/*", "apps/*"]`, `private: true`, root scripts delegate to workspaces — root scripts now `npm -w @chronicles/server run <x>`; app deps moved out of root
+- [x] `tsconfig.base.json` at root with shared compilerOptions (`composite`, `declaration`, strict, bundler resolution) — created at repo root; server tsconfig `extends` it
+- [x] Move `src/`, `tests/`, `prompts/`, `next.config.ts`, `vitest.config.ts`, `eslint.config.mjs`, tailwind/postcss config → `packages/server/` — `git mv` (renames, history preserved); also `scripts/`, `next-env.d.ts`, `tsconfig.json`
+- [x] `packages/server/package.json` (`@chronicles/server`) with current deps; `@/*` alias → `packages/server/src/*` (unchanged for now) — name `@chronicles/server` v0.6.21; `@/* → ./src/*` retained in server tsconfig
+- [x] Fix cwd coupling: `prompt-files.ts` + `db.ts` resolve via `import.meta.url`, not `process.cwd()` (prereq for everything after) — `path.dirname(fileURLToPath(import.meta.url))` (the `new URL(literal, import.meta.url)` form broke `next build` by webpack-rewriting the .sqlite/.md into asset modules); `DATABASE_PATH` override + `NEXT_PHASE` `:memory:` guard preserved; verified from a foreign cwd
+- [x] Keep `serverExternalPackages: ['better-sqlite3']` in server `next.config.ts` — moved verbatim, intact
+- [x] Document version-of-record (still `packages/server/package.json` until P6) — v0.6.21 lives in `packages/server/package.json`; `src/app/page.tsx` (now `packages/server/src/app/page.tsx`) still reads its `pkg.version`
+- **Gate:** `npm run build && npm test && npm run type-check` green from repo root via workspace scripts. — type-check clean; `npm test` 33 files / 323 tests (322 pass, 1 pre-existing skip); `npm run build` succeeds (benign "TypeScript project references not fully supported" warning, falls back to incremental)
 
 ## P1 — Repository ports over SQLite (strangler-fig)
 Spec: §3.4, §5.1-P1. **Highest-leverage, lowest-risk. Must precede Mongo.** Wrap SQL only — do NOT extract decisions (that's P4).
@@ -152,4 +152,8 @@ Spec: §2.5, §3.7, §5.1-P7.
 ## Status Log
 _(newest first — agents append a line per phase gate with real command output)_
 
+- 2026-06-04 — **P0 GATE GREEN.** App moved verbatim under `packages/server/` via `git mv` (history-preserving renames); npm workspaces stood up (`packages/*`, `apps/*`), root scripts delegate to `@chronicles/server`; `tsconfig.base.json` added, server tsconfig extends it (keeps `@/*`, Next plugin, `serverExternalPackages: ['better-sqlite3']`); cwd coupling removed in `db.ts` + `prompt-files.ts` (module-relative via `import.meta.url`). Real gate output from repo root after `npm install`:
+  - `npm run type-check` → `tsc --noEmit` clean (no errors)
+  - `npm test` → `Test Files 32 passed | 1 skipped (33)` / `Tests 322 passed | 1 skipped (323)` — matches baseline 33 files / 323 tests
+  - `npm run build` → `✓ Compiled successfully`, page data collected, 12 routes built (one benign warning: "TypeScript project references are not fully supported", falls back to incremental). Not part of the hard gate but green.
 - 2026-06-04 — Branch `onion-arch-refactor` created. Baseline captured: type-check clean, 323 tests pass. Tracker initialized.
