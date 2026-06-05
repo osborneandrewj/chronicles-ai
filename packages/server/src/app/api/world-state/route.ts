@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { inspectWorld, WorldNotFoundError } from '@/application/use-cases/inspect-world'
 import { getContainer } from '@/composition/container'
 import { getFullWorldState } from '@/lib/world-state'

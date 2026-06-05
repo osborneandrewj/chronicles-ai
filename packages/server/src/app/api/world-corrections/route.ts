@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { listCorrections, WorldNotFoundError } from '@/application/use-cases/list-corrections'
 import { getContainer } from '@/composition/container'
 

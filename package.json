@@ -12,8 +12,13 @@
     "start": "npm -w @chronicles/server run start",
     "lint": "npm -w @chronicles/server run lint",
     "type-check": "npm -w @chronicles/server run type-check",
+    "depcruise": "depcruise packages/server/src packages/contracts/src --config .dependency-cruiser.cjs",
+    "pretest": "npm run depcruise",
     "test": "npm -w @chronicles/server run test",
     "test:mongo": "npm -w @chronicles/server run test:mongo",
     "test:watch": "npm -w @chronicles/server run test:watch"
+  },
+  "devDependencies": {
+    "dependency-cruiser": "^16.10.4"
   }
 }

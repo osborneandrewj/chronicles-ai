@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { loadHistory, WorldNotFoundError } from '@/application/use-cases/load-history'
 import { getContainer } from '@/composition/container'
 import type { Turn } from '@/domain/entities'

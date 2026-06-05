@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { recordTtsUsage } from '@/application/use-cases/record-tts-usage'
 import { getContainer } from '@/composition/container'
 

@@ -1,3 +1,5 @@
+import 'server-only'
+
 import { summarizeUsage, WorldNotFoundError } from '@/application/use-cases/summarize-usage'
 import { getContainer } from '@/composition/container'
 import { summarizeTurn } from '@/lib/turn-cost'
