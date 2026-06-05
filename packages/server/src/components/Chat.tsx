@@ -16,16 +16,15 @@ import {
   findPrevUser,
   messageText,
 } from "@/lib/turn-cost-map";
-import type { AgentCost, TurnCost } from "@/lib/turn-cost";
+import type {
+  AgentCostDTO as AgentCost,
+  MessageMetadata,
+  OlderResponseDTO as OlderResponse,
+  OlderTurnDTO as OlderTurn,
+  TurnCostDTO as TurnCost,
+} from "@chronicles/contracts";
 
 const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
-
-type MessageMetadata = {
-  createdAt?: string;
-  // The real DB turn id, attached by /api/chat once a streamed turn is
-  // persisted. History-loaded turns instead encode the id in the message id.
-  dbTurnId?: number;
-};
 
 export type ChroniclesMessage = UIMessage<MessageMetadata>;
 
@@ -40,15 +39,6 @@ type Props = {
   initialHasOlder: boolean;
 };
 
-type OlderTurn = {
-  id: number;
-  world_id: number;
-  role: "user" | "assistant";
-  content: string;
-  scene_id: number | null;
-  created_at: string;
-};
-type OlderResponse = { turns: OlderTurn[]; usage: TurnCost[]; hasMore: boolean };
 
 export function Chat({
   worldId,

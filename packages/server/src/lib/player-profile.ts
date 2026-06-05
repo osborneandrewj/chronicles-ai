@@ -1,24 +1,15 @@
-export type PlayerProfileGroupKey =
-  | 'profile'
-  | 'gear'
-  | 'condition'
-  | 'people'
-  | 'work'
-  | 'business'
-  | 'discoveries'
-  | 'commitments'
-  | 'other'
+import type {
+  PlayerProfileEntryDTO,
+  PlayerProfileGroupDTO,
+  PlayerProfileGroupKey,
+} from '@chronicles/contracts'
 
-export type PlayerProfileEntry = {
-  line: string
-  text: string
-}
-
-export type PlayerProfileGroup = {
-  key: PlayerProfileGroupKey
-  label: string
-  entries: PlayerProfileEntry[]
-}
+// The grouped-profile shape is the wire DTO — the server runs
+// organizePlayerProfileFacts and ships groups in the WorldStateDTO so the client
+// renders them with no domain logic (spec §2.4).
+export type { PlayerProfileGroupKey }
+export type PlayerProfileEntry = PlayerProfileEntryDTO
+export type PlayerProfileGroup = PlayerProfileGroupDTO
 
 const GROUP_LABELS: Record<PlayerProfileGroupKey, string> = {
   profile: 'Profile',

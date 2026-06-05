@@ -2,9 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { organizePlayerProfileFacts, type PlayerProfileGroup } from "@/lib/player-profile";
+import type {
+  BadgeTone,
+  CorrectionDTO,
+  InspectorBadge,
+  PlayerProfileGroupDTO as PlayerProfileGroup,
+} from "@chronicles/contracts";
+
+import { organizePlayerProfileFacts } from "@/lib/player-profile";
 import type { ReverieRow } from "@/lib/reveries";
-import { deriveCharacterBadges, deriveSceneBadge, type BadgeTone, type InspectorBadge } from "@/lib/inspector-badges";
+import { deriveCharacterBadges, deriveSceneBadge } from "@/lib/inspector-badges";
 import type { FullWorldState } from "@/lib/world-state";
 
 type InspectorTab = "now" | "story" | "wiki" | "archivist";
@@ -1104,13 +1111,7 @@ function parseTimestamp(value: string): Date | null {
 // is server-backed (world_corrections) so it survives reloads. On successful
 // send, calls onCorrectionApplied so the parent re-fetches FullWorldState and
 // the Wiki tab shows the new player_notes.
-type Correction = {
-  id: number;
-  turnId: number | null;
-  playerText: string;
-  archivistReply: string;
-  createdAt: string;
-};
+type Correction = CorrectionDTO;
 
 function ArchivistView({
   worldId,

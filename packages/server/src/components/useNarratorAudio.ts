@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { splitNewChunks } from "@/lib/sentence-splitter";
+import { splitNewChunks } from "@chronicles/contracts/pure/sentence-splitter";
 
 const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
 const PRIME_AUDIO_SECONDS = 0.05;

@@ -1,12 +1,10 @@
+import type { BadgeTone, InspectorBadge } from '@chronicles/contracts'
+
 import type { Character, Scene } from '@/lib/world-state'
 
-// tone drives the CSS class; label drives the displayed text (they may coincide).
-export type BadgeTone = 'player' | 'danger' | 'muted' | 'here' | 'agency' | 'active'
-
-export interface InspectorBadge {
-  label: string
-  tone: BadgeTone
-}
+// The badge tone/shape is the wire DTO — the server derives badges[] into the
+// WorldStateDTO so the client renders them with no domain logic (spec §2.4).
+export type { BadgeTone, InspectorBadge }
 
 /**
  * At-a-glance badges for a character's collapsed row, in fixed order:

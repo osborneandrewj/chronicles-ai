@@ -1,30 +1,15 @@
+import type { AgentCostDTO, TtsCostDTO, TurnCostDTO } from '@chronicles/contracts'
+
 import { costForTts, costForUsage, type UsageLike } from '@/infrastructure/llm/pricing'
 
 type AgentMeta = { model?: string; usage?: UsageLike } | undefined
 type TtsMeta = { chars?: number } | undefined
 
-export type AgentCost = {
-  model: string
-  inputTokens: number
-  outputTokens: number
-  cachedInputTokens: number
-  cost: number
-}
-
-export type TtsCost = {
-  chars: number
-  cost: number
-}
-
-export type TurnCost = {
-  id: number
-  narrator?: AgentCost
-  archivist?: AgentCost
-  classifier?: AgentCost
-  npcAgent?: AgentCost
-  tts?: TtsCost
-  total: number
-}
+// Server-side cost-rollup types ARE the wire DTOs (the server computes them and
+// ships them straight to the client). Aliased so there is one shape, not two.
+export type AgentCost = AgentCostDTO
+export type TtsCost = TtsCostDTO
+export type TurnCost = TurnCostDTO
 
 function agentCost(meta: AgentMeta): AgentCost | undefined {
   if (!meta?.model || !meta.usage) return undefined
