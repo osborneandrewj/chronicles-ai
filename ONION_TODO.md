@@ -44,7 +44,7 @@ Spec: §2.3, §5.1-P0. **Goal:** move the app under `packages/server` verbatim; 
 - [x] `packages/server/package.json` (`@chronicles/server`) with current deps; `@/*` alias → `packages/server/src/*` (unchanged for now) — name `@chronicles/server` v0.6.21; `@/* → ./src/*` retained in server tsconfig
 - [x] Fix cwd coupling: `prompt-files.ts` + `db.ts` resolve via `import.meta.url`, not `process.cwd()` (prereq for everything after) — `path.dirname(fileURLToPath(import.meta.url))` (the `new URL(literal, import.meta.url)` form broke `next build` by webpack-rewriting the .sqlite/.md into asset modules); `DATABASE_PATH` override + `NEXT_PHASE` `:memory:` guard preserved; verified from a foreign cwd
 - [x] Keep `serverExternalPackages: ['better-sqlite3']` in server `next.config.ts` — moved verbatim, intact
-- [x] Document version-of-record (still `packages/server/package.json` until P6) — v0.6.21 lives in `packages/server/package.json`; `src/app/page.tsx` (now `packages/server/src/app/page.tsx`) still reads its `pkg.version`
+- [x] Document version-of-record (still `packages/server/package.json` until P6) — version-of-record lives in `packages/server/package.json`; `packages/server/src/app/page.tsx` reads its `pkg.version`. **Version restarted to `v0.1.0` (2026-06-05)** under the new 0.x convention (minor=feature, patch=fix) — see `docs/RELEASING.md`. Root + `@chronicles/server` + `@chronicles/contracts` all at `0.1.0`.
 - **Gate:** `npm run build && npm test && npm run type-check` green from repo root via workspace scripts. — type-check clean; `npm test` 33 files / 323 tests (322 pass, 1 pre-existing skip); `npm run build` succeeds (benign "TypeScript project references not fully supported" warning, falls back to incremental)
 
 ## P1 — Repository ports over SQLite (strangler-fig)
@@ -131,7 +131,7 @@ Spec: §2.4-§2.8, §5.1-P6. Client carries **no onion concern**.
 - [x] Move render-only domain server-side: badges / `organizePlayerProfileFacts` / `[t:N]` derivation → DTO ships ready-to-render fields — `d1673bf`
 - [~] Re-express SQL-reading Server Components + Server Actions as HTTP endpoints — **DEFERRED** with the physical move (work in-process today)
 - [~] Per-package tsconfigs + project references; drop root `@/*` alias — **DEFERRED** with the physical move
-- [~] Version-of-record `apps/web/package.json` (Open Q #6) — moot until `apps/web` exists; stays `packages/server` for now
+- [~] Version-of-record `apps/web/package.json` (Open Q #6) — moot until `apps/web` exists; stays `packages/server` (now `v0.1.0`). When `apps/web` lands it becomes the UI-header version-of-record per `docs/RELEASING.md`; bump per the 0.x convention there.
 - **Gate (partial):** type-check + 361 tests + `npm run build` green with the logical split in place; physical-move gate deferred.
 
 ## P7 — Enforce boundaries in CI; delete SQLite
