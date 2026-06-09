@@ -1,11 +1,10 @@
 import { xai } from '@ai-sdk/xai'
 import { generateText } from 'ai'
 
-import type { SceneRepository } from '@/domain/ports'
+import type { SceneRepository, TurnRepository } from '@/domain/ports'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { isOverDailyLimit } from '@/lib/cost-cap'
-import { insertTurn, updateTurnMetadata } from '@/lib/db'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
   formatStateBlock,
@@ -33,6 +32,7 @@ const OPENING_DIRECTIVE =
 // container; SQLite delegates to the same `lib/db` readers (byte-identical).
 export type OpeningTurnDeps = NarratorWorldStateDeps & {
   scenes: Pick<SceneRepository, 'activeForWorld'>
+  turns: Pick<TurnRepository, 'insert' | 'mergeMetadata'>
 }
 
 export async function generateOpeningTurn(
@@ -73,12 +73,12 @@ export async function generateOpeningTurn(
   const trimmed = text.trim()
   if (trimmed.length === 0) return
 
-  const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
+  const narratorTurn = await deps.turns.insert(worldId, 'assistant', trimmed, activeSceneId)
   const narratorMeta = { model: NARRATOR_MODEL, usage: narratorUsage, opening: true }
 
   // Visible cost lands immediately; the archivist follow-up below merges its
-  // own key via updateTurnMetadata's json_patch semantics. Mirrors /api/chat.
-  updateTurnMetadata(narratorTurn.id, { narrator: narratorMeta })
+  // own key via mergeMetadata's json_patch semantics. Mirrors /api/chat.
+  await deps.turns.mergeMetadata(narratorTurn.id, 'narrator', narratorMeta)
 
   try {
     const { patch, usage: archivistUsage } = await extractPatch(
@@ -89,12 +89,15 @@ export async function generateOpeningTurn(
       true, // isOpening — bootstrap the central thread + concrete place kind
     )
     await applyArchivistPatch(worldId, narratorTurn.id, patch)
-    updateTurnMetadata(narratorTurn.id, {
-      archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
+    await deps.turns.mergeMetadata(narratorTurn.id, 'archivist', {
+      model: ARCHIVIST_MODEL,
+      usage: archivistUsage,
+      patch,
     })
   } catch (err) {
-    updateTurnMetadata(narratorTurn.id, {
-      archivist: { model: ARCHIVIST_MODEL, error: String(err) },
+    await deps.turns.mergeMetadata(narratorTurn.id, 'archivist', {
+      model: ARCHIVIST_MODEL,
+      error: String(err),
     })
     console.error('[opening-turn] archivist patch failed', err)
   }

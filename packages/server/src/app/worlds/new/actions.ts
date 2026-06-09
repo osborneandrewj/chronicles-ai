@@ -68,6 +68,7 @@ function openingTurnDeps(c: ReturnType<typeof getContainer>): OpeningTurnDeps {
     occupancy: c.occupancy,
     places: c.places,
     scenes: c.scenes,
+    turns: c.turns,
     worlds: c.worlds,
   }
 }
