@@ -4,6 +4,7 @@ import { createWorld } from '@/application/use-cases/create-world'
 import { seedBoundedWorld } from '@/application/use-cases/seed-bounded-world'
 import { MongoCharacterRepository } from '@/infrastructure/persistence/mongo/repositories/character-repository.mongo'
 import { MongoDossierRepository } from '@/infrastructure/persistence/mongo/repositories/dossier-repository.mongo'
+import { MongoDossierWriter } from '@/infrastructure/persistence/mongo/repositories/dossier-writer.mongo'
 import { MongoOccupancyRepository } from '@/infrastructure/persistence/mongo/repositories/occupancy-repository.mongo'
 import { MongoPlaceConnectionRepository } from '@/infrastructure/persistence/mongo/repositories/place-connection-repository.mongo'
 import { MongoPlaceRepository } from '@/infrastructure/persistence/mongo/repositories/place-repository.mongo'
@@ -251,6 +252,246 @@ d('mongo turn pipeline (e2e)', () => {
     const bumped = (await characters.forWorld(worldId)).find((c) => c.id === npcId)
     expect(bumped?.appearance_count).toBe(1)
     expect(bumped?.last_seen_turn_id).toBe(narratorTurn.id)
+  })
+
+  it('round-trips the archivist WRITE surface on MONGO (P4a port additions)', async () => {
+    const worlds = new MongoWorldRepository(h.ctx)
+    const places = new MongoPlaceRepository(h.ctx)
+    const characters = new MongoCharacterRepository(h.ctx)
+    const scenes = new MongoSceneRepository(h.ctx)
+    const dossiers = new MongoDossierRepository(h.ctx)
+    const dossierWriter = new MongoDossierWriter(h.ctx)
+
+    const { worldId } = await createWorld(
+      {
+        name: 'Charlestown 1903',
+        premise: 'a tall-ship port on the edge of change',
+        initialState: {
+          time: 'noon',
+          location: 'Charlestown harbour — Cornwall',
+          identity: 'a shipwright',
+        },
+      },
+      { worlds, extractSettingRegion: async () => null },
+    )
+
+    // ── PlaceRepository: insert → update → merge → delete ──────────────────
+    const { id: placeAId } = await places.insert({
+      world_id: worldId,
+      name: 'The Rope Walk',
+      description: 'a long shed of tarred hemp',
+      kind: 'workshop',
+    })
+    const { id: placeBId } = await places.insert({
+      world_id: worldId,
+      name: 'Rope Walk (duplicate)',
+      description: 'the same shed, seen again',
+      kind: 'workshop',
+    })
+    expect(await places.nameById(placeAId)).toBe('The Rope Walk')
+
+    await places.update({ id: placeAId, description: 'rethatched and busy', kind: null })
+    const afterUpdate = await places.byId(placeAId)
+    expect(afterUpdate?.description).toBe('rethatched and busy')
+    expect(afterUpdate?.kind).toBe('workshop') // null = COALESCE'd, unchanged
+
+    await places.merge({ id: placeAId, description: 'merged description', kind: 'landmark' })
+    const afterMerge = await places.byId(placeAId)
+    expect(afterMerge?.description).toBe('merged description')
+    expect(afterMerge?.kind).toBe('landmark')
+
+    await places.delete(placeBId)
+    expect(await places.byId(placeBId)).toBeNull()
+
+    // ── CharacterRepository: insert → update → merge → rename → delete ─────
+    const { id: charId } = await characters.insert({
+      world_id: worldId,
+      name: 'Mariah Pengelly',
+      description: 'a sailmaker with sharp eyes',
+      is_player: 0,
+      current_place_id: placeAId,
+      memorable_facts: null,
+      status: 'active',
+      active_goal: null,
+      current_attitude: null,
+      observations: null,
+    })
+    expect((await characters.findByExactLowerName(worldId, 'mariah pengelly'))?.id).toBe(charId)
+
+    await characters.update(charId, {
+      description: 'a sailmaker, now foreman',
+      current_place_id: null,
+      is_player: null,
+      memorable_facts: '[t:1] runs the loft',
+      status: null,
+    })
+    const updatedChar = (await characters.forWorld(worldId)).find((c) => c.id === charId)
+    expect(updatedChar?.description).toBe('a sailmaker, now foreman')
+    expect(updatedChar?.memorable_facts).toBe('[t:1] runs the loft')
+
+    const { id: dupCharId } = await characters.insert({
+      world_id: worldId,
+      name: 'Mariah (other)',
+      description: 'a second sighting',
+      is_player: 0,
+      current_place_id: placeAId,
+      memorable_facts: null,
+      status: 'active',
+      active_goal: null,
+      current_attitude: null,
+      observations: null,
+    })
+    await characters.merge(charId, {
+      name: 'Mariah Pengelly',
+      description: 'the canonical sailmaker',
+      current_place_id: placeAId,
+      memorable_facts: '[t:1] runs the loft',
+      status: 'active',
+      active_goal: 'finish the mainsail',
+      current_attitude: 'focused',
+      observations: '[t:1] seen at the loft',
+      agency_level: 'npc',
+      personal_goals: null,
+      current_focus: null,
+      recent_activity: null,
+      private_beliefs: null,
+      relationship_to_player: null,
+      long_term_agenda: null,
+      tool_access: null,
+      appearance_count: 2,
+      last_seen_turn_id: null,
+      last_agent_tick_turn_id: null,
+      player_notes: null,
+      aliases: 'Mariah',
+    })
+    const mergedChar = (await characters.forWorld(worldId)).find((c) => c.id === charId)
+    expect(mergedChar?.description).toBe('the canonical sailmaker')
+    expect(mergedChar?.appearance_count).toBe(2)
+
+    await characters.rename('Mariah P. Pengelly', charId)
+    expect((await characters.forWorld(worldId)).find((c) => c.id === charId)?.name).toBe(
+      'Mariah P. Pengelly',
+    )
+
+    await characters.delete(dupCharId)
+    expect((await characters.forWorld(worldId)).some((c) => c.id === dupCharId)).toBe(false)
+
+    // ── SceneRepository: insert (open) → close ────────────────────────────
+    const sceneNumber = (await scenes.maxSceneNumber(worldId)) + 1
+    const { id: sceneId } = await scenes.insert({
+      world_id: worldId,
+      place_id: placeAId,
+      title: 'In the rope walk',
+      scene_number: sceneNumber,
+      opened_at_turn: 1,
+    })
+    await worlds.setCurrentScene(sceneId, worldId)
+    expect(await scenes.currentSceneId(worldId)).toBe(sceneId)
+    expect(await scenes.currentScenePlaceId(worldId)).toBe(placeAId)
+
+    await scenes.close({ summary: 'the loft falls quiet', closedAtTurn: 2, id: sceneId })
+    const closedScene = (await scenes.forWorld(worldId)).find((s) => s.id === sceneId)
+    expect(closedScene?.status).toBe('completed')
+    expect(closedScene?.summary).toBe('the loft falls quiet')
+
+    // ── DossierWriter: thread + clue + objective + resource ───────────────
+    const { id: threadId } = await dossierWriter.insertThread({
+      world_id: worldId,
+      title: 'The missing manifest',
+      kind: 'mystery',
+      status: 'active',
+      summary: 'a cargo ledger has vanished',
+      stakes: null,
+      rewards: null,
+      consequences: null,
+      hidden: null,
+      relevance_tags_json: '[]',
+      source_turn_id: 1,
+    })
+    expect((await dossierWriter.threadByTitle(worldId, 'the missing manifest'))?.id).toBe(threadId)
+    await dossierWriter.updateThread({
+      id: threadId,
+      kind: 'mystery',
+      status: 'dormant',
+      summary: null, // COALESCE: unchanged
+      stakes: 'the harbourmaster is implicated',
+      rewards: null,
+      consequences: null,
+      hidden: null,
+      relevance_tags_json: '["manifest"]',
+      resolved_turn_id: null,
+    })
+
+    const { id: clueId } = await dossierWriter.insertClue({
+      world_id: worldId,
+      thread_id: threadId,
+      title: 'Torn ledger corner',
+      detail: 'a scrap with half a date',
+      implication: null,
+      status: 'open',
+      source_turn_id: 1,
+    })
+    expect((await dossierWriter.clueByTitle(worldId, 'torn ledger corner'))?.id).toBe(clueId)
+    await dossierWriter.updateClue({
+      id: clueId,
+      thread_id: null,
+      detail: null,
+      implication: 'the date predates the voyage',
+      status: 'interpreted',
+    })
+
+    const { id: objId } = await dossierWriter.insertObjective({
+      world_id: worldId,
+      thread_id: threadId,
+      title: 'Recover the manifest',
+      status: 'active',
+      detail: 'search the harbourmaster office',
+      blocker: null,
+      source_turn_id: 1,
+    })
+    expect((await dossierWriter.objectiveByTitle(worldId, 'recover the manifest'))?.id).toBe(objId)
+    await dossierWriter.updateObjective({
+      id: objId,
+      thread_id: null,
+      status: 'blocked',
+      detail: null,
+      blocker: 'office is locked',
+      completed_turn_id: null,
+    })
+
+    const { id: resId } = await dossierWriter.insertResource({
+      world_id: worldId,
+      owner_character_id: charId,
+      name: 'Brass key',
+      kind: 'tool',
+      status: 'held',
+      detail: 'opens the office',
+      source_turn_id: 1,
+    })
+    expect((await dossierWriter.resourceByName(worldId, 'brass key'))?.id).toBe(resId)
+    await dossierWriter.updateResource({
+      id: resId,
+      owner_character_id: null,
+      kind: null,
+      status: 'lost',
+      detail: null,
+    })
+
+    // The whole dossier reads back through the read port with the writes applied.
+    const dossier = await dossiers.forWorld(worldId)
+    const thread = dossier.threads.find((t) => t.id === threadId)
+    expect(thread?.status).toBe('dormant')
+    expect(thread?.stakes).toBe('the harbourmaster is implicated')
+    expect(thread?.summary).toBe('a cargo ledger has vanished') // COALESCE preserved
+    expect(dossier.clues.find((c) => c.id === clueId)?.status).toBe('interpreted')
+    expect(dossier.clues.find((c) => c.id === clueId)?.implication).toBe(
+      'the date predates the voyage',
+    )
+    expect(dossier.objectives.find((o) => o.id === objId)?.status).toBe('blocked')
+    expect(dossier.objectives.find((o) => o.id === objId)?.blocker).toBe('office is locked')
+    const resource = dossier.resources.find((r) => r.id === resId)
+    expect(resource?.status).toBe('lost')
+    expect(resource?.kind).toBe('tool') // COALESCE preserved
   })
 
   // Final exit criterion of the cutover — un-skipped in Phase 5 once the opening

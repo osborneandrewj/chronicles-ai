@@ -52,6 +52,13 @@ export interface WorldRepository {
   /** Advance only world_time (the P2 pre-sim clock), leaving the scene cursor. */
   setWorldTime(worldId: number, worldTime: string): Promise<void>
   /**
+   * Point the world cursor at a scene — the archivist's `setCurrentSceneStmt`
+   * mirror (P4a write surface). Sets ONLY current_scene_id; world_time is left
+   * untouched. (Distinct port entry from `setCursor` while the archivist's own
+   * statement is strangled behind this port; the two converge at P4b.)
+   */
+  setCurrentScene(sceneId: number, worldId: number): Promise<void>
+  /**
    * Point the world cursor at a scene (the P4a join hand-off). Sets ONLY
    * current_scene_id; world_time is already set by the pre-sim.
    */

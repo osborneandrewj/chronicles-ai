@@ -10,6 +10,18 @@ export type { PlaceRepository } from './place-repository'
 export type { SceneRepository } from './scene-repository'
 export type { DossierRepository } from './dossier-repository'
 export type {
+  DossierWriter,
+  InsertStoryClueInput,
+  InsertStoryObjectiveInput,
+  InsertStoryResourceInput,
+  InsertStoryThreadInput,
+  StoryThreadLookupRow,
+  UpdateStoryClueInput,
+  UpdateStoryObjectiveInput,
+  UpdateStoryResourceInput,
+  UpdateStoryThreadInput,
+} from './dossier-writer'
+export type {
   DeckPlanCrewSlot,
   DeckPlanEdge,
   DeckPlanProvider,

@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { getWorldCursor } from '@/lib/db'
+import { db, getWorldCursor } from '@/lib/db'
 import {
   archiveWorld,
   createBoundedWorld,
@@ -20,6 +20,14 @@ import type {
   CreateOpenWorldInput,
   WorldRepository,
 } from '@/domain/ports/world-repository'
+
+// Verbatim copy of lib/archivist.ts `setCurrentSceneStmt` (P4a write surface —
+// temporary duplication; P4b deletes the original). Byte-identical SQL/columns/
+// WHERE so the oracle characterization tests stay green when the archivist is
+// rewired onto this port.
+const setCurrentSceneStmt = db.prepare<[number, number]>(
+  'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
+)
 
 // SQLite adapter for WorldRepository (spec §5.1-P1). Delegates to the flat
 // read/archive functions in `worlds.ts` and the cursor reader in `db.ts`. World
@@ -64,6 +72,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setWorldTime(worldId: number, worldTime: string): Promise<void> {
     setWorldTime(worldId, worldTime)
+    return Promise.resolve()
+  }
+
+  setCurrentScene(sceneId: number, worldId: number): Promise<void> {
+    setCurrentSceneStmt.run(sceneId, worldId)
     return Promise.resolve()
   }
 

@@ -113,6 +113,9 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async setCursor(_id, sceneId) {
       store.cursor.current_scene_id = sceneId
     },
+    async setCurrentScene(sceneId) {
+      store.cursor.current_scene_id = sceneId
+    },
     async setSettingRegion() {},
   }
 
@@ -146,6 +149,41 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
       })
       return { id }
     },
+    async currentPlaceForWorld() {
+      return null
+    },
+    async nameById(id) {
+      return store.places.find((p) => p.id === id)?.name ?? null
+    },
+    async insert(place) {
+      const id = nextPlaceId++
+      store.places.push({
+        id,
+        world_id: place.world_id,
+        name: place.name,
+        description: place.description,
+        kind: place.kind,
+        deck: null,
+        layout_hint: null,
+        player_notes: null,
+        osm_display_name: null,
+        osm_street: null,
+        osm_neighborhood: null,
+        osm_lat: null,
+        osm_lng: null,
+        geo_status: 'unresolved',
+        geo_resolved_at: null,
+        created_at: '',
+        updated_at: '',
+      })
+      return { id }
+    },
+    async update() {},
+    async merge() {},
+    async moveCharactersToPlace() {},
+    async moveScenesToPlace() {},
+    async delete() {},
+    async appendPlayerNotes() {},
   }
 
   const placeConnections: CreateStarshipWorldDeps['placeConnections'] = {
@@ -215,6 +253,22 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
       const c = store.characters.find((ch) => ch.id === characterId)
       if (c) c.current_place_id = placeId
     },
+    async findByExactLowerName(_wid, name) {
+      return store.characters.find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? null
+    },
+    async insert() {
+      return { id: nextCharacterId++ }
+    },
+    async update() {},
+    async setActiveGoal() {},
+    async setCurrentAttitude() {},
+    async setObservations() {},
+    async merge() {},
+    async delete() {},
+    async setAliases() {},
+    async rename() {},
+    async setPlayersPlace() {},
+    async appendPlayerNotes() {},
     async recordAppearancesAndAutoPromote() {
       return { promoted: [], counted: 0, tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] } }
     },
@@ -270,6 +324,21 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
         updated_at: '',
       })
       return { id }
+    },
+    async close() {},
+    async insert() {
+      return { id: nextSceneId++ }
+    },
+    async updateContext() {},
+    async autoClose() {},
+    async maxSceneNumber() {
+      return store.scenes.reduce((max, s) => Math.max(max, s.scene_number), 0)
+    },
+    async currentSceneId() {
+      return store.cursor.current_scene_id
+    },
+    async currentScenePlaceId() {
+      return null
     },
   }
 

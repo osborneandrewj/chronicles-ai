@@ -197,6 +197,18 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
     setPlace: async (characterId, placeId) => {
       setPlaceCalls.push({ characterId, placeId })
     },
+    findByExactLowerName: async () => null,
+    insert: async () => ({ id: 0 }),
+    update: async () => {},
+    setActiveGoal: async () => {},
+    setCurrentAttitude: async () => {},
+    setObservations: async () => {},
+    merge: async () => {},
+    delete: async () => {},
+    setAliases: async () => {},
+    rename: async () => {},
+    setPlayersPlace: async () => {},
+    appendPlayerNotes: async () => {},
     recordAppearancesAndAutoPromote: async () => ({
       promoted: [],
       counted: 0,
@@ -223,6 +235,15 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
     forWorld: async () => ROOMS,
     byId: async (id) => ROOMS.find((p) => p.id === id) ?? null,
     add: async () => ({ id: 0 }),
+    currentPlaceForWorld: async () => null,
+    nameById: async (id) => ROOMS.find((p) => p.id === id)?.name ?? null,
+    insert: async () => ({ id: 0 }),
+    update: async () => {},
+    merge: async () => {},
+    moveCharactersToPlace: async () => {},
+    moveScenesToPlace: async () => {},
+    delete: async () => {},
+    appendPlayerNotes: async () => {},
   }
   const drama: DramaPort = {
     generateBeat: async (input) => {

@@ -108,6 +108,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     },
     async setWorldTime() {},
     async setCursor() {},
+    async setCurrentScene() {},
     async setSettingRegion() {},
   }
   const places: PlaceRepository = {
@@ -121,6 +122,21 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       rec.placesAdded.push(place)
       return { id: nextPlaceId++ }
     },
+    async currentPlaceForWorld() {
+      return null
+    },
+    async nameById() {
+      return null
+    },
+    async insert() {
+      return { id: nextPlaceId++ }
+    },
+    async update() {},
+    async merge() {},
+    async moveCharactersToPlace() {},
+    async moveScenesToPlace() {},
+    async delete() {},
+    async appendPlayerNotes() {},
   }
   const placeConnections: PlaceConnectionRepository = {
     async forWorld() {
@@ -142,6 +158,22 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       return { id: nextCharacterId++ }
     },
     async setPlace() {},
+    async findByExactLowerName() {
+      return null
+    },
+    async insert() {
+      return { id: nextCharacterId++ }
+    },
+    async update() {},
+    async setActiveGoal() {},
+    async setCurrentAttitude() {},
+    async setObservations() {},
+    async merge() {},
+    async delete() {},
+    async setAliases() {},
+    async rename() {},
+    async setPlayersPlace() {},
+    async appendPlayerNotes() {},
     async recordAppearancesAndAutoPromote() {
       return { promoted: [], counted: 0, tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] } }
     },

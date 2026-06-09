@@ -9,10 +9,14 @@ import type { CharacterAgencyLevel } from '@/domain/entities'
 import type { Character } from '@/lib/world-state'
 import type {
   AppearancePromotionResult,
+  ArchivistCharacterInsert,
+  ArchivistCharacterMerge,
+  ArchivistCharacterUpdate,
   CharacterInput,
   CharacterRepository,
 } from '@/domain/ports/character-repository'
 
+import type { CharacterDoc } from '../models'
 import type { MongoContext } from '../mongo-context'
 import { mapCharacter } from './mappers'
 
@@ -85,6 +89,194 @@ export class MongoCharacterRepository implements CharacterRepository {
     await this.ctx.models.Character.updateOne(
       { id: characterId },
       { $set: { currentPlaceId: placeId, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors findCharacterByExactLowerNameStmt (`lower(name) = lower(?)`). The
+  // lowercased name lives in the indexed nameKey field; map the doc back to the
+  // flat Character row. Returns null when no row matches.
+  async findByExactLowerName(worldId: number, name: string): Promise<Character | null> {
+    const doc = await this.ctx.models.Character.findOne({
+      worldId,
+      nameKey: name.toLowerCase(),
+    }).lean()
+    return doc ? mapCharacter(doc) : null
+  }
+
+  // Mirrors insertCharacterStmt: the archivist's first-sight INSERT. Assigns an
+  // integer id via nextSeq; nameKey mirrors lower(name). Columns not in the SQL
+  // INSERT fall to their schema defaults (agencyLevel='npc', appearanceCount=0,
+  // etc.), matching the SQLite row defaults.
+  async insert(character: ArchivistCharacterInsert): Promise<{ id: number }> {
+    const id = await this.ctx.nextSeq('characterId')
+    const now = new Date()
+    await this.ctx.models.Character.create(
+      [
+        {
+          id,
+          worldId: character.world_id,
+          name: character.name,
+          nameKey: character.name.toLowerCase(),
+          description: character.description,
+          isPlayer: character.is_player === 1,
+          currentPlaceId: character.current_place_id,
+          memorableFacts: character.memorable_facts,
+          status: character.status as CharacterDoc['status'],
+          activeGoal: character.active_goal,
+          currentAttitude: character.current_attitude,
+          observations: character.observations,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      { session: this.session },
+    )
+    return { id }
+  }
+
+  // Mirrors updateCharacterStmt: each column is COALESCE(?, column) — a null
+  // leaves it unchanged. Translate that to a $set of only the non-null fields
+  // (plus updatedAt, which the SQL always bumps).
+  async update(characterId: number, patch: ArchivistCharacterUpdate): Promise<void> {
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.description !== null) set.description = patch.description
+    if (patch.current_place_id !== null) set.currentPlaceId = patch.current_place_id
+    if (patch.is_player !== null) set.isPlayer = patch.is_player === 1
+    if (patch.memorable_facts !== null) set.memorableFacts = patch.memorable_facts
+    if (patch.status !== null) set.status = patch.status
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: set },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setActiveGoalStmt: plain assignment (null clears, string sets).
+  async setActiveGoal(characterId: number, activeGoal: string | null): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { activeGoal, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setCurrentAttitudeStmt: plain assignment (null clears, string sets).
+  async setCurrentAttitude(
+    characterId: number,
+    currentAttitude: string | null,
+  ): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { currentAttitude, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setObservationsStmt: COALESCE(?, observations) — a null leaves it
+  // unchanged, so only $set observations when a value is supplied. updatedAt is
+  // bumped unconditionally to match the SQL.
+  async setObservations(
+    characterId: number,
+    observations: string | null,
+  ): Promise<void> {
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (observations !== null) set.observations = observations
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: set },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors mergeCharacterStmt: a full overwrite of the surviving row — every
+  // column is a plain assignment (the use case computed the merged values).
+  // nameKey tracks the new name to keep the exact-lower-name lookup consistent.
+  async merge(characterId: number, merged: ArchivistCharacterMerge): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      {
+        $set: {
+          name: merged.name,
+          nameKey: merged.name.toLowerCase(),
+          description: merged.description,
+          currentPlaceId: merged.current_place_id,
+          memorableFacts: merged.memorable_facts,
+          status: merged.status,
+          activeGoal: merged.active_goal,
+          currentAttitude: merged.current_attitude,
+          observations: merged.observations,
+          agencyLevel: merged.agency_level,
+          personalGoals: merged.personal_goals,
+          currentFocus: merged.current_focus,
+          recentActivity: merged.recent_activity,
+          privateBeliefs: merged.private_beliefs,
+          relationshipToPlayer: merged.relationship_to_player,
+          longTermAgenda: merged.long_term_agenda,
+          toolAccess: merged.tool_access,
+          appearanceCount: merged.appearance_count,
+          lastSeenTurnId: merged.last_seen_turn_id,
+          lastAgentTickTurnId: merged.last_agent_tick_turn_id,
+          playerNotes: merged.player_notes,
+          aliases: merged.aliases,
+          updatedAt: new Date(),
+        },
+      },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors deleteCharacterStmt: hard-delete the merge source row.
+  async delete(characterId: number): Promise<void> {
+    await this.ctx.models.Character.deleteOne(
+      { id: characterId },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setCharacterAliasesStmt: overwrite the aliases column (null clears).
+  async setAliases(characterId: number, aliases: string | null): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { aliases, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors renameCharacterStmt: rename a row (alias-merge canonicalisation).
+  // nameKey tracks the new name to keep the exact-lower-name lookup consistent.
+  async rename(name: string, characterId: number): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { name, nameKey: name.toLowerCase(), updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setPlayersPlaceStmt: move the world's player row (is_player=1) to a
+  // place. Scoped to worldId + isPlayer like the SQL WHERE.
+  async setPlayersPlace(placeId: number, worldId: number): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { worldId, isPlayer: true },
+      { $set: { currentPlaceId: placeId, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors appendCharacterPlayerNotesStmt: append-only, newline-separated
+  // player_notes. The SQL CASE writes the bare line on an empty/null column, else
+  // existing || char(10) || line. Read-modify-write the same way under the
+  // session.
+  async appendPlayerNotes(characterId: number, line: string): Promise<void> {
+    const doc = await this.ctx.models.Character.findOne({ id: characterId }).lean()
+    const existing = doc?.playerNotes ?? null
+    const next =
+      existing === null || existing.trim().length === 0
+        ? line
+        : `${existing}\n${line}`
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { playerNotes: next, updatedAt: new Date() } },
       { session: this.session },
     )
   }

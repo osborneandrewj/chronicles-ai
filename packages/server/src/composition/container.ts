@@ -7,6 +7,7 @@ import type {
   CorrectionRepository,
   DeckPlanProvider,
   DossierRepository,
+  DossierWriter,
   DramaPort,
   Logger,
   MemoryRepository,
@@ -32,6 +33,7 @@ import { ConsoleLogger } from '@/infrastructure/logging/console-logger'
 import { SqliteCharacterRepository } from '@/infrastructure/persistence/sqlite/character-repository.sqlite'
 import { SqliteCorrectionRepository } from '@/infrastructure/persistence/sqlite/correction-repository.sqlite'
 import { SqliteDossierRepository } from '@/infrastructure/persistence/sqlite/dossier-repository.sqlite'
+import { SqliteDossierWriter } from '@/infrastructure/persistence/sqlite/dossier-writer.sqlite'
 import { SqliteNpcIntentRepository } from '@/infrastructure/persistence/sqlite/npc-intent-repository.sqlite'
 import { SqliteOccupancyRepository } from '@/infrastructure/persistence/sqlite/occupancy-repository.sqlite'
 import { SqlitePlaceConnectionRepository } from '@/infrastructure/persistence/sqlite/place-connection-repository.sqlite'
@@ -75,6 +77,7 @@ export type Container = {
   relationships: RelationshipRepository
   scenes: SceneRepository
   dossiers: DossierRepository
+  dossierWriter: DossierWriter
   timeline: TimelineWriter
   reveries: ReverieRepository
   npcIntents: NpcIntentRepository
@@ -128,6 +131,7 @@ function buildSqlite(): Container {
     relationships: new SqliteRelationshipRepository(),
     scenes: new SqliteSceneRepository(),
     dossiers: new SqliteDossierRepository(),
+    dossierWriter: new SqliteDossierWriter(),
     timeline: new SqliteTimelineWriter(),
     reveries: new SqliteReverieRepository(),
     npcIntents: new SqliteNpcIntentRepository(),

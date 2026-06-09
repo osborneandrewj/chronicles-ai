@@ -4,6 +4,7 @@ import type {
   CharacterRepository,
   CorrectionRepository,
   DossierRepository,
+  DossierWriter,
   MemoryRepository,
   NpcIntentRepository,
   OccupancyRepository,
@@ -26,6 +27,7 @@ import { MongoUnitOfWork } from './mongo-unit-of-work'
 import { MongoCharacterRepository } from './repositories/character-repository.mongo'
 import { MongoCorrectionRepository } from './repositories/correction-repository.mongo'
 import { MongoDossierRepository } from './repositories/dossier-repository.mongo'
+import { MongoDossierWriter } from './repositories/dossier-writer.mongo'
 import { MongoMemoryRepository } from './repositories/memory-repository.mongo'
 import { MongoNpcIntentRepository } from './repositories/npc-intent-repository.mongo'
 import { MongoOccupancyRepository } from './repositories/occupancy-repository.mongo'
@@ -54,6 +56,7 @@ export type MongoRepositorySet = {
   relationships: RelationshipRepository
   scenes: SceneRepository
   dossiers: DossierRepository
+  dossierWriter: DossierWriter
   timeline: TimelineWriter
   reveries: ReverieRepository
   npcIntents: NpcIntentRepository
@@ -87,6 +90,7 @@ export async function buildMongoRepositories(
     relationships: new MongoRelationshipRepository(ctx),
     scenes: new MongoSceneRepository(ctx),
     dossiers: new MongoDossierRepository(ctx),
+    dossierWriter: new MongoDossierWriter(ctx),
     timeline: new MongoTimelineWriter(ctx),
     reveries: new MongoReverieRepository(ctx),
     npcIntents: new MongoNpcIntentRepository(ctx),

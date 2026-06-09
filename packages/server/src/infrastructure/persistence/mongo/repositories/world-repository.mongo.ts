@@ -239,6 +239,17 @@ export class MongoWorldRepository implements WorldRepository {
     )
   }
 
+  // Archivist `setCurrentSceneStmt` mirror (P4a write surface): point the world
+  // cursor at a scene, leaving worldTime untouched. Equivalent collection write
+  // to the SQLite verbatim copy; session-threaded like the sibling cursor writes.
+  async setCurrentScene(sceneId: number, worldId: number): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { currentSceneId: sceneId } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
   async setSettingRegion(worldId: number, region: string | null): Promise<void> {
     await this.ctx.models.World.updateOne(
       { id: worldId },
