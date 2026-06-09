@@ -231,6 +231,45 @@ container; a live Grok smoke test is a manual follow-up, not part of the automat
 **Deferred to P4:** the initial active scene + world cursor (needed for `/play`, not
 for the P1 "DB holds a connected ship + crew" proof).
 
+## P2 implementation spec (deterministic forward sim — binding)
+The player-less sim loop, deterministic only (no LLM — beats are P3). Proves NPCs
+move on their routines over N ticks and the world clock advances; persists compact
+end-state (final positions + relationship drift + world time), per the locked decisions.
+
+**New pure domain service** `domain/services/sim-clock.ts`:
+- A tick = one `WorldTimeBand`. `tickToBand(tick): WorldTimeBand` cycles
+  morning→midday→evening→night. `tickToWorldTime(tick, startDay=1): string` → a
+  label like `Day 1 — morning` (so ~4 ticks/day; 24 ticks ≈ 6 days). Pure, tested.
+
+**Add to `domain/services/relationship-drift.ts`:** `coLocationOutcome(valence:
+number): BeatOutcome` — the deterministic drift trigger (valence ≥ 0 → 'positive'
+i.e. allies bond when together; < 0 → 'negative' i.e. rivals chafe). Tested.
+
+**Write surface** (ports + SQLite + Mongo adapters):
+- `CharacterRepository.setPlace(characterId: number, placeId: number | null): Promise<void>`.
+- `WorldRepository.setWorldTime(worldId: number, worldTime: string): Promise<void>`.
+- Reuse the existing `RelationshipRepository.adjustValence(id, delta)` (delta-based) —
+  no new relationship write.
+
+**SimulateWorldForward use case** (`application/use-cases/simulate-world-forward.ts`):
+- Deps: `{ characters, placeConnections, relationships, clock }`. Pure orchestration.
+- Load: NPCs (`is_player=0`) with `current_place_id` + parsed `daily_loop` JSON
+  projected to `ResolvedDailyLoop` (band → place_id); `place_connections` →
+  `buildDeckGraph` → `neighborsOf`; relationships (held as a mutable working copy).
+- Loop `tick = 0..N-1`: `band = tickToBand(tick)`; per NPC `nextPlaceId(...)` →
+  update in-memory position; `coLocatedGroups(...)`; for each relationship whose
+  both endpoints are co-located, `applyDrift(workingRel, driftFromOutcome(
+  coLocationOutcome(workingRel.valence)))` (clamped in-memory).
+- Persist ONCE at the end (compact): `setPlace` per NPC (final room),
+  `adjustValence(id, finalValence − originalValence)` per drifted relationship,
+  `setWorldTime(worldId, tickToWorldTime(N))`. No timeline events in P2 (beats=P3).
+- Return `{ ticks: N, finalPositions, drifted }`.
+
+**Offline proof** `scripts/sim-ship.mjs`: seed a scout (stub crew) → run
+SimulateWorldForward for 24 ticks → print final positions + world time + drifted
+relationships; assert every NPC's final room matches its routine for the final tick's
+band and the clock advanced. (Extends the P1 seed-script pattern; stub crew, no spend.)
+
 ## Risks / things to validate
 - **daily_loop place references** must point at real seeded rooms, not free text —
   enforce at seed time.
