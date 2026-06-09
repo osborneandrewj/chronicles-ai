@@ -21,3 +21,4 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 - Keep `delta` within −0.4..0.4. Direction must match the beat (strain → negative, warmth → positive).
 - Compact and factual. The summary is a log line, never a narrated scene or dialogue.
 - Ground the beat in the relationships you were given — a high-tension rivalry produces friction; a warm bond produces a moment of trust. Do not invent new crew or rooms.
+- If an "ALREADY HAPPENED" list is provided, those beats are prior events you MUST NOT restate. Do not regenerate the same conflict or moment. Advance it, escalate it, resolve it, or shift focus to a different dynamic among the participants — the new beat must move the situation forward, not repeat it.

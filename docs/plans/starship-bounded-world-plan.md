@@ -307,6 +307,21 @@ drama-port design + cost discipline — flagged for a possible Grok swap at P4.
 timeline beats written, and asserts ≥1 beat fired given the seeded tension. Live Haiku beat
 smoke is manual (with the Grok crew smoke at P4).
 
+## P3.1 — beat memory (anti-repetition; from the live smoke)
+The live smoke (real Grok crew + Haiku beats) was strong — Grok scheduled a communal
+rhythm (Mess at midday, Quarters at night) so beats fired — BUT 6/8 beats were the same
+"medic presses captain for rest rotations" conflict, because `DramaPort` never saw prior
+beats. Fix: give the generator GLOBAL memory (the repeated conflict spanned different
+rooms, so per-room memory wouldn't catch it).
+- `DramaBeatInput` gains `recentBeats: string[]` (the last N beats ship-wide as
+  "title: summary").
+- `SimulateWorldForward` keeps a rolling `recentBeats` list; each `generateBeat` call gets
+  `recentBeats.slice(-5)` (the beats BEFORE this one), then pushes the new beat.
+- `prompts/drama-beat.md` instructs: these already happened — do NOT restate; advance,
+  escalate, resolve, or shift to a different dynamic among the participants.
+- `StubDramaPort` accepts the field (no behavior change). Keep beats on Haiku (locked).
+Verify offline (plumbing) with sim-ship; confirm actual variation with a live smoke re-run.
+
 ## Open decision for P4 (surfaced in P2 — needs a call + browser check)
 P2's sim persists the clock and the positions for DIFFERENT moments, on purpose:
 `world_time = tickToWorldTime(ticks)` (the band the player *arrives* into, e.g. "Day 7

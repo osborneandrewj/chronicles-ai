@@ -394,6 +394,26 @@ describe('simulateWorldForward — gated drama beats (P3)', () => {
     expect(fakes.adjustCalls[0]!.delta).toBeCloseTo(0.8, 6)
   })
 
+  it('threads a rolling ship-wide recentBeats window into later beats', async () => {
+    const fakes = buildFakes(beatRoster, rivalRels)
+    // Cooldown 0 + threshold 0 so a beat fires on every co-located tick (2,3,6,7),
+    // even after the canned +0.5 delta drifts the rival edge out of tension range.
+    await simulateWorldForward(
+      { worldId: WORLD_ID, ticks: 8, cooldownTicks: 0, tensionThreshold: 0 },
+      fakes.deps,
+    )
+
+    expect(fakes.beatCalls.length).toBeGreaterThanOrEqual(2)
+    // The FIRST beat saw no prior beats.
+    expect(fakes.beatCalls[0]!.recentBeats).toEqual([])
+    // The SECOND beat saw the first beat as 'title: summary', proving the rolling
+    // ship-wide window threads through (the canned beat: 'Beat in Mess: ...').
+    const firstBeat = fakes.appendCalls[0]!
+    expect(fakes.beatCalls[1]!.recentBeats).toContain(
+      `${firstBeat.title}: ${firstBeat.summary}`,
+    )
+  })
+
   it('cooldown suppresses a second immediate beat in the same room', async () => {
     const fakes = buildFakes(beatRoster, rivalRels)
     // Cooldown 100 over 8 ticks: even though captain + cook share MESS at ticks

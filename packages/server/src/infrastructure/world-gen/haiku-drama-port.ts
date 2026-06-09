@@ -84,6 +84,16 @@ export class HaikuDramaPort implements DramaPort {
       input.threads.length > 0
         ? input.threads.map((t) => `- ${t}`).join('\n')
         : '(no active threads)'
+    // Ship-wide beat memory: when non-empty, surface prior beats so the model
+    // advances the situation instead of restating a conflict it already recorded.
+    const recentBeatsBlock =
+      input.recentBeats.length > 0
+        ? [
+            'ALREADY HAPPENED (do not repeat — advance the situation):',
+            input.recentBeats.map((b) => `- ${b}`).join('\n'),
+            '',
+          ]
+        : []
 
     const { object } = await generateObject({
       model: anthropic(HAIKU_MODEL),
@@ -102,6 +112,7 @@ export class HaikuDramaPort implements DramaPort {
         'ACTIVE THREADS:',
         threadBlock,
         '',
+        ...recentBeatsBlock,
         'Record one beat for this group now.',
       ]
         .filter((line) => line !== '')

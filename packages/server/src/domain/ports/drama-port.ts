@@ -27,6 +27,9 @@ export type DramaBeatInput = {
   participants: DramaParticipant[]
   relationships: CharacterRelationship[]
   threads: string[]
+  // The last few ship-wide beats as 'title: summary', most-recent-last, so the
+  // generator can advance the situation instead of repeating a prior conflict.
+  recentBeats: string[]
 }
 
 // A valence delta the beat suggests, to be applied by the relationship-drift

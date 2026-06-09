@@ -21,6 +21,7 @@ function input(overrides: Partial<DramaBeatInput> = {}): DramaBeatInput {
     ],
     relationships: [],
     threads: [],
+    recentBeats: [],
     ...overrides,
   }
 }

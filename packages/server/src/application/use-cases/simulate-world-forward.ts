@@ -44,6 +44,9 @@ export type SimulateWorldForwardInput = {
 
 const DEFAULT_COOLDOWN_TICKS = 3
 const DEFAULT_TENSION_THRESHOLD = 0.3
+// How many of the most recent ship-wide beats to hand the generator as memory, so
+// it advances the situation instead of regenerating the same conflict.
+const RECENT_BEATS_WINDOW = 5
 // Importance of a sim-generated beat on the timeline — a small, modest value so
 // player-turn events still outrank ambient pre-sim drama.
 const BEAT_IMPORTANCE = 2
@@ -140,6 +143,10 @@ export async function simulateWorldForward(
 
   // Beat cooldown is per-room: each place remembers the tick of its last beat.
   const lastBeatTickByPlace = new Map<number, number>()
+  // Beat memory is ship-wide: a rolling list of prior beats as 'title: summary',
+  // most-recent-last, so the generator advances rather than repeats (the repeated
+  // conflict in the live smoke spanned different rooms, so memory must be global).
+  const recentBeats: string[] = []
   let beats = 0
 
   for (let tick = 0; tick < ticks; tick += 1) {
@@ -202,7 +209,10 @@ export async function simulateWorldForward(
           participants,
           relationships: relationshipsInGroup,
           threads: [],
+          recentBeats: recentBeats.slice(-RECENT_BEATS_WINDOW),
         })
+
+        recentBeats.push(`${beat.title}: ${beat.summary}`)
 
         await timeline.append({
           world_id: worldId,
