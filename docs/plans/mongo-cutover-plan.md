@@ -38,6 +38,19 @@ SQLite singleton). Strangler pattern: convert each into a use-case/domain-servic
 injected ports; the route/container wires the active store's adapter. SQLite adapters
 DELEGATE to the existing `lib` SQL so the SQLite path stays byte-identical.
 
+## Transition hazard: Mongo/SQLite id collision (found live in P5)
+Mongo's `nextSeq` assigns world ids 1,2,3… which COLLIDE with the existing SQLite worlds
+(ids 1-10). While the cutover is incomplete, ANY remaining SQLite-by-id read during a Mongo
+session pulls a DIFFERENT world's data — e.g. a Mongo "Scout Vessel" (id 2) cross-reads
+SQLite world 2 ("Arkham Miskatonic"), bleeding Lovecraft content into the scout world and,
+on pre-cutover code, writing the scout's turns INTO the SQLite Arkham row. The `test:mongo`
+suite did NOT catch this — it runs against a fresh MongoMemoryReplSet with no colliding
+SQLite data. The collision becomes HARMLESS once the cutover is complete (under Mongo nothing
+reads SQLite — two independent stores). Mitigations while transitioning: finish the cutover
+(Phase 5b removes the last turn-path SQLite reads); test with the real SQLite data present, not
+just a clean Mongo; and for a clean local Mongo run, clear `.next`, confirm `PERSISTENCE=mongo`,
+and start from a fresh Mongo DB so stale shells don't confuse diagnosis.
+
 ## Phases (lowest-risk first; SQLite + test:mongo green after each)
 
 **Phase 0 — safety net (first).**
