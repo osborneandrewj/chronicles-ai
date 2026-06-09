@@ -793,7 +793,106 @@ export const migrations: Migration[] = [
       }
     },
   },
+  {
+    // v0.x (starship P0) — bounded spatial mode + topology. `worlds.spatial_mode`
+    // distinguishes today's open/OSM worlds ('open') from authored, fixed-
+    // topology interiors ('bounded'); `template_id` records which deck plan
+    // seeded a bounded world (null for open). `places.deck` / `layout_hint`
+    // capture deck grouping + a nullable JSON map hint so a map is *possible*
+    // later (nothing rendered now). `place_connections` is the room-connectivity
+    // graph. All ADDs are nullable / literal-default so existing rows are
+    // unaffected and the migration is reversible (SQLite 3.35+ DROP COLUMN).
+    // Each ADD is guarded against re-run via PRAGMA table_info so a partial
+    // prior application (or a future driver that reorders the tx wrap) is safe.
+    version: 26,
+    name: 'bounded_spatial_mode',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'spatial_mode', "TEXT DEFAULT 'open'")
+      addColumnIfMissing(db, 'worlds', 'template_id', 'TEXT')
+      addColumnIfMissing(db, 'places', 'deck', 'TEXT')
+      addColumnIfMissing(db, 'places', 'layout_hint', 'TEXT')
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS place_connections (
+          id            INTEGER PRIMARY KEY,
+          world_id      INTEGER NOT NULL REFERENCES worlds(id),
+          from_place_id INTEGER NOT NULL REFERENCES places(id),
+          to_place_id   INTEGER NOT NULL REFERENCES places(id),
+          kind          TEXT,
+          bidirectional INTEGER NOT NULL DEFAULT 1,
+          created_at    TEXT
+        );
+        CREATE INDEX IF NOT EXISTS place_connections_world_id ON place_connections(world_id);
+        CREATE INDEX IF NOT EXISTS place_connections_from ON place_connections(from_place_id);
+      `)
+    },
+  },
+  {
+    // v0.x (starship P0) — the relationship graph (the roadmap's "key missing
+    // table"). `valence` in −1..1 drives deterministic drift + beat gating in
+    // the pre-sim; `kind` is free-text role (rival/ally/mentor/romance/…). Idem-
+    // potent via CREATE TABLE IF NOT EXISTS.
+    version: 27,
+    name: 'character_relationships',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS character_relationships (
+          id                 INTEGER PRIMARY KEY,
+          world_id           INTEGER NOT NULL REFERENCES worlds(id),
+          from_character_id  INTEGER NOT NULL REFERENCES characters(id),
+          to_character_id    INTEGER NOT NULL REFERENCES characters(id),
+          kind               TEXT,
+          valence            REAL NOT NULL DEFAULT 0,
+          note               TEXT,
+          updated_at         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS character_relationships_world_id
+          ON character_relationships(world_id);
+        CREATE INDEX IF NOT EXISTS character_relationships_from
+          ON character_relationships(from_character_id);
+      `)
+    },
+  },
+  {
+    // v0.x (starship P0) — sim provenance on the timeline. Pre-sim beats have no
+    // player turn, so `provenance` distinguishes 'turn' (player-driven, today's
+    // only kind) from 'sim' (pre-sim forward simulation); `sim_tick` records the
+    // tick that produced a sim event (nullable; null for turn events). This keeps
+    // ONE timeline the narrator already reads instead of a parallel table.
+    //
+    // turn_id NULLABILITY: timeline_events.turn_id was created in v11 WITHOUT a
+    // NOT NULL constraint (`turn_id INTEGER REFERENCES turns(id) ON DELETE SET
+    // NULL`), so it is already nullable. No recreate-table dance is needed — sim
+    // events simply insert turn_id = NULL. Both ADDs are guarded against re-run.
+    version: 28,
+    name: 'sim_timeline_provenance',
+    up: (db) => {
+      addColumnIfMissing(db, 'timeline_events', 'sim_tick', 'INTEGER')
+      addColumnIfMissing(
+        db,
+        'timeline_events',
+        'provenance',
+        "TEXT NOT NULL DEFAULT 'turn'",
+      )
+    },
+  },
 ]
+
+// Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,
+// so we probe PRAGMA table_info first. `columnDef` is the post-name DDL fragment
+// (type + default), e.g. "TEXT DEFAULT 'open'". Used by v26+ so a partial prior
+// application can't abort a re-run. Only safe for NULL-default / literal-default
+// / NOT NULL-with-literal-default columns (SQLite's own ADD COLUMN limits).
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  columnDef: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${columnDef}`)
+  }
+}
 
 // Backfill helpers (v5). Kept local to migrations.ts because they only run
 // inside the v5 up() and have no callers elsewhere.

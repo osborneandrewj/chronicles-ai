@@ -44,6 +44,8 @@ export type Place = {
   name: string
   description: string | null
   kind: string | null
+  deck: string | null
+  layout_hint: string | null
   player_notes: string | null
   osm_display_name: string | null
   osm_street: string | null
@@ -54,6 +56,41 @@ export type Place = {
   geo_resolved_at: string | null
   created_at: string
   updated_at: string
+}
+
+// place_connections row (v26). The bounded-world room-connectivity graph: a
+// directed edge from one place to another. `bidirectional` (1/0) means the edge
+// is traversable both ways. `kind`: corridor/hatch/door/ladder/airlock.
+export type PlaceConnection = {
+  id: number
+  world_id: number
+  from_place_id: number
+  to_place_id: number
+  kind: string | null
+  bidirectional: number
+  created_at: string | null
+}
+
+// Plain adjacency over place ids that the pure topology services (deck-graph,
+// npc-movement) share. `adjacency[placeId]` lists the place ids reachable in one
+// hop. Bidirectional connections contribute an entry on both sides; the service
+// that builds the graph from PlaceConnection rows owns that expansion.
+export type DeckGraph = {
+  adjacency: Record<number, number[]>
+}
+
+// character_relationships row (v27). A directed relationship from one character
+// to another. `valence` in −1..1 drives deterministic drift + beat gating in the
+// pre-sim. `kind`: rival/ally/mentor/romance/superior/subordinate/…
+export type CharacterRelationship = {
+  id: number
+  world_id: number
+  from_character_id: number
+  to_character_id: number
+  kind: string | null
+  valence: number
+  note: string | null
+  updated_at: string | null
 }
 
 export type Scene = {

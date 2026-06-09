@@ -48,6 +48,10 @@ export type WorldDoc = {
   premise: string
   initialState: Record<string, unknown> | null
   settingRegion: string | null
+  // Bounded-world fields (v26). SQLite: spatial_mode TEXT DEFAULT 'open',
+  // template_id TEXT (nullable).
+  spatialMode: 'open' | 'bounded'
+  templateId: string | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -61,6 +65,8 @@ const WorldSchema = new Schema<WorldDoc>(
     premise: { type: String, default: '' },
     initialState: { type: InitialStateSchema, default: null },
     settingRegion: { type: String, default: null },
+    spatialMode: { type: String, enum: ['open', 'bounded'], default: 'open' },
+    templateId: { type: String, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },
@@ -231,6 +237,10 @@ export type PlaceDoc = {
   nameKey: string
   description: string | null
   kind: string | null
+  // Bounded-world topology fields (v26). SQLite: deck TEXT, layout_hint TEXT
+  // (both nullable; layout_hint holds nullable JSON {x,y}/zone for a future map).
+  deck: string | null
+  layoutHint: string | null
   playerNotes: string | null
   geo: Record<string, unknown>
   profile: Record<string, unknown> | null
@@ -246,6 +256,8 @@ const PlaceSchema = new Schema<PlaceDoc>(
     nameKey: { type: String, required: true },
     description: { type: String, default: null },
     kind: { type: String, default: null },
+    deck: { type: String, default: null },
+    layoutHint: { type: String, default: null },
     playerNotes: { type: String, default: null },
     geo: { type: GeoSchema, default: () => ({}) },
     profile: { type: PlaceProfileSchema, default: null },
@@ -255,6 +267,70 @@ const PlaceSchema = new Schema<PlaceDoc>(
   { collection: 'places', minimize: false, versionKey: false },
 )
 PlaceSchema.index({ worldId: 1, nameKey: 1 }, { unique: true })
+
+// ---------------------------------------------------------------------------
+// place_connections — bounded-world topology graph (v26). One edge per row;
+// `bidirectional` is a 0/1 flag mirroring the SQLite INTEGER (kept numeric so
+// the repository port stays byte-compatible with the SQLite adapter).
+// ---------------------------------------------------------------------------
+export type PlaceConnectionDoc = {
+  _id: Types.ObjectId
+  id: number
+  worldId: number
+  fromPlaceId: number
+  toPlaceId: number
+  kind: string | null
+  bidirectional: number
+  createdAt: Date | null
+}
+
+const PlaceConnectionSchema = new Schema<PlaceConnectionDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    worldId: { type: Number, required: true },
+    fromPlaceId: { type: Number, required: true },
+    toPlaceId: { type: Number, required: true },
+    kind: { type: String, default: null },
+    bidirectional: { type: Number, default: 1 },
+    createdAt: { type: Date, default: null },
+  },
+  { collection: 'place_connections', minimize: false, versionKey: false },
+)
+PlaceConnectionSchema.index({ worldId: 1 })
+PlaceConnectionSchema.index({ fromPlaceId: 1 })
+
+// ---------------------------------------------------------------------------
+// character_relationships — the relationship graph (v27). `valence` in −1..1
+// drives deterministic drift + beat gating in the pre-sim; `kind` is free-text
+// role (rival/ally/mentor/romance/…).
+// ---------------------------------------------------------------------------
+export type CharacterRelationshipDoc = {
+  _id: Types.ObjectId
+  id: number
+  worldId: number
+  fromCharacterId: number
+  toCharacterId: number
+  kind: string | null
+  valence: number
+  note: string | null
+  updatedAt: Date | null
+}
+
+const CharacterRelationshipSchema = new Schema<CharacterRelationshipDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    worldId: { type: Number, required: true },
+    fromCharacterId: { type: Number, required: true },
+    toCharacterId: { type: Number, required: true },
+    kind: { type: String, default: null },
+    valence: { type: Number, default: 0, min: -1, max: 1 },
+    note: { type: String, default: null },
+    updatedAt: { type: Date, default: null },
+  },
+  { collection: 'character_relationships', minimize: false, versionKey: false },
+)
+CharacterRelationshipSchema.index({ worldId: 1 })
+CharacterRelationshipSchema.index({ fromCharacterId: 1 })
 
 // ---------------------------------------------------------------------------
 // scenes — referenced by turns.sceneId and worlds.currentSceneId
@@ -585,6 +661,11 @@ export type TimelineEventDoc = {
   title: string
   summary: string
   importance: number
+  // Sim-provenance fields (v28). SQLite: sim_tick INTEGER (nullable; the tick
+  // that produced a sim event), provenance TEXT NOT NULL DEFAULT 'turn'. turnId
+  // is already nullable above — sim events have no player turn.
+  simTick: number | null
+  provenance: 'turn' | 'sim'
   createdAt: Date
 }
 
@@ -598,6 +679,8 @@ const TimelineEventSchema = new Schema<TimelineEventDoc>(
     title: { type: String, required: true },
     summary: { type: String, required: true },
     importance: { type: Number, default: 3, min: 1, max: 5 },
+    simTick: { type: Number, default: null },
+    provenance: { type: String, enum: ['turn', 'sim'], default: 'turn' },
     createdAt: { type: Date, required: true },
   },
   { collection: 'timeline_events', minimize: false, versionKey: false },
@@ -749,6 +832,8 @@ export type MongoModels = {
   Turn: Model<TurnDoc>
   Character: Model<CharacterDoc>
   Place: Model<PlaceDoc>
+  PlaceConnection: Model<PlaceConnectionDoc>
+  CharacterRelationship: Model<CharacterRelationshipDoc>
   Scene: Model<SceneDoc>
   Reverie: Model<ReverieDoc>
   NpcIntent: Model<NpcIntentDoc>
@@ -787,6 +872,12 @@ export function buildModels(connection: Connection): MongoModels {
     Turn: bind(connection, 'Turn', TurnSchema),
     Character: bind(connection, 'Character', CharacterSchema),
     Place: bind(connection, 'Place', PlaceSchema),
+    PlaceConnection: bind(connection, 'PlaceConnection', PlaceConnectionSchema),
+    CharacterRelationship: bind(
+      connection,
+      'CharacterRelationship',
+      CharacterRelationshipSchema,
+    ),
     Scene: bind(connection, 'Scene', SceneSchema),
     Reverie: bind(connection, 'Reverie', ReverieSchema),
     NpcIntent: bind(connection, 'NpcIntent', NpcIntentSchema),

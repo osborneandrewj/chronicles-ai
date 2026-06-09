@@ -1,12 +1,16 @@
 // World entity + new-world initial-state shape. Pure type declarations
 // (spec §3.3).
 
+export type SpatialMode = 'open' | 'bounded'
+
 export type World = {
   id: number
   name: string
   premise: string
   initial_state_json: string
   setting_region: string | null
+  spatial_mode: SpatialMode
+  template_id: string | null
   created_at: string
 }
 

@@ -60,6 +60,8 @@ export function mapWorld(d: WorldDoc): World {
     premise: d.premise,
     initial_state_json: JSON.stringify(d.initialState ?? {}),
     setting_region: d.settingRegion,
+    spatial_mode: d.spatialMode ?? 'open',
+    template_id: d.templateId ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }
@@ -141,6 +143,8 @@ export function mapPlace(d: PlaceDoc): Place {
     name: d.name,
     description: d.description,
     kind: d.kind,
+    deck: d.deck ?? null,
+    layout_hint: d.layoutHint ?? null,
     player_notes: d.playerNotes,
     osm_display_name: geo.displayName ?? null,
     osm_street: geo.street ?? null,
@@ -313,6 +317,8 @@ export function mapTimelineEvent(
     title: d.title,
     summary: d.summary,
     importance: d.importance,
+    sim_tick: d.simTick ?? null,
+    provenance: d.provenance ?? 'turn',
     created_at: toSqliteDatetime(d.createdAt),
   }
 }

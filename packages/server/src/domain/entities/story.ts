@@ -62,6 +62,8 @@ export type StoryResource = {
   updated_at: string
 }
 
+export type TimelineProvenance = 'turn' | 'sim'
+
 export type TimelineEvent = {
   id: number
   world_id: number
@@ -72,6 +74,8 @@ export type TimelineEvent = {
   title: string
   summary: string
   importance: number
+  sim_tick: number | null
+  provenance: TimelineProvenance
   created_at: string
 }
 

@@ -166,6 +166,23 @@ change isn't "done" until a turn streams end-to-end in the browser.
   snap-to-room), creation UI + "world warming up" state, Mongo model/repo parity,
   add a second ship template.
 
+## P1 prerequisites (discovered during P0)
+The live SQLite read paths delegate to legacy `lib/` modules whose row types
+partially shadow the domain entities, masked by `as` casts — so a field added to a
+domain entity is NOT automatically returned at runtime. P0 fixed the urgent one;
+P1 must close the rest **before** seeding/branching on them:
+- **World (fixed in P0):** `lib/worlds.ts` `getWorld`/`createWorld` now SELECT/RETURN
+  `spatial_mode` + `template_id` so `world.spatial_mode === 'bounded'` is real, not
+  `undefined`. The `WorldRepository` port uses `lib/worlds`' `World` (a re-export of
+  the domain `World`), so this flows through.
+- **Place (P1):** `PlaceRepository` reads through `lib/world-state`'s `Place` type,
+  which does NOT carry the new `deck`/`layout_hint`. When seeding writes `deck` and
+  the sim reads it, extend that read type + its SELECT (or give bounded worlds a
+  dedicated place read), or `place.deck` will be `undefined` at runtime.
+- **TimelineEvent (P3/P4):** same masked-cast risk for `sim_tick`/`provenance` on
+  whatever path reads timeline rows for narrator context — verify the SELECT carries
+  them before relying on `provenance === 'sim'`.
+
 ## Risks / things to validate
 - **daily_loop place references** must point at real seeded rooms, not free text —
   enforce at seed time.

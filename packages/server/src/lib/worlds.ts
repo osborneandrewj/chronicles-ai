@@ -10,11 +10,12 @@ export type { InitialState, World, WorldSummary }
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
    VALUES (?, ?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, setting_region, created_at`,
+   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at`,
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  'SELECT id, name, premise, initial_state_json, setting_region, created_at FROM worlds WHERE id = ?',
+  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at
+   FROM worlds WHERE id = ?`,
 )
 
 const listWorldsStmt = db.prepare(`

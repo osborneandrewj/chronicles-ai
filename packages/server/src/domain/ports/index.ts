@@ -9,6 +9,29 @@ export type { CharacterRepository } from './character-repository'
 export type { PlaceRepository } from './place-repository'
 export type { SceneRepository } from './scene-repository'
 export type { DossierRepository } from './dossier-repository'
+export type {
+  DeckPlanCrewSlot,
+  DeckPlanEdge,
+  DeckPlanProvider,
+  DeckPlanRoom,
+  DeckPlanTemplate,
+} from './deck-plan-provider'
+export type {
+  DramaBeat,
+  DramaBeatInput,
+  DramaParticipant,
+  DramaPort,
+  DramaValenceDelta,
+} from './drama-port'
+export type {
+  PlaceConnectionInput,
+  PlaceConnectionRepository,
+} from './place-connection-repository'
+export type {
+  RelationshipInput,
+  RelationshipRepository,
+} from './relationship-repository'
+export type { TimelineEventInput, TimelineWriter } from './timeline-writer'
 export type { ReverieRepository } from './reverie-repository'
 export type {
   NpcIntentRepository,
