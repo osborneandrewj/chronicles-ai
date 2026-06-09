@@ -1,5 +1,14 @@
 import type { Character } from '@/lib/world-state'
 
+// Result of the appearance-bump / auto-promotion pass (spec §3.4-P3). `promoted`
+// is the names of NPCs that crossed the auto-promote threshold on this call;
+// `tiers` records every other tier transition (for turn metadata / logging).
+export type AppearancePromotionResult = {
+  promoted: string[]
+  counted: number
+  tiers: Record<'local' | 'nearby' | 'distant' | 'dormant' | 'demoted', string[]>
+}
+
 // A character to insert (starship P1). The bounded-world seeder writes crew with
 // a `role` (stored in the existing current_focus field — there is no dedicated
 // role column), an active_goal, and a daily_loop (JSON text, characters.daily_loop
@@ -25,4 +34,16 @@ export interface CharacterRepository {
   add(character: CharacterInput): Promise<{ id: number }>
   /** Move a character to a room (or clear its room when null). */
   setPlace(characterId: number, placeId: number | null): Promise<void>
+  /**
+   * Bump appearance_count for each present NPC and auto-promote/demote agency
+   * tiers in one atomic pass (spec §3.4-P3). The promotion DECISION (threshold,
+   * transient-service detection, next-tier) is the pure `npc-promotion` domain
+   * service; this port only persists the resulting writes. `presentCharacters`
+   * are the rows read before the bump (their counts are pre-increment).
+   */
+  recordAppearancesAndAutoPromote(
+    worldId: number,
+    presentCharacters: Character[],
+    turnId: number,
+  ): Promise<AppearancePromotionResult>
 }

@@ -142,6 +142,9 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       return { id: nextCharacterId++ }
     },
     async setPlace() {},
+    async recordAppearancesAndAutoPromote() {
+      return { promoted: [], counted: 0, tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] } }
+    },
   }
   const relationships: RelationshipRepository = {
     async forWorld() {

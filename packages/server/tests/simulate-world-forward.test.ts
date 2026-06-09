@@ -197,6 +197,11 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
     setPlace: async (characterId, placeId) => {
       setPlaceCalls.push({ characterId, placeId })
     },
+    recordAppearancesAndAutoPromote: async () => ({
+      promoted: [],
+      counted: 0,
+      tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] },
+    }),
   }
   const placeConnections: PlaceConnectionRepository = {
     forWorld: async () => connections,

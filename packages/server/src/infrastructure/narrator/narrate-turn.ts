@@ -20,19 +20,14 @@ import {
 import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
-import {
-  getCharactersForWorld,
-  insertTurn,
-  updateTurnMetadata,
-} from '@/lib/db'
+import { getCharactersForWorld } from '@/lib/db'
 import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
-import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
-import { computeReverieFlares, getReveriesForCharacters, stampFlaredReveries } from '@/lib/reveries'
+import { computeReverieFlares, getReveriesForCharacters } from '@/lib/reveries'
 import { hasRichStorySignal } from '@/lib/story-signal'
 import {
   collectSceneTags,
@@ -60,10 +55,13 @@ const FULL_HISTORY_TURNS = 6
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
 
-  // Read ports for the narrator-context assembler (P2 cutover). The SQLite
-  // adapters delegate to the same `lib/db` readers, so the assembled state is
-  // byte-identical; under PERSISTENCE=mongo they read the collections.
-  const { characters, dossiers, occupancy, places, scenes, turns, worlds } = getContainer()
+  // Read ports for the narrator-context assembler (P2 cutover) + the
+  // non-archivist post-stream WRITE ports (P3 cutover: turns, reveries,
+  // appearance/promotion bumps). The SQLite adapters delegate to the same
+  // `lib/*` functions, so behavior is byte-identical; under PERSISTENCE=mongo
+  // they read/write the collections.
+  const { characters, dossiers, occupancy, places, reveries, scenes, turns, worlds } =
+    getContainer()
   const stateDeps = { characters, dossiers, occupancy, places, scenes, worlds }
 
   const world = getWorld(worldId)
@@ -77,7 +75,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const priorState = await getNarratorWorldStateVia(stateDeps, worldId)
 
   // Update NPC attention tiers before the NPC agent call.
-  const promotion = recordAppearancesAndAutoPromote(
+  const promotion = await characters.recordAppearancesAndAutoPromote(
     worldId,
     priorState.presentCharacters,
     playerTurnId,
@@ -147,7 +145,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     presentCharacterIds: presentNpcIds,
   })
   try {
-    stampFlaredReveries(flaringReverieIds, playerTurnId)
+    await reveries.stampFlared(flaringReverieIds, playerTurnId)
   } catch (err) {
     console.error('[reverie-flare]', err)
   }
@@ -211,7 +209,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       const trimmed = text.trim()
       if (trimmed.length === 0) return
       // ── POST-STREAM transaction boundary: narrator turn + factual work ────
-      const narratorTurn = insertTurn(worldId, 'assistant', trimmed, activeSceneId)
+      const narratorTurn = await turns.insert(worldId, 'assistant', trimmed, activeSceneId)
       narratorTurnId = narratorTurn.id
 
       const narratorMeta = {
@@ -245,7 +243,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       } else if (Object.values(promotion.tiers).some((names) => names.length > 0)) {
         upfrontMeta.npc_promotion = { promoted: [], tiers: promotion.tiers }
       }
-      updateTurnMetadata(narratorTurn.id, upfrontMeta)
+      // Disjoint top-level agent blocks — merging each key independently is
+      // byte-identical to a single json_patch of the whole object.
+      for (const [agentKey, block] of Object.entries(upfrontMeta)) {
+        await turns.mergeMetadata(narratorTurn.id, agentKey, block as Record<string, unknown>)
+      }
 
       // Reconcile NPC plans against the narrator's prose — best-effort.
       if (plans.length > 0) {
@@ -255,18 +257,17 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             narratorTurnId: narratorTurn.id,
             narratorText: trimmed,
           })
-          updateTurnMetadata(narratorTurn.id, {
-            npc_intent_reconciler: {
-              model: reconciliation.model,
-              usage: reconciliation.usage,
-              results: reconciliation.results,
-              error: reconciliation.error,
-              skipped: reconciliation.skipped,
-            },
+          await turns.mergeMetadata(narratorTurn.id, 'npc_intent_reconciler', {
+            model: reconciliation.model,
+            usage: reconciliation.usage,
+            results: reconciliation.results,
+            error: reconciliation.error,
+            skipped: reconciliation.skipped,
           })
         } catch (err) {
-          updateTurnMetadata(narratorTurn.id, {
-            npc_intent_reconciler: { model: RECONCILER_MODEL, error: String(err) },
+          await turns.mergeMetadata(narratorTurn.id, 'npc_intent_reconciler', {
+            model: RECONCILER_MODEL,
+            error: String(err),
           })
           console.error('[intent reconciler failed]', err)
         }
@@ -277,15 +278,18 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
       if (!runArchivistLlm && deterministicPatch) {
         applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
-        updateTurnMetadata(narratorTurn.id, {
-          archivist: { model: 'deterministic-archivist', patch: deterministicPatch },
+        await turns.mergeMetadata(narratorTurn.id, 'archivist', {
+          model: 'deterministic-archivist',
+          patch: deterministicPatch,
         })
         runDupDetector(worldId)
         return
       }
       if (!runArchivistLlm) {
-        updateTurnMetadata(narratorTurn.id, {
-          archivist: { model: ARCHIVIST_MODEL, skipped: true, reason: 'no_state_change_signal' },
+        await turns.mergeMetadata(narratorTurn.id, 'archivist', {
+          model: ARCHIVIST_MODEL,
+          skipped: true,
+          reason: 'no_state_change_signal',
         })
         return
       }
@@ -306,16 +310,19 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         false,
         bootstrapDossier,
       )
-        .then(({ patch, usage: archivistUsage }) => {
+        .then(async ({ patch, usage: archivistUsage }) => {
           applyArchivistPatch(worldId, narratorTurn.id, patch)
-          updateTurnMetadata(narratorTurn.id, {
-            archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
+          await turns.mergeMetadata(narratorTurn.id, 'archivist', {
+            model: ARCHIVIST_MODEL,
+            usage: archivistUsage,
+            patch,
           })
           runDupDetector(worldId)
         })
-        .catch((err) => {
-          updateTurnMetadata(narratorTurn.id, {
-            archivist: { model: ARCHIVIST_MODEL, error: String(err) },
+        .catch(async (err) => {
+          await turns.mergeMetadata(narratorTurn.id, 'archivist', {
+            model: ARCHIVIST_MODEL,
+            error: String(err),
           })
           console.error('[archivist patch failed]', err)
         })

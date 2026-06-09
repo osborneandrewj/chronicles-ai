@@ -215,6 +215,9 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
       const c = store.characters.find((ch) => ch.id === characterId)
       if (c) c.current_place_id = placeId
     },
+    async recordAppearancesAndAutoPromote() {
+      return { promoted: [], counted: 0, tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] } }
+    },
   }
 
   const relationships: CreateStarshipWorldDeps['relationships'] = {

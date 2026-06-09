@@ -8,7 +8,9 @@ import { MongoOccupancyRepository } from '@/infrastructure/persistence/mongo/rep
 import { MongoPlaceConnectionRepository } from '@/infrastructure/persistence/mongo/repositories/place-connection-repository.mongo'
 import { MongoPlaceRepository } from '@/infrastructure/persistence/mongo/repositories/place-repository.mongo'
 import { MongoRelationshipRepository } from '@/infrastructure/persistence/mongo/repositories/relationship-repository.mongo'
+import { MongoReverieRepository } from '@/infrastructure/persistence/mongo/repositories/reverie-repository.mongo'
 import { MongoSceneRepository } from '@/infrastructure/persistence/mongo/repositories/scene-repository.mongo'
+import { MongoTurnRepository } from '@/infrastructure/persistence/mongo/repositories/turn-repository.mongo'
 import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/repositories/world-repository.mongo'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
@@ -158,6 +160,97 @@ d('mongo turn pipeline (e2e)', () => {
     const seededCharacters = await characters.forWorld(result.worldId)
     expect(seededCharacters.length).toBe(result.characterIds.length)
     expect(seededCharacters.length).toBeGreaterThan(0)
+  })
+
+  it('writes the non-archivist post-stream surface to MONGO and reads it back (P3)', async () => {
+    const worlds = new MongoWorldRepository(h.ctx)
+    const places = new MongoPlaceRepository(h.ctx)
+    const characters = new MongoCharacterRepository(h.ctx)
+    const turns = new MongoTurnRepository(h.ctx)
+    const reveries = new MongoReverieRepository(h.ctx)
+    const occupancy = new MongoOccupancyRepository(h.ctx)
+
+    const { worldId } = await createWorld(
+      {
+        name: 'Fowey 1899',
+        premise: 'a harbour town between the old world and the new',
+        initialState: {
+          time: 'morning',
+          location: 'Fowey waterfront — Cornwall',
+          identity: 'a harbourmaster',
+        },
+      },
+      { worlds, extractSettingRegion: async () => null },
+    )
+
+    const seededPlaces = await places.forWorld(worldId)
+    const placeId = seededPlaces[0]!.id
+
+    // Seed an NPC the appearance-bump pass can act on. createWorld only seeds the
+    // player character, so promotion has nothing to count without this.
+    const { id: npcId } = await characters.add({
+      world_id: worldId,
+      name: 'Old Trevithick',
+      description: 'a weathered net-mender',
+      is_player: 0,
+      current_place_id: placeId,
+      role: null,
+      active_goal: null,
+      daily_loop: null,
+    })
+
+    // ── TurnRepository.insert (P3 turn write) ──────────────────────────────
+    const playerTurn = await turns.insert(worldId, 'user', 'Hail the net-mender.', null)
+    const narratorTurn = await turns.insert(
+      worldId,
+      'assistant',
+      'Old Trevithick looks up from his nets.',
+      null,
+    )
+    expect(typeof narratorTurn.id).toBe('number')
+    const readTurns = await turns.allForWorld(worldId)
+    expect(readTurns.map((t) => t.id)).toContain(narratorTurn.id)
+    expect(readTurns.find((t) => t.id === narratorTurn.id)?.role).toBe('assistant')
+
+    // ── ReverieRepository.add + stampFlared (P3 reverie writes) ────────────
+    await reveries.add(
+      worldId,
+      npcId,
+      [{ text: 'the storm of ninety-one took my brother', match_tags: ['storm'], intensity: 3 }],
+      playerTurn.id,
+    )
+    const npcReveries = await reveries.forCharacter(npcId)
+    expect(npcReveries).toHaveLength(1)
+    await reveries.stampFlared([npcReveries[0]!.id], narratorTurn.id)
+    expect((await reveries.forCharacter(npcId))[0]!.last_flared_turn_id).toBe(narratorTurn.id)
+
+    // ── OccupancyRepository.insertSnapshot (P3 occupancy write) ────────────
+    await occupancy.insertSnapshot({
+      worldId,
+      placeId,
+      sceneId: null,
+      sourceTurnId: narratorTurn.id,
+      worldTime: 'morning',
+      occupancyJson: JSON.stringify({ count: 2, roles: ['net-mender'] }),
+    })
+    const snapshot = await occupancy.latestSnapshot(worldId, placeId)
+    expect(snapshot).not.toBeNull()
+    expect(snapshot?.source_turn_id).toBe(narratorTurn.id)
+
+    // ── CharacterRepository.recordAppearancesAndAutoPromote (P3 bump) ──────
+    const present = (await characters.forWorld(worldId)).filter((c) => c.is_player === 0)
+    expect(present.some((c) => c.id === npcId)).toBe(true)
+    const promotion = await characters.recordAppearancesAndAutoPromote(
+      worldId,
+      present,
+      narratorTurn.id,
+    )
+    expect(promotion.counted).toBeGreaterThan(0)
+    // The bump landed in Mongo: the NPC's appearance_count incremented and
+    // last_seen_turn_id now points at the narrator turn.
+    const bumped = (await characters.forWorld(worldId)).find((c) => c.id === npcId)
+    expect(bumped?.appearance_count).toBe(1)
+    expect(bumped?.last_seen_turn_id).toBe(narratorTurn.id)
   })
 
   // Final exit criterion of the cutover — un-skipped in Phase 5 once the opening

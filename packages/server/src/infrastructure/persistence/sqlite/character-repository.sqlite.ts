@@ -6,8 +6,10 @@ import {
   insertBoundedCharacter,
   setCharacterPlace,
 } from '@/lib/db'
+import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import type { Character } from '@/lib/world-state'
 import type {
+  AppearancePromotionResult,
   CharacterInput,
   CharacterRepository,
 } from '@/domain/ports/character-repository'
@@ -29,5 +31,17 @@ export class SqliteCharacterRepository implements CharacterRepository {
   setPlace(characterId: number, placeId: number | null): Promise<void> {
     setCharacterPlace(characterId, placeId)
     return Promise.resolve()
+  }
+
+  // Delegates to the byte-identical `lib/npc-promotion` transaction; the
+  // promotion decision stays in the pure `domain/services/npc-promotion` it uses.
+  recordAppearancesAndAutoPromote(
+    worldId: number,
+    presentCharacters: Character[],
+    turnId: number,
+  ): Promise<AppearancePromotionResult> {
+    return Promise.resolve(
+      recordAppearancesAndAutoPromote(worldId, presentCharacters, turnId),
+    )
   }
 }
