@@ -32,4 +32,9 @@ export interface WorldRepository {
   cursor(worldId: number): Promise<{ world_time: string | null; current_scene_id: number | null }>
   /** Advance only world_time (the P2 pre-sim clock), leaving the scene cursor. */
   setWorldTime(worldId: number, worldTime: string): Promise<void>
+  /**
+   * Point the world cursor at a scene (the P4a join hand-off). Sets ONLY
+   * current_scene_id; world_time is already set by the pre-sim.
+   */
+  setCursor(worldId: number, sceneId: number): Promise<void>
 }

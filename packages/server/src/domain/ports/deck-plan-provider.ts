@@ -46,4 +46,8 @@ export type DeckPlanTemplate = {
 
 export interface DeckPlanProvider {
   getTemplate(templateId: string): Promise<DeckPlanTemplate | null>
+  // The id of the template a "create a bounded world" entry point should seed
+  // when the caller has no specific ship in mind. Lets a driving adapter launch
+  // the default starship without importing the infrastructure template constant.
+  defaultTemplateId(): string
 }

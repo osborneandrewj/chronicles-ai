@@ -69,11 +69,20 @@ const setWorldCursorStmt = db.prepare<[string, number, number]>(
 const setWorldTimeStmt = db.prepare<[string, number]>(
   'UPDATE worlds SET world_time = ? WHERE id = ?',
 )
+const setWorldSceneCursorStmt = db.prepare<[number, number]>(
+  'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
+)
 
 // Bounded-world sim write (starship P2): advance only world_time, leaving the
 // scene cursor untouched (the player-less pre-sim has no active scene yet).
 export function setWorldTime(worldId: number, worldTime: string): void {
   setWorldTimeStmt.run(worldTime, worldId)
+}
+
+// Bounded-world join hand-off (starship P4a): point the cursor at the initial
+// scene, leaving world_time (already set by the pre-sim) untouched.
+export function setWorldSceneCursor(worldId: number, sceneId: number): void {
+  setWorldSceneCursorStmt.run(sceneId, worldId)
 }
 
 export type CreateWorldInput = {

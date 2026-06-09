@@ -5,6 +5,7 @@ import { SqliteCharacterRepository } from '@/infrastructure/persistence/sqlite/c
 import { SqlitePlaceConnectionRepository } from '@/infrastructure/persistence/sqlite/place-connection-repository.sqlite'
 import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place-repository.sqlite'
 import { SqliteRelationshipRepository } from '@/infrastructure/persistence/sqlite/relationship-repository.sqlite'
+import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
 
 // SQLite-adapter tests for the bounded-world write surface (starship P1). They
@@ -17,6 +18,7 @@ const places = new SqlitePlaceRepository()
 const characters = new SqliteCharacterRepository()
 const connections = new SqlitePlaceConnectionRepository()
 const relationships = new SqliteRelationshipRepository()
+const scenes = new SqliteSceneRepository()
 
 function tableCount(table: string, worldId: number): number {
   const row = db
@@ -153,6 +155,66 @@ describe('SqliteWorldRepository.setWorldTime', () => {
     const cursor = await worlds.cursor(worldId)
     expect(cursor.world_time).toBe('Day 6 — night')
     expect(cursor.current_scene_id).toBeNull()
+  })
+})
+
+describe('SqliteSceneRepository.add', () => {
+  it('inserts a scene readable as the active scene for the world', async () => {
+    const worldId = await createWorld(`scene-${Math.random()}`)
+    const { id: bridge } = await places.add({
+      world_id: worldId,
+      name: 'Bridge',
+      description: 'The command deck.',
+      kind: 'room',
+      deck: 'A',
+      layout_hint: null,
+    })
+
+    const { id } = await scenes.add({
+      world_id: worldId,
+      place_id: bridge,
+      title: 'Scene 1',
+      scene_number: 1,
+      status: 'active',
+    })
+
+    const active = await scenes.activeForWorld(worldId)
+    expect(active?.id).toBe(id)
+    expect(active?.place_id).toBe(bridge)
+    expect(active?.title).toBe('Scene 1')
+    expect(active?.scene_number).toBe(1)
+    expect(active?.status).toBe('active')
+
+    const forWorld = await scenes.forWorld(worldId)
+    expect(forWorld.map((s) => s.id)).toContain(id)
+  })
+})
+
+describe('SqliteWorldRepository.setCursor', () => {
+  it('sets current_scene_id without touching world_time', async () => {
+    const worldId = await createWorld(`cursor-${Math.random()}`)
+    await worlds.setWorldTime(worldId, 'Day 3 — midday')
+    const { id: bridge } = await places.add({
+      world_id: worldId,
+      name: 'Bridge',
+      description: null,
+      kind: 'room',
+      deck: 'A',
+      layout_hint: null,
+    })
+    const { id: sceneId } = await scenes.add({
+      world_id: worldId,
+      place_id: bridge,
+      title: 'Scene 1',
+      scene_number: 1,
+      status: 'active',
+    })
+
+    await worlds.setCursor(worldId, sceneId)
+
+    const cursor = await worlds.cursor(worldId)
+    expect(cursor.current_scene_id).toBe(sceneId)
+    expect(cursor.world_time).toBe('Day 3 — midday')
   })
 })
 

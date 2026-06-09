@@ -17,4 +17,8 @@ export class AuthoredDeckPlanProvider implements DeckPlanProvider {
   async getTemplate(templateId: string): Promise<DeckPlanTemplate | null> {
     return TEMPLATES[templateId] ?? null
   }
+
+  defaultTemplateId(): string {
+    return SCOUT_TEMPLATE_ID
+  }
 }

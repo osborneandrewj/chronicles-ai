@@ -80,6 +80,9 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     async getTemplate(id) {
       return template && template.id === id ? template : null
     },
+    defaultTemplateId() {
+      return template?.id ?? ''
+    },
   }
   const worlds: WorldRepository = {
     async createBounded(input) {
@@ -101,6 +104,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       return { world_time: null, current_scene_id: null }
     },
     async setWorldTime() {},
+    async setCursor() {},
   }
   const places: PlaceRepository = {
     async forWorld() {

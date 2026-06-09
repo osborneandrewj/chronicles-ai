@@ -107,4 +107,14 @@ export class MongoWorldRepository implements WorldRepository {
       { session: this.ctx.currentSession ?? undefined },
     )
   }
+
+  // Bounded-world join hand-off (starship P4a): point the cursor at the initial
+  // scene, leaving worldTime (already set by the pre-sim) untouched.
+  async setCursor(worldId: number, sceneId: number): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { currentSceneId: sceneId } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
+import { createStarshipWorld } from '@/application/use-cases/create-starship-world'
+import { getContainer } from '@/composition/container'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn } from '@/lib/opening-turn'
 import { generateWorldFromGenre } from '@/lib/world-generator'
@@ -25,6 +27,19 @@ const BasicWorldSchema = z.object({
   playerName: z.string().trim().max(120).optional(),
   genre: z.string().trim().refine(isGenre, 'Pick a genre from the list'),
 })
+
+const StarshipWorldSchema = z.object({
+  playerName: z.string().trim().max(120).optional(),
+})
+
+// Fixed dressing for the scout starship — the player picks neither name nor
+// premise here; the bounded mode supplies a single authored vessel.
+const STARSHIP_NAME = 'Scout Vessel'
+const STARSHIP_PREMISE =
+  'A lone scout vessel runs a long survey arc through empty space, its small crew ' +
+  'sealed in together for the duration. The mission grinds on; tensions simmer in ' +
+  'the close quarters, and the ship is already mid-watch when a newcomer comes aboard.'
+const STARSHIP_SIM_TICKS = 12
 
 export type CreateWorldFormState = {
   error?: string
@@ -95,4 +110,47 @@ export async function createBasicWorldAction(
       playerName: playerName ?? undefined,
     },
   })
+}
+
+// Bounded "living world" mode: seed the authored scout ship (real Grok crew),
+// run the player-less forward sim (real Haiku beats), drop the player aboard as a
+// newcomer on the Bridge, then send them into /play already mid-motion. The
+// create+sim work is kept in the try; `redirect` throws by design and so stays
+// outside it (its special error must not be swallowed by the catch).
+export async function createStarshipWorldAction(
+  _prev: CreateWorldFormState,
+  formData: FormData,
+): Promise<CreateWorldFormState> {
+  const parsed = StarshipWorldSchema.safeParse({
+    playerName: formData.get('playerName') || undefined,
+  })
+  if (!parsed.success) {
+    return { error: parsed.error.issues.map((i) => i.message).join('; ') }
+  }
+  const { playerName } = parsed.data
+
+  // The container names the crew-generator port `crewGenerator`; the seed use
+  // case's deps call it `crew`, so map it here at the wiring edge.
+  const c = getContainer()
+
+  let worldId: number
+  try {
+    const result = await createStarshipWorld(
+      {
+        templateId: c.decks.defaultTemplateId(),
+        name: STARSHIP_NAME,
+        premise: STARSHIP_PREMISE,
+        playerName,
+        ticks: STARSHIP_SIM_TICKS,
+      },
+      { ...c, crew: c.crewGenerator },
+    )
+    worldId = result.worldId
+    await generateOpeningTurn(worldId, STARSHIP_PREMISE)
+  } catch (err) {
+    console.error('[starship launch failed]', err)
+    return { error: "Couldn't launch the ship — try again." }
+  }
+
+  redirect(`/worlds/${worldId}/play`)
 }

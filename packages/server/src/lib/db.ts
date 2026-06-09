@@ -497,6 +497,31 @@ export function insertBoundedCharacter(input: {
   return { id: row.id }
 }
 
+// Bounded-world scene insert (starship P4a). Writes the initial active scene
+// once the pre-sim has placed the crew; mirrors the open-world scene insert
+// column shape (world_id, place_id, title, scene_number, status, updated_at).
+const insertBoundedSceneStmt = db.prepare<[number, number, string, number, string]>(
+  `INSERT INTO scenes (world_id, place_id, title, scene_number, status, updated_at)
+   VALUES (?, ?, ?, ?, ?, datetime('now')) RETURNING id`,
+)
+
+export function insertBoundedScene(input: {
+  world_id: number
+  place_id: number
+  title: string
+  scene_number: number
+  status: string
+}): { id: number } {
+  const row = insertBoundedSceneStmt.get(
+    input.world_id,
+    input.place_id,
+    input.title,
+    input.scene_number,
+    input.status,
+  ) as { id: number }
+  return { id: row.id }
+}
+
 // Bounded-world sim write (starship P2): move an NPC to a room (or clear it).
 const setCharacterPlaceStmt = db.prepare<[number | null, number]>(
   'UPDATE characters SET current_place_id = ? WHERE id = ?',

@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import { CreateWorldForm } from './CreateWorldForm'
 import { QuickStartForm } from './QuickStartForm'
+import { StarshipLaunch } from './StarshipLaunch'
 
 type Mode = 'basic' | 'advanced'
 
@@ -21,7 +22,24 @@ export function CreateModeTabs() {
         </TabButton>
       </div>
 
-      {mode === 'basic' ? <QuickStartForm /> : <CreateWorldForm />}
+      {mode === 'basic' ? (
+        <div className="space-y-6">
+          <StarshipLaunch />
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center" aria-hidden>
+              <div className="w-full border-t border-neutral-800" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-neutral-950 px-3 text-xs font-medium uppercase tracking-[0.14em] text-neutral-500">
+                or generate a world
+              </span>
+            </div>
+          </div>
+          <QuickStartForm />
+        </div>
+      ) : (
+        <CreateWorldForm />
+      )}
     </div>
   )
 }
