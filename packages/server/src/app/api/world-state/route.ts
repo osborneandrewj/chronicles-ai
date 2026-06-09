@@ -2,7 +2,7 @@ import 'server-only'
 
 import { inspectWorld, WorldNotFoundError } from '@/application/use-cases/inspect-world'
 import { getContainer } from '@/composition/container'
-import { getFullWorldState } from '@/lib/world-state'
+import { getFullWorldStateVia } from '@/lib/world-state'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,11 +14,14 @@ export async function GET(req: Request) {
     return new Response('Missing or invalid worldId', { status: 400 })
   }
 
-  const { worlds } = getContainer()
+  // Read the inspector projection through the ACTIVE store's ports (not the
+  // legacy SQLite-direct getFullWorldState), so under PERSISTENCE=mongo the
+  // inspector reflects the Mongo world. The container satisfies FullWorldStateDeps.
+  const container = getContainer()
   try {
     const state = await inspectWorld(
       { worldId },
-      { worlds, project: getFullWorldState },
+      { worlds: container.worlds, project: (id) => getFullWorldStateVia(container, id) },
     )
     return Response.json(state)
   } catch (err) {
