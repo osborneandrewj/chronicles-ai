@@ -11,8 +11,10 @@ import type {
   AssistantTurnMetadata,
   CachedTtsAudio,
   Character,
+  CharacterRelationship,
   OccupancySnapshotRow,
   Place,
+  PlaceConnection,
   PlaceProfileRow,
   PopulationTemplateRow,
   Scene,
@@ -216,14 +218,14 @@ const charactersInPlaceStmt = db.prepare<[number, number]>(
    FROM characters WHERE world_id = ? AND current_place_id = ? ORDER BY id ASC`,
 )
 const placesForWorldStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, kind, player_notes,
+  `SELECT id, world_id, name, description, kind, deck, layout_hint, player_notes,
           osm_display_name, osm_street, osm_neighborhood, osm_lat, osm_lng,
           geo_status, geo_resolved_at,
           created_at, updated_at FROM places
    WHERE world_id = ? ORDER BY id ASC`,
 )
 const placeByIdStmt = db.prepare<[number]>(
-  `SELECT id, world_id, name, description, kind, player_notes,
+  `SELECT id, world_id, name, description, kind, deck, layout_hint, player_notes,
           osm_display_name, osm_street, osm_neighborhood, osm_lat, osm_lng,
           geo_status, geo_resolved_at,
           created_at, updated_at FROM places WHERE id = ?`,
@@ -429,6 +431,176 @@ export function getPlacesForWorld(worldId: number): Place[] {
 
 export function getPlace(id: number): Place | null {
   return (placeByIdStmt.get(id) as Place | undefined) ?? null
+}
+
+// Bounded-world inserts (starship P1). The seeder writes its own rooms/crew, so
+// these are plain parameterized inserts returning the new row id. Unlike the
+// open-world place insert in worlds.ts, these carry deck + layout_hint (v26).
+const insertBoundedPlaceStmt = db.prepare<
+  [number, string, string | null, string | null, string | null, string | null]
+>(
+  `INSERT INTO places (world_id, name, description, kind, deck, layout_hint)
+   VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+)
+
+export function insertBoundedPlace(input: {
+  world_id: number
+  name: string
+  description: string | null
+  kind: string | null
+  deck: string | null
+  layout_hint: string | null
+}): { id: number } {
+  const row = insertBoundedPlaceStmt.get(
+    input.world_id,
+    input.name,
+    input.description,
+    input.kind,
+    input.deck,
+    input.layout_hint,
+  ) as { id: number }
+  return { id: row.id }
+}
+
+// Bounded-world character insert (starship P1). `role` has no dedicated column;
+// the crew role is stored in `current_focus` (an existing field) per the P1 spec.
+// daily_loop is JSON text written to the characters.daily_loop column (v24).
+const insertBoundedCharacterStmt = db.prepare<
+  [number, string, string | null, number, number | null, string | null, string | null, string | null]
+>(
+  `INSERT INTO characters
+     (world_id, name, description, is_player, current_place_id,
+      current_focus, active_goal, daily_loop)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+)
+
+export function insertBoundedCharacter(input: {
+  world_id: number
+  name: string
+  description: string | null
+  is_player: number
+  current_place_id: number | null
+  role: string | null
+  active_goal: string | null
+  daily_loop: string | null
+}): { id: number } {
+  const row = insertBoundedCharacterStmt.get(
+    input.world_id,
+    input.name,
+    input.description,
+    input.is_player,
+    input.current_place_id,
+    input.role,
+    input.active_goal,
+    input.daily_loop,
+  ) as { id: number }
+  return { id: row.id }
+}
+
+// --- place_connections (v26): bounded-world topology graph (starship P1) ---
+
+const insertPlaceConnectionStmt = db.prepare<
+  [number, number, number, string | null, number]
+>(
+  `INSERT INTO place_connections
+     (world_id, from_place_id, to_place_id, kind, bidirectional, created_at)
+   VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+)
+
+const placeConnectionsForWorldStmt = db.prepare<[number]>(
+  `SELECT id, world_id, from_place_id, to_place_id, kind, bidirectional, created_at
+   FROM place_connections WHERE world_id = ? ORDER BY id ASC`,
+)
+
+export function insertPlaceConnection(input: {
+  world_id: number
+  from_place_id: number
+  to_place_id: number
+  kind: string | null
+  bidirectional: number
+}): void {
+  insertPlaceConnectionStmt.run(
+    input.world_id,
+    input.from_place_id,
+    input.to_place_id,
+    input.kind,
+    input.bidirectional,
+  )
+}
+
+export function getPlaceConnectionsForWorld(worldId: number): PlaceConnection[] {
+  return placeConnectionsForWorldStmt.all(worldId) as PlaceConnection[]
+}
+
+// --- character_relationships (v27): the relationship graph (starship P1) ---
+
+const relationshipsForWorldStmt = db.prepare<[number]>(
+  `SELECT id, world_id, from_character_id, to_character_id, kind, valence, note, updated_at
+   FROM character_relationships WHERE world_id = ? ORDER BY id ASC`,
+)
+
+const findRelationshipStmt = db.prepare<[number, number, number]>(
+  `SELECT id FROM character_relationships
+   WHERE world_id = ? AND from_character_id = ? AND to_character_id = ?`,
+)
+
+const insertRelationshipStmt = db.prepare<
+  [number, number, number, string | null, number, string | null]
+>(
+  `INSERT INTO character_relationships
+     (world_id, from_character_id, to_character_id, kind, valence, note, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+)
+
+const updateRelationshipStmt = db.prepare<
+  [string | null, number, string | null, number]
+>(
+  `UPDATE character_relationships
+   SET kind = ?, valence = ?, note = ?, updated_at = datetime('now')
+   WHERE id = ?`,
+)
+
+const adjustRelationshipValenceStmt = db.prepare<[number, number]>(
+  `UPDATE character_relationships
+   SET valence = valence + ?, updated_at = datetime('now')
+   WHERE id = ?`,
+)
+
+export function getRelationshipsForWorld(worldId: number): CharacterRelationship[] {
+  return relationshipsForWorldStmt.all(worldId) as CharacterRelationship[]
+}
+
+// Upsert a (from,to) edge: replace kind/note and set valence on conflict,
+// otherwise insert. Keyed on (world_id, from_character_id, to_character_id).
+export function upsertRelationship(input: {
+  world_id: number
+  from_character_id: number
+  to_character_id: number
+  kind: string | null
+  valence: number
+  note: string | null
+}): void {
+  const existing = findRelationshipStmt.get(
+    input.world_id,
+    input.from_character_id,
+    input.to_character_id,
+  ) as { id: number } | undefined
+  if (existing) {
+    updateRelationshipStmt.run(input.kind, input.valence, input.note, existing.id)
+  } else {
+    insertRelationshipStmt.run(
+      input.world_id,
+      input.from_character_id,
+      input.to_character_id,
+      input.kind,
+      input.valence,
+      input.note,
+    )
+  }
+}
+
+export function adjustRelationshipValence(relationshipId: number, valence: number): void {
+  adjustRelationshipValenceStmt.run(valence, relationshipId)
 }
 
 export function getScenesForWorld(worldId: number): Scene[] {

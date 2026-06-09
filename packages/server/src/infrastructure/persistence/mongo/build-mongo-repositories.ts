@@ -7,7 +7,9 @@ import type {
   MemoryRepository,
   NpcIntentRepository,
   OccupancyRepository,
+  PlaceConnectionRepository,
   PlaceRepository,
+  RelationshipRepository,
   ReverieRepository,
   SceneRepository,
   TtsCacheRepository,
@@ -26,7 +28,9 @@ import { MongoDossierRepository } from './repositories/dossier-repository.mongo'
 import { MongoMemoryRepository } from './repositories/memory-repository.mongo'
 import { MongoNpcIntentRepository } from './repositories/npc-intent-repository.mongo'
 import { MongoOccupancyRepository } from './repositories/occupancy-repository.mongo'
+import { MongoPlaceConnectionRepository } from './repositories/place-connection-repository.mongo'
 import { MongoPlaceRepository } from './repositories/place-repository.mongo'
+import { MongoRelationshipRepository } from './repositories/relationship-repository.mongo'
 import { MongoReverieRepository } from './repositories/reverie-repository.mongo'
 import { MongoSceneRepository } from './repositories/scene-repository.mongo'
 import { MongoTtsCacheRepository } from './repositories/tts-cache-repository.mongo'
@@ -44,6 +48,8 @@ export type MongoRepositorySet = {
   turns: TurnRepository
   characters: CharacterRepository
   places: PlaceRepository
+  placeConnections: PlaceConnectionRepository
+  relationships: RelationshipRepository
   scenes: SceneRepository
   dossiers: DossierRepository
   reveries: ReverieRepository
@@ -74,6 +80,8 @@ export async function buildMongoRepositories(
     turns: new MongoTurnRepository(ctx),
     characters: new MongoCharacterRepository(ctx),
     places: new MongoPlaceRepository(ctx),
+    placeConnections: new MongoPlaceConnectionRepository(ctx),
+    relationships: new MongoRelationshipRepository(ctx),
     scenes: new MongoSceneRepository(ctx),
     dossiers: new MongoDossierRepository(ctx),
     reveries: new MongoReverieRepository(ctx),

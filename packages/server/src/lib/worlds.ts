@@ -13,6 +13,15 @@ const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
    RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at`,
 )
 
+// Bare bounded-world insert (starship P1). Unlike createWorld, this seeds NO
+// place/character/scene — the SeedBoundedWorld use case writes its own rooms and
+// crew. spatial_mode is fixed to 'bounded'; template_id records the deck plan.
+const insertBoundedWorldStmt = db.prepare<[string, string, string, string]>(
+  `INSERT INTO worlds (name, premise, initial_state_json, spatial_mode, template_id)
+   VALUES (?, ?, ?, 'bounded', ?)
+   RETURNING id`,
+)
+
 const getWorldStmt = db.prepare<[number]>(
   `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at
    FROM worlds WHERE id = ?`,
@@ -106,6 +115,25 @@ export function createWorld(input: CreateWorldInput): World {
 
     return world
   })()
+}
+
+export type CreateBoundedWorldInput = {
+  name: string
+  premise: string
+  initialStateJson: string
+  templateId: string
+}
+
+// Insert a bare bounded world (no seeded place/character/scene). Returns the new
+// world id; the SeedBoundedWorld use case then writes rooms + crew + topology.
+export function createBoundedWorld(input: CreateBoundedWorldInput): { id: number } {
+  const row = insertBoundedWorldStmt.get(
+    input.name,
+    input.premise,
+    input.initialStateJson,
+    input.templateId,
+  ) as { id: number }
+  return { id: row.id }
 }
 
 const setSettingRegionStmt = db.prepare<[string | null, number]>(

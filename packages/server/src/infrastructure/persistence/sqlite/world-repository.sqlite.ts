@@ -3,6 +3,7 @@ import 'server-only'
 import { getWorldCursor } from '@/lib/db'
 import {
   archiveWorld,
+  createBoundedWorld,
   getWorld,
   listArchivedWorlds,
   listWorlds,
@@ -10,12 +11,19 @@ import {
   type World,
   type WorldSummary,
 } from '@/lib/worlds'
-import type { WorldRepository } from '@/domain/ports/world-repository'
+import type {
+  CreateBoundedWorldInput,
+  WorldRepository,
+} from '@/domain/ports/world-repository'
 
 // SQLite adapter for WorldRepository (spec §5.1-P1). Delegates to the flat
 // read/archive functions in `worlds.ts` and the cursor reader in `db.ts`. World
 // *creation* (seeding) stays in `worlds.ts` as deciding logic until P4.
 export class SqliteWorldRepository implements WorldRepository {
+  createBounded(input: CreateBoundedWorldInput): Promise<{ id: number }> {
+    return Promise.resolve(createBoundedWorld(input))
+  }
+
   getWorld(id: number): Promise<World | null> {
     return Promise.resolve(getWorld(id))
   }

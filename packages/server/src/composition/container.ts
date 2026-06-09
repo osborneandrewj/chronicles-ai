@@ -5,12 +5,15 @@ import type {
   CharacterRepository,
   Clock,
   CorrectionRepository,
+  DeckPlanProvider,
   DossierRepository,
   Logger,
   MemoryRepository,
   NpcIntentRepository,
   OccupancyRepository,
+  PlaceConnectionRepository,
   PlaceRepository,
+  RelationshipRepository,
   ReverieRepository,
   SceneRepository,
   SpeechSynthesizer,
@@ -20,6 +23,7 @@ import type {
   UsageRepository,
   WorldRepository,
 } from '@/domain/ports'
+import type { CrewGenerator } from '@/domain/ports/crew-generator'
 import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { ConsoleLogger } from '@/infrastructure/logging/console-logger'
@@ -28,7 +32,9 @@ import { SqliteCorrectionRepository } from '@/infrastructure/persistence/sqlite/
 import { SqliteDossierRepository } from '@/infrastructure/persistence/sqlite/dossier-repository.sqlite'
 import { SqliteNpcIntentRepository } from '@/infrastructure/persistence/sqlite/npc-intent-repository.sqlite'
 import { SqliteOccupancyRepository } from '@/infrastructure/persistence/sqlite/occupancy-repository.sqlite'
+import { SqlitePlaceConnectionRepository } from '@/infrastructure/persistence/sqlite/place-connection-repository.sqlite'
 import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place-repository.sqlite'
+import { SqliteRelationshipRepository } from '@/infrastructure/persistence/sqlite/relationship-repository.sqlite'
 import { SqliteReverieRepository } from '@/infrastructure/persistence/sqlite/reverie-repository.sqlite'
 import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene-repository.sqlite'
 import { SqliteTtsCacheRepository } from '@/infrastructure/persistence/sqlite/tts-cache-repository.sqlite'
@@ -38,6 +44,8 @@ import { SqliteMemoryRepository } from '@/infrastructure/persistence/sqlite/memo
 import { SqliteUsageRepository } from '@/infrastructure/persistence/sqlite/usage-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
+import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
+import { GrokCrewGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
 
 // Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
 // constructs concrete infrastructure adapters. Everything else depends on the
@@ -59,6 +67,8 @@ export type Container = {
   turns: TurnRepository
   characters: CharacterRepository
   places: PlaceRepository
+  placeConnections: PlaceConnectionRepository
+  relationships: RelationshipRepository
   scenes: SceneRepository
   dossiers: DossierRepository
   reveries: ReverieRepository
@@ -70,6 +80,8 @@ export type Container = {
   memory: MemoryRepository
   speech: SpeechSynthesizer
   backgroundTasks: BackgroundTasks
+  decks: DeckPlanProvider
+  crewGenerator: CrewGenerator
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -106,6 +118,8 @@ function buildSqlite(): Container {
     turns: new SqliteTurnRepository(),
     characters: new SqliteCharacterRepository(),
     places: new SqlitePlaceRepository(),
+    placeConnections: new SqlitePlaceConnectionRepository(),
+    relationships: new SqliteRelationshipRepository(),
     scenes: new SqliteSceneRepository(),
     dossiers: new SqliteDossierRepository(),
     reveries: new SqliteReverieRepository(),
@@ -117,6 +131,8 @@ function buildSqlite(): Container {
     memory: new SqliteMemoryRepository(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
+    decks: new AuthoredDeckPlanProvider(),
+    crewGenerator: new GrokCrewGenerator(),
   }
 }
 
@@ -162,6 +178,8 @@ export async function initContainer(): Promise<Container> {
     logger: new ConsoleLogger(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
+    decks: new AuthoredDeckPlanProvider(),
+    crewGenerator: new GrokCrewGenerator(),
     ...repos,
   })
 }

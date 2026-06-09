@@ -2,9 +2,11 @@ import 'server-only'
 
 import type {
   Character,
+  CharacterRelationship,
   NpcIntentRow,
   OccupancySnapshotRow,
   Place,
+  PlaceConnection,
   PlaceProfileRow,
   PopulationTemplateRow,
   Scene,
@@ -21,8 +23,10 @@ import type { ReverieRow } from '@/lib/reveries'
 
 import type {
   CharacterDoc,
+  CharacterRelationshipDoc,
   NpcIntentDoc,
   OccupancySnapshotDoc,
+  PlaceConnectionDoc,
   PlaceDoc,
   ReverieDoc,
   SceneDoc,
@@ -155,6 +159,33 @@ export function mapPlace(d: PlaceDoc): Place {
     geo_resolved_at: geo.resolvedAt ? toSqliteDatetime(geo.resolvedAt) : null,
     created_at: toSqliteDatetime(d.createdAt),
     updated_at: toSqliteDatetime(d.updatedAt),
+  }
+}
+
+export function mapPlaceConnection(d: PlaceConnectionDoc): PlaceConnection {
+  return {
+    id: d.id,
+    world_id: d.worldId,
+    from_place_id: d.fromPlaceId,
+    to_place_id: d.toPlaceId,
+    kind: d.kind,
+    bidirectional: d.bidirectional,
+    created_at: d.createdAt ? toSqliteDatetime(d.createdAt) : null,
+  }
+}
+
+export function mapCharacterRelationship(
+  d: CharacterRelationshipDoc,
+): CharacterRelationship {
+  return {
+    id: d.id,
+    world_id: d.worldId,
+    from_character_id: d.fromCharacterId,
+    to_character_id: d.toCharacterId,
+    kind: d.kind,
+    valence: d.valence,
+    note: d.note,
+    updated_at: d.updatedAt ? toSqliteDatetime(d.updatedAt) : null,
   }
 }
 

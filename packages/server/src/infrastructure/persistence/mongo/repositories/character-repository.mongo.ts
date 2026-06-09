@@ -1,7 +1,10 @@
 import 'server-only'
 
 import type { Character } from '@/lib/world-state'
-import type { CharacterRepository } from '@/domain/ports/character-repository'
+import type {
+  CharacterInput,
+  CharacterRepository,
+} from '@/domain/ports/character-repository'
 
 import type { MongoContext } from '../mongo-context'
 import { mapCharacter } from './mappers'
@@ -27,5 +30,41 @@ export class MongoCharacterRepository implements CharacterRepository {
       .sort({ id: 1 })
       .lean()
     return docs.map(mapCharacter)
+  }
+
+  // Bounded-world crew insert (starship P1). `role` stores into the existing
+  // currentFocus field (no dedicated role column, mirroring SQLite). daily_loop
+  // arrives as JSON text and is stored as a native subdoc (the mapper reverses it).
+  async add(character: CharacterInput): Promise<{ id: number }> {
+    const id = await this.ctx.nextSeq('characterId')
+    const now = new Date()
+    let dailyLoop: Record<string, unknown> | null = null
+    try {
+      dailyLoop = character.daily_loop
+        ? (JSON.parse(character.daily_loop) as Record<string, unknown>)
+        : null
+    } catch {
+      dailyLoop = null
+    }
+    await this.ctx.models.Character.create(
+      [
+        {
+          id,
+          worldId: character.world_id,
+          name: character.name,
+          nameKey: character.name.toLowerCase(),
+          description: character.description,
+          isPlayer: character.is_player === 1,
+          currentPlaceId: character.current_place_id,
+          currentFocus: character.role,
+          activeGoal: character.active_goal,
+          dailyLoop,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      { session: this.ctx.currentSession ?? undefined },
+    )
+    return { id }
   }
 }

@@ -86,6 +86,7 @@ class FakeBackgroundTasks {
 
 function fakeWorld(exists: boolean): WorldRepository {
   return {
+    createBounded: async () => ({ id: 1 }),
     getWorld: async () => (exists ? ({ id: 1, premise: 'A test premise.' } as never) : null),
     listWorlds: async () => [],
     listArchivedWorlds: async () => [],

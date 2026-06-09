@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { Place } from '@/lib/world-state'
-import type { PlaceRepository } from '@/domain/ports/place-repository'
+import type { PlaceInput, PlaceRepository } from '@/domain/ports/place-repository'
 
 import type { MongoContext } from '../mongo-context'
 import { mapPlace } from './mappers'
@@ -19,5 +19,31 @@ export class MongoPlaceRepository implements PlaceRepository {
   async byId(id: number): Promise<Place | null> {
     const doc = await this.ctx.models.Place.findOne({ id }).lean()
     return doc ? mapPlace(doc) : null
+  }
+
+  async add(place: PlaceInput): Promise<{ id: number }> {
+    const id = await this.ctx.nextSeq('placeId')
+    const now = new Date()
+    await this.ctx.models.Place.create(
+      [
+        {
+          id,
+          worldId: place.world_id,
+          name: place.name,
+          nameKey: place.name.toLowerCase(),
+          description: place.description,
+          kind: place.kind,
+          deck: place.deck,
+          layoutHint: place.layout_hint,
+          playerNotes: null,
+          geo: {},
+          profile: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      { session: this.ctx.currentSession ?? undefined },
+    )
+    return { id }
   }
 }

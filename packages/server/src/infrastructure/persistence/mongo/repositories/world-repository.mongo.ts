@@ -1,7 +1,10 @@
 import 'server-only'
 
 import type { World, WorldSummary } from '@/lib/worlds'
-import type { WorldRepository } from '@/domain/ports/world-repository'
+import type {
+  CreateBoundedWorldInput,
+  WorldRepository,
+} from '@/domain/ports/world-repository'
 
 import type { MongoContext } from '../mongo-context'
 import { mapWorld, mapWorldSummary } from './mappers'
@@ -12,6 +15,37 @@ import { mapWorld, mapWorldSummary } from './mappers'
 // logic that stays in the use case (P4/P5).
 export class MongoWorldRepository implements WorldRepository {
   constructor(private readonly ctx: MongoContext) {}
+
+  async createBounded(input: CreateBoundedWorldInput): Promise<{ id: number }> {
+    const id = await this.ctx.nextSeq('worldId')
+    let initialState: Record<string, unknown> | null = null
+    try {
+      initialState = input.initialStateJson
+        ? (JSON.parse(input.initialStateJson) as Record<string, unknown>)
+        : null
+    } catch {
+      initialState = null
+    }
+    await this.ctx.models.World.create(
+      [
+        {
+          id,
+          name: input.name,
+          premise: input.premise,
+          initialState,
+          settingRegion: null,
+          spatialMode: 'bounded',
+          templateId: input.templateId,
+          worldTime: null,
+          currentSceneId: null,
+          archivedAt: null,
+          createdAt: new Date(),
+        },
+      ],
+      { session: this.ctx.currentSession ?? undefined },
+    )
+    return { id }
+  }
 
   async getWorld(id: number): Promise<World | null> {
     const doc = await this.ctx.models.World.findOne({ id }).lean()
