@@ -3,13 +3,19 @@ import Link from 'next/link'
 import pkg from '../../package.json'
 import { ArchivedSection } from '@/components/ArchivedSection'
 import { WorldRowMenu } from '@/components/WorldRowMenu'
-import { listArchivedWorlds, listWorlds, type WorldSummary } from '@/lib/worlds'
+import { getContainer } from '@/composition/container'
+import type { WorldSummary } from '@/domain/entities'
 
 export const dynamic = 'force-dynamic'
 
-export default function Home() {
-  const worlds = listWorlds()
-  const archived = listArchivedWorlds()
+export default async function Home() {
+  // Read the world list through the repository port (not lib/worlds directly) so
+  // the homepage reflects the ACTIVE persistence model — under PERSISTENCE=mongo
+  // it lists Mongo worlds, not the SQLite file. (P6: strangle SQL-reading Server
+  // Components onto ports.)
+  const { worlds: worldRepo } = getContainer()
+  const worlds = await worldRepo.listWorlds()
+  const archived = await worldRepo.listArchivedWorlds()
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col bg-black px-4 py-5 sm:px-8 sm:py-8">

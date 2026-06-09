@@ -4,17 +4,22 @@
 
 The frontend is a Next.js 15 App Router application using React Server Components for data fetching and Client Components for interactivity. It is designed as a Progressive Web App (PWA) targeting both desktop and mobile browsers.
 
+After the onion/hexagonal refactor (branch `onion-arch-refactor`), the frontend is a **driving adapter**: routes, pages, and React components live alongside the rest of the runtime in the `@chronicles/server` workspace package, at `packages/server/src/{app,components}`. They parse input, call a use case (or read via a query port), and render — they own no business logic and never touch SQL or an SDK. A planned `apps/web` client split did **not** happen; the root `workspaces` glob lists `apps/*` but `apps/` is empty, and the client still ships inside `packages/server`.
+
 ### Design Principles
 - **Story-first**: The narrative feed dominates the viewport. Everything else is secondary.
 - **Server Components by default**: Only add `"use client"` when interactivity is required.
 - **Progressive enhancement**: Core read experience works without JavaScript. Interactive features (streaming, input) require JS.
+- **The client renders derived values, not raw rows**: cost/badge/profile derivation moved server-side (P6) and crosses the boundary as DTOs. React reads through a query port and never assembles domain logic or writes SQL.
 - **Conversation-first play**: Do not assume an always-visible wiki/timeline/sidebar during play. Knowledge data should be queryable first; visible surfaces are optional and deferred until playtesting shows they help.
 - **Mobile-native feel**: Touch-friendly, stacked navigation on mobile. Optional knowledge surfaces should not reduce the core reading/input space.
 
 ## 2. Routing Structure
 
+The tree below is the **target** layout. Many leaf routes (seed, wiki, timeline, characters, auth) are still deferred knowledge surfaces; what ships today under `packages/server/src/app/` is the root shell, `worlds/new` (create + quick-start forms), `worlds/[worldId]/play`, and the `api/` route handlers.
+
 ```
-src/app/
+packages/server/src/app/
 ├── layout.tsx                    # Root layout: fonts, global CSS, providers
 ├── page.tsx                      # Landing page → redirect to /worlds
 ├── globals.css                   # Tailwind imports + CSS variables
@@ -45,9 +50,17 @@ src/app/
 │   ├── login/page.tsx
 │   └── signup/page.tsx
 │
-└── api/
-    └── story/stream/route.ts     # SSE streaming endpoint
+└── api/                          # thin route handlers: parse → call use case → pipe
+    ├── chat/route.ts             # POST: streaming turn (AdvanceTurn use case)
+    ├── tts/                      # SynthesizeNarration; tts/record → RecordTtsUsage
+    ├── turns/route.ts            # LoadHistory
+    ├── usage/route.ts            # SummarizeUsage
+    ├── world-state/route.ts      # InspectWorld
+    ├── world-correction/route.ts # ApplyCorrection
+    └── world-corrections/route.ts# ListCorrections
 ```
+
+Each `api/` route is a driving adapter over a use case: it validates the request with a shared `@chronicles/contracts` Zod schema, calls the use case, pipes the result, and maps domain errors to HTTP status codes **only at this edge**. The old 593-line `src/app/api/chat/route.ts` god endpoint is gone; `POST /api/chat` now calls the `AdvanceTurn` use case via a `NarratorPort`/`NarrationStream` for streaming, with a `BackgroundTasks` port (and a SIGTERM drain adapter) handling post-turn work.
 
 ### Route Types
 
@@ -138,6 +151,17 @@ Knowledge records are part of the backend architecture before they are necessari
 | `TimelinePanel` | Server | `components/sidebar/TimelinePanel.tsx` | Timeline event list |
 | `CharacterPanel` | Server | `components/sidebar/CharacterPanel.tsx` | Character cards |
 | `ThreadPanel` | Server | `components/sidebar/ThreadPanel.tsx` | Story thread list |
+
+> The component names above describe the **target** decomposition. What ships today under `packages/server/src/components/` is a smaller set — `Chat.tsx` (the `useChat` client container + feed + input), `WorldInspector.tsx`, `ArchivedSection.tsx`, `WorldRowMenu.tsx`, `SlashCommandMenu.tsx`, and the `useNarratorAudio.ts` hook — plus the create-world forms colocated under `app/worlds/new/`. Refactor toward the decomposition above as the play UI grows.
+
+#### Boundary rules for client components
+
+The client tree is fenced off from the rest of the onion. Two `dependency-cruiser` rules enforce this in CI:
+
+- **`client-no-server-layers`** — a `"use client"` module may not import `domain/`, `application/`, `infrastructure/`, `composition/`, or `server/render`. It speaks only DTOs from `@chronicles/contracts` (value imports; type-only imports are erased).
+- **`client-no-native-or-server-sdk`** — a client module may not pull `mongoose`, `better-sqlite3`, `ai`, or a server-side `@ai-sdk/*` provider. Only `@ai-sdk/react` is allowed client-side. Because `@chronicles/contracts` depends on `zod` and nothing else, the client can never transitively reach a DB driver or LLM SDK.
+
+This is why **derived presentation values cross the boundary as DTOs, not raw rows**: cost, badge, and profile derivation run server-side (P6), and React renders the already-computed values. Likewise, the narrator-markdown **state block is rendered server-side** in `packages/server/src/server/render/state-block.ts` (a `server-only` rendering adapter that turns structured `NarratorWorldState`/`StoryDossier` values into the narrator's prompt-markdown dialect); the client never reconstructs that dialect.
 
 ## 4. UI Wireframes
 
@@ -306,9 +330,9 @@ This is an optional future layout, not a Phase 1 requirement. The default play p
 
 ## 5. State Management
 
-### 5.1 Server State (React Query / Server Components)
+### 5.1 Server State (Server Components via a query port)
 
-Most data is server state — fetched on the server and rendered via Server Components. No client-side cache needed for:
+Most data is server state — fetched on the server and rendered via Server Components. Server Components read through a **query port** (the read side of the repositories wired in `composition/`); they do not write SQL or reach into `infrastructure/` directly. The values handed to React are derived DTOs (cost/badge/profile already computed server-side), not raw rows. No client-side cache is needed for:
 - World list (re-fetched on navigation)
 - World details (re-fetched on navigation)
 - Wiki pages (re-fetched on navigation)
@@ -323,7 +347,7 @@ The `useChat()` hook manages:
 - `sendMessage()` / `regenerate()` / `stop()` actions
 - `onData()` handling for custom persisted-turn metadata
 
-The story input textarea uses local React state. AI SDK 5+ no longer manages input state internally, so `StoryInput` owns the text value and calls `sendMessage()` with the current action plus `worldId`, `sceneId`, and `characterId` in the request body.
+The story input textarea uses local React state. AI SDK 5+ no longer manages input state internally, so `StoryInput` owns the text value and calls `sendMessage()` against `POST /api/chat` with the current action plus `worldId`, `sceneId`, and `characterId` in the request body. The request and response shapes are the shared `@chronicles/contracts` Zod schemas (the chat contract), so the client and the route handler validate against the same definition. The contracts package also re-exports one pure util — the sentence-splitter at `@chronicles/contracts/pure/sentence-splitter` — shared between the server-side TTS path and the client.
 
 ### 5.3 Client State (React useState)
 

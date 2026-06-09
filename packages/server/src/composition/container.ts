@@ -72,7 +72,26 @@ export type Container = {
   backgroundTasks: BackgroundTasks
 }
 
-let cached: Container | undefined
+// The container is a process-wide singleton, cached on `globalThis` rather than
+// a module-level variable ON PURPOSE. Next compiles the instrumentation boot
+// hook in a SEPARATE bundle from the route handlers, so a plain module-level
+// `cached` would be DUPLICATED: initContainer() in the boot hook populates one
+// copy while getContainer() in a route reads another (empty) copy and throws.
+// globalThis is shared across both bundles in the single Node process, so the
+// Mongo container built at boot is visible to every route. (It also survives
+// dev HMR, avoiding a reconnect on every edit.)
+const CONTAINER_CACHE_KEY = '__chroniclesContainer__'
+
+function readCachedContainer(): Container | undefined {
+  return (globalThis as Record<string, unknown>)[CONTAINER_CACHE_KEY] as
+    | Container
+    | undefined
+}
+
+function cacheContainer(container: Container): Container {
+  ;(globalThis as Record<string, unknown>)[CONTAINER_CACHE_KEY] = container
+  return container
+}
 
 function persistenceMode(): 'sqlite' | 'mongo' {
   return process.env.PERSISTENCE === 'mongo' ? 'mongo' : 'sqlite'
@@ -109,6 +128,7 @@ function buildSqlite(): Container {
  * inside a sync getter).
  */
 export function getContainer(): Container {
+  const cached = readCachedContainer()
   if (cached) return cached
   if (persistenceMode() === 'mongo') {
     throw new Error(
@@ -116,7 +136,7 @@ export function getContainer(): Container {
         'getContainer() — the Mongo connection is async (spec §5.1-P2).',
     )
   }
-  return (cached = buildSqlite())
+  return cacheContainer(buildSqlite())
 }
 
 /**
@@ -126,9 +146,10 @@ export function getContainer(): Container {
  * at process start when PERSISTENCE=mongo.
  */
 export async function initContainer(): Promise<Container> {
+  const cached = readCachedContainer()
   if (cached) return cached
   if (persistenceMode() === 'sqlite') {
-    return (cached = buildSqlite())
+    return cacheContainer(buildSqlite())
   }
   // Dynamic import so the default SQLite path never loads mongoose.
   const { buildMongoRepositories } = await import(
@@ -136,17 +157,16 @@ export async function initContainer(): Promise<Container> {
   )
   const databaseUrl = process.env.DATABASE_URL ?? ''
   const repos = await buildMongoRepositories(databaseUrl)
-  cached = {
+  return cacheContainer({
     clock: new SystemClock(),
     logger: new ConsoleLogger(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
     ...repos,
-  }
-  return cached
+  })
 }
 
 /** For tests: drop the cached container so the next call rebuilds it. */
 export function __resetContainerForTests(): void {
-  cached = undefined
+  delete (globalThis as Record<string, unknown>)[CONTAINER_CACHE_KEY]
 }

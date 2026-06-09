@@ -1,8 +1,15 @@
 # Current Database and NPC/Narrator Design
 
-**Status**: Current-state reference for this branch.
-**Source of truth**: `src/lib/migrations.ts`, `src/lib/db.ts`, `src/lib/world-state.ts`, `src/lib/npc-agent.ts`, `src/app/api/chat/route.ts`.
-**Schema level**: SQLite migration 19 on this branch.
+**Status**: Current-state reference for the `onion-arch-refactor` branch (preview; may be discarded).
+**Source of truth**:
+- Narrator: `packages/server/src/domain/ports/narrator.ts` (port) + `packages/server/src/infrastructure/narrator/narrate-turn.ts` (Grok narration-stream adapter).
+- Turn orchestration: `packages/server/src/application/use-cases/advance-turn.ts`, driven by the thin route adapter `packages/server/src/app/api/chat/route.ts`.
+- NPC/runtime logic now lives in pure domain services under `packages/server/src/domain/services/`: `npc-promotion.ts`, `story-signal.ts`, `reverie-flare.ts`, `occupancy-sim.ts` (NPC-intent reconciliation against narrator prose is persisted through `domain/ports/npc-intent-repository.ts`).
+- Background post-turn work runs behind `packages/server/src/domain/ports/background-tasks.ts`, implemented by `packages/server/src/infrastructure/background/process-background-tasks.ts` (with a SIGTERM drain).
+- State assembly + schema: `packages/server/src/lib/world-state.ts`, `packages/server/src/lib/migrations.ts`, `packages/server/src/lib/db.ts` (mid-migration code still under `lib/`; the row TYPE defs have moved to `domain/entities/`).
+
+**Schema level**: SQLite migration 25 (`prune_reveries_to_three`) on this branch.
+**Persistence**: SQLite via raw `better-sqlite3` (live/default); a full MongoDB + Mongoose adapter exists behind `PERSISTENCE=mongo` but is **not yet cut over** (P3 production cutover is a manual gate). Both adapter sets satisfy the same domain ports.
 
 This document describes the database architecture as it exists today and the runtime relationship between NPCs, the NPC agent, the narrator, and the archivist. The older target architecture in `02-database-design.md` remains useful for direction, but the code is authoritative for current behavior.
 
@@ -19,14 +26,14 @@ The current architecture optimizes for four constraints:
 
 ## Storage Stack
 
-The app uses SQLite through `better-sqlite3`.
+The live/default store is SQLite through `better-sqlite3` (no Drizzle, no Postgres). A full MongoDB + Mongoose adapter exists behind `PERSISTENCE=mongo` but is not yet cut over; both adapter sets implement the same domain repository ports, and nothing above `infrastructure/` knows which store is live. The notes below describe the SQLite path.
 
 - Runtime DB path comes from `DATABASE_PATH`; local dev falls back to `chronicles.sqlite` in the repo root.
 - During Next production build page-data collection, the DB opens as `:memory:` to avoid build-worker locks against a mounted production volume.
 - SQLite runs with WAL journal mode and foreign keys enabled.
-- Migrations are code-owned in `src/lib/migrations.ts`; `runMigrations(db)` executes when the singleton DB opens.
-- Access is raw prepared SQL in `src/lib/db.ts`, `src/lib/worlds.ts`, `src/lib/archivist.ts`, `src/lib/npc-agent.ts`, and related modules. There is no ORM in the current implementation.
-- `turns.metadata` is a JSON text column patched with SQLite JSON functions so narrator, classifier, NPC agent, archivist, TTS, and promotion metadata can merge without clobbering each other.
+- Migrations are code-owned in `packages/server/src/lib/migrations.ts`; `runMigrations(db)` executes when the singleton DB opens (currently through migration 25).
+- Access is raw prepared SQL behind repository adapters in `packages/server/src/infrastructure/persistence/sqlite/` (14 `*.sqlite.ts` repos + `unit-of-work.sqlite.ts`). Repositories are dumb CRUD; deciding logic lives in domain services. There is no ORM. Legacy helpers still under `packages/server/src/lib/` (`db.ts`, `worlds.ts`, `archivist.ts`, `npc-agent.ts`) are mid-migration toward those adapters.
+- `turns.metadata` is a JSON text column patched with SQLite JSON functions so narrator, classifier, NPC agent, archivist, TTS, and promotion metadata can merge without clobbering each other (via `TurnRepository.mergeMetadata` — the turn port is append-only).
 
 ## High-Level Entity Model
 
@@ -93,7 +100,7 @@ Core fields:
 - `scene_id`
 - `created_at`
 
-The route persists the player action before the narrator call, then persists the assistant/narrator response after streaming completes. Metadata on assistant rows can include:
+The `AdvanceTurn` use case (driven by the thin `/api/chat` route adapter) persists the player action before the narrator call, then persists the assistant/narrator response after streaming completes. Metadata on assistant rows can include:
 
 - `narrator`: model, usage, tool results
 - `classifier`: stance and input-mode classification
@@ -102,7 +109,7 @@ The route persists the player action before the narrator call, then persists the
 - `archivist`: extracted patch, usage, skip reason, or error
 - `tts`: synthesized character count
 
-The route has retry/idempotency logic: if the latest user text already has a persisted assistant response and the client is retrying, the existing assistant turn is replayed instead of spending another model call.
+The pipeline has retry/idempotency logic: if the latest user text already has a persisted assistant response and the client is retrying, the existing assistant turn is replayed instead of spending another model call.
 
 ### `places`
 
@@ -255,7 +262,7 @@ Core fields:
 
 ## Runtime Turn Pipeline
 
-The main `POST /api/chat` flow is:
+The main `POST /api/chat` → `AdvanceTurn` flow is (the route is a thin adapter; the steps below are the use case):
 
 ```text
 client submits player action
@@ -519,7 +526,7 @@ The correction prompt can write player notes. The normal narrator-extraction arc
 - Time is free-text, so ETA comparison is prompt-guided rather than deterministic.
 - Long newline logs can grow; prompt formatters trim recent lines, but storage is unbounded.
 - Agency tiers are stored on `characters`, so future multiplayer or parallel-scene support will need more precise attention scheduling.
-- The target docs still describe a future PostgreSQL/Drizzle shape. Engineers should treat migrations and prepared statements as the current implementation.
+- The previous Postgres 17 + pgvector + Drizzle target is superseded. Live persistence is SQLite via raw prepared statements behind repository ports; a Mongo + Mongoose adapter is ready behind `PERSISTENCE=mongo` but not yet cut over. Vector search is still a no-op (`MemoryRepository.searchSimilar()` returns `[]` in both adapters — the Phase-2 embedding slot is unbuilt).
 
 ## v2 Pressure Relief
 
@@ -529,20 +536,27 @@ The v2 roadmap accepts five targeted improvements rather than a rewrite:
 - Add `relationships` so trust, fear, leverage, promises, and debts become first-class state.
 - Move memory-like character lines toward rows with `importance`, `decay_score`, and `visibility`.
 - Treat narrator surprise as visibility filtering, not as an all-purpose hidden-secret field.
-- Run dormant-NPC reverie work as background maintenance, not inside the chat hot path.
+- Run dormant-NPC reverie work as background maintenance, not inside the chat hot path. (Now realized via the `BackgroundTasks` port — `infrastructure/background/process-background-tasks.ts`, drained on SIGTERM — so post-turn reconciliation/reverie/promotion run off the streaming hot path.)
 
 The important pushback: the current project prompts should not be replaced by generic "Westworld-style" sketches. They already encode project-specific constraints around diegesis, geography, journey state, player canon, service NPCs, and prose shape. v2 should add narrow clauses for intent/outcome tracking and visibility, not discard the accumulated prompt work.
 
 ## Useful Code Entry Points
 
-- `src/lib/migrations.ts`: schema history and current table definitions.
-- `src/lib/db.ts`: shared prepared statements and read/write helpers.
-- `src/lib/worlds.ts`: world creation and initial seed rows.
-- `src/lib/world-state.ts`: narrator/inspector state assembly and prompt formatting.
-- `src/lib/npc-promotion.ts`: deterministic NPC appearance counting and tier changes.
-- `src/lib/npc-agent.ts`: pre-narrator agent-tier NPC planning and updates.
-- `src/lib/archivist.ts`: patch schemas, extraction, correction path, upserts, merges, and apply transaction.
-- `src/app/api/chat/route.ts`: main turn orchestration.
+All paths are under `packages/server/src/`.
+
+- `lib/migrations.ts`: schema history and current table definitions (migration 25).
+- `infrastructure/persistence/sqlite/`: the 14 repository adapters + `unit-of-work.sqlite.ts` (raw `better-sqlite3`). Mongo siblings live in `infrastructure/persistence/mongo/`.
+- `domain/entities/`: row TYPE definitions (moved off `lib/db.ts`).
+- `lib/worlds.ts`: world creation and initial seed rows (mid-migration).
+- `lib/world-state.ts`: narrator/inspector state assembly and prompt formatting.
+- `domain/services/npc-promotion.ts`: deterministic NPC appearance counting and tier changes (pure).
+- `domain/services/` (`story-signal.ts`, `reverie-flare.ts`, `occupancy-sim.ts`, `name-resolution.ts`, `character-dedup.ts`, `patch-sanitizer.ts`, `scene-transition.ts`, …): the pure domain logic carved out of the old god files.
+- `lib/npc-agent.ts`: pre-narrator agent-tier NPC planning and updates (mid-migration); intents persist through `domain/ports/npc-intent-repository.ts`.
+- `lib/archivist.ts`: patch schemas, extraction, correction path, upserts, merges, and apply transaction (mid-migration).
+- `domain/ports/narrator.ts` + `infrastructure/narrator/narrate-turn.ts`: NarratorPort and its Grok narration-stream adapter.
+- `application/use-cases/advance-turn.ts`: the turn pipeline as a use case (orchestration only). `app/api/chat/route.ts` is now a thin adapter calling it (the old 593-line god endpoint is gone).
+- `infrastructure/llm/model-registry.ts` + `pricing.ts`: the single source of model IDs (`NARRATOR_MODEL = 'grok-4.3'`, `HAIKU_MODEL = 'claude-haiku-4-5-20251001'`) and pricing.
+- `composition/container.ts`: the only module that constructs concrete adapters and selects the store by `PERSISTENCE`.
 - `prompts/narrator-system.md`: narrator behavioral contract.
 - `prompts/npc-agent-system.md`: NPC agent behavioral contract.
 - `prompts/archivist-system.md`: narrator-turn extraction contract.

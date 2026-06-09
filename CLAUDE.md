@@ -2,8 +2,6 @@
 
 AI-powered multiplayer interactive novel engine. Persistent world, multi-agent narrator system, living wiki + timeline.
 
-> **MVP sprint in progress** (target 2026-05-25). Until the exit criteria in `docs/plans/milestones/mvp-sprint.md` are met, the stack and rules in this file describe the **post-sprint target**, not what's being built right now. Sprint reality: SQLite + raw `better-sqlite3`, no Drizzle, no migrations, no Docker; one `turns` table with autoincrement `id`; one streaming `POST /api/chat` route; Claude **Sonnet 4.6** (`claude-sonnet-4-6`); no auth, no rate limiting, no test suite. Read `docs/plans/milestones/mvp-sprint.md` for the explicit cuts and accepted tradeoffs before suggesting anything from the long-term stack below.
-
 Architecture and design detail lives in `docs/` — read the relevant doc before non-trivial changes:
 - `docs/specs/system-architecture.md` — overall structure, project layout
 - `docs/specs/database-design.md` — full schema
@@ -22,21 +20,22 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 ## Working in this repo
 
 - **State assumptions before coding.** If the request has multiple reasonable readings, surface them rather than picking silently. If you don't know which agent/table/phase a change belongs in, ask.
-- **Define "done" before starting.** A narrator change isn't done until you've streamed a turn end-to-end in the browser. A schema change isn't done until `db:generate` + `db:migrate` succeed and queries still typecheck. A new agent isn't done until its prompt template is in `prompts/` and a real call returns valid output.
+- **Define "done" before starting.** A narrator change isn't done until you've streamed a turn end-to-end in the browser. A schema change isn't done until the migration in `packages/server/src/lib/migrations.ts` applies cleanly on boot, the matching Mongo model/index under `infrastructure/persistence/mongo/models` is updated, and queries still typecheck. A new agent isn't done until its prompt template is in `prompts/` and a real call returns valid output.
 - **Stay in your lane.** Each agent has its own prompt, context, and Zod schema. Don't merge them, don't share full prompts, don't let the narrator see what the archivist sees.
+- **Simplicity first.** Minimum code that solves the problem. Nothing speculative. If you write 200 lines and it could be 50, rewrite it.
 - **Respect the budget.** Context assembler enforces 8K input / 1K output per narrator call. System prompt, authoritative state, and player action are pinned; recent turns + retrieved memories drop first. Don't bypass it.
 
 ## Architecture & separation of concerns
 
 This project is organized as a **hexagonal architecture (ports & adapters)**. The full design and rationale live in `docs/specs/hexagonal-architecture-blueprint.md` — read it before non-trivial work. The rules below are the short, binding form, and they override convenience.
 
-**The one rule: dependencies point inward.** The domain depends on nothing; everything depends on the domain. This is the *target* layout — today most logic still lives in `src/lib/`; new and refactored code adopts the layered layout below and moves violating code toward it.
+**The one rule: dependencies point inward.** The domain depends on nothing; everything depends on the domain. This layout is now **realized** under `packages/server/src/` (the `onion-arch-refactor` branch). A few legacy SQL-owning modules still live in `packages/server/src/lib/` and are being strangled behind ports — new and refactored code adopts the layered layout below; never add to `lib/`. (All paths below are relative to `packages/server/src/`.)
 
-- `src/domain/` — **pure.** Entities, value objects, pure domain services (context assembly, reverie flaring, occupancy sim, NPC promotion, patch sanitization, classifier rules, world clock, dedup), and **ports** (interfaces). No `import` of `next`, `ai`, `@ai-sdk/*`, `better-sqlite3`, `fs`, `fetch`, or a wall-clock. Deterministic, no I/O.
-- `src/application/` — **use cases** (`AdvanceTurn`, `CreateWorld`, `ApplyCorrection`, `LoadHistory`, …). Orchestration and transaction boundaries only. May import `domain/`; never SQL, an SDK, or a framework.
-- `src/infrastructure/` — **driven adapters** implementing ports: repositories (SQLite today; Postgres a sibling), LLM providers, embeddings, geocoder, TTS, clock, logger. **All model IDs and pricing live here.**
-- `src/app/` + `src/components/` — **driving adapters.** A route handler / Server Action parses input, calls a use case, pipes the result, and owns no logic. React renders and reads via a query port; it never writes SQL.
-- `src/composition/` — the **only** place adapters meet use cases (the dependency-injection wiring root).
+- `domain/` — **pure.** Entities (`domain/entities/`), pure domain services (`domain/services/`: name resolution, reverie flaring, occupancy sim, NPC promotion, patch sanitization, classifier rules, scene-transition, story-signal, world clock, dedup, turn numbering, memorable-fact provenance), and **ports** (`domain/ports/`, 20 interfaces). No `import` of `next`, `ai`, `@ai-sdk/*`, `better-sqlite3`, `mongoose`, `fs`, `fetch`, or a wall-clock. Deterministic, no I/O.
+- `application/use-cases/` — **use cases** (`AdvanceTurn`, `ApplyCorrection`, `InspectWorld`, `ListCorrections`, `LoadHistory`, `RecordTtsUsage`, `SummarizeUsage`, `SynthesizeNarration`). Orchestration and transaction boundaries only. May import `domain/`; never SQL, an SDK, or a framework.
+- `infrastructure/` — **driven adapters** implementing ports: repositories (SQLite live default in `persistence/sqlite/`; a Mongo/Mongoose set is a sibling in `persistence/mongo/` behind `PERSISTENCE=mongo`), the narrator (`narrator/`), TTS (`tts/`), clock, logger, background tasks. **All model IDs and pricing live in `infrastructure/llm/`.**
+- `app/` + `components/` + `server/render/` — **driving adapters.** A route handler / Server Action parses input, calls a use case, pipes the result, and owns no logic. React renders and reads via a query port; it never writes SQL.
+- `composition/container.ts` — the **only** place adapters meet use cases (the dependency-injection wiring root; selects the live store by `PERSISTENCE`).
 
 **Separation-of-concerns rules — one concern per module:**
 
@@ -48,23 +47,28 @@ This project is organized as a **hexagonal architecture (ports & adapters)**. Th
 
 **The leak test:** if adding one feature forces you to edit two layers at once, a concern has leaked — re-cut the boundary before writing the feature.
 
-**Mid-migration discipline.** Some shipped code still violates this — the 594-line `src/app/api/chat/route.ts` god endpoint, and `src/lib/db.ts` imported directly everywhere. **Do not add to them.** New logic goes in a domain service or a use case; new persistence goes behind a repository port; new modules must not `import` `db.ts` or an SDK directly. When you touch a violating file, move it one step toward the layering (blueprint §10). Cross-layer imports are forbidden and should fail CI (`dependency-cruiser` / `import/no-restricted-paths`) — don't introduce them.
+**Mid-migration discipline.** The big offenders are gone — the 593-line chat god endpoint is now the `AdvanceTurn` use case (`POST /api/chat` is a thin adapter), and model IDs/pricing are consolidated in `infrastructure/llm/`. What remains: a handful of SQL-owning modules in `packages/server/src/lib/` (e.g. `db.ts`, `world-state.ts`, `npc-agent.ts`) still being strangled behind ports, plus two **manual gates** — the Mongo production cutover (P3) and the eventual SQLite deletion (P7). **Do not add to `lib/`.** New logic goes in a domain service or a use case; new persistence goes behind a repository port; new modules must not `import` `db.ts` or an SDK directly. When you touch a violating file, move it one step toward the layering (blueprint §10). Cross-layer imports are forbidden and fail CI (`dependency-cruiser` — 11 boundary rules + `server-only` + grep guards, run as `npm run depcruise` / pretest) — don't introduce them.
 
 ## Tech Stack
 
-Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (`@ai-sdk/anthropic`) · Grok 4.3 (narrator/seeder/actor) + Haiku (compiler/linter/archivist/conductor) · PostgreSQL 17 + pgvector · Drizzle ORM (postgres-js driver) · Zod · Voyage AI embeddings (Phase 2+) · NextAuth.js (Phase 5+)
+npm-workspace monorepo — `@chronicles/server` (the Next.js app) + `@chronicles/contracts` (shared Zod schemas + the pure sentence-splitter) · Next.js 15 (App Router) · TypeScript · Tailwind · Vercel AI SDK (`@ai-sdk/anthropic` + `@ai-sdk/xai`) · Grok 4.3 (`grok-4.3` — narrator/seeder) + Haiku (`claude-haiku-4-5-20251001` — archivist/classifier/intent-reconciler/npc-agent/region-extractor/world-generator) · **SQLite via raw `better-sqlite3`** (live default, migrates on boot) + **MongoDB/Mongoose** behind `PERSISTENCE=mongo` (implemented, not yet cut over) · Zod · xAI TTS · `dependency-cruiser` onion-boundary CI · Voyage AI embeddings (Phase 2+, unbuilt)
+
+> Postgres 17 + pgvector + Drizzle ORM was the earlier target and is **superseded** — the chosen persistence path is SQLite (live) → MongoDB (behind a flag).
 
 ## Commands
 
-- `docker compose up -d` — start Postgres
+All root scripts proxy to `@chronicles/server` via npm workspaces.
+
 - `npm run dev` — start Next.js dev server
 - `npm run build` — production build
 - `npm run lint` — ESLint
 - `npm run type-check` — TypeScript check (`tsc --noEmit`)
-- `npm run db:generate` — generate migration from schema changes
-- `npm run db:migrate` — apply pending migrations
-- `npm run db:studio` — open Drizzle Studio
-- `npm test` — run tests
+- `npm test` — Vitest (SQLite default; `pretest` runs `npm run depcruise`)
+- `npm run test:mongo` — Vitest Mongo suite against a `MongoMemoryReplSet`
+- `npm run depcruise` — enforce onion boundaries (dependency-cruiser)
+- `docker compose up -d` — start the MongoDB replica set (only needed for `PERSISTENCE=mongo` experimentation; the default SQLite path needs no DB process)
+
+> SQLite has no separate migrate step — `packages/server/src/lib/migrations.ts` runs on boot. There is no Drizzle / `db:generate` / `db:migrate` / `db:studio`.
 
 ## Code Style
 
@@ -96,17 +100,19 @@ Next.js 15 (App Router) · TypeScript · Tailwind + shadcn/ui · Vercel AI SDK (
 ## Environment
 
 - `.env.local` for local dev (never commit); `.env.example` documents required variables
-- Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`
-- Phase 2+: `VOYAGE_API_KEY`
+- Required: `ANTHROPIC_API_KEY` (Haiku extractors), `XAI_API_KEY` (Grok narrator + TTS)
+- `PERSISTENCE=sqlite|mongo` (default `sqlite`). SQLite path: optional `DATABASE_PATH` overrides the local DB file. Mongo path: `DATABASE_URL` is the replica-set connection string (and requires `await initContainer()` at boot)
+- Optional tuning: `DAILY_TOKEN_LIMIT`, `TTS_VOICE`, `TTS_SPEED`, `MAP_ROUTE_PROVIDER`, `MAP_TOOL_USER_AGENT`
+- Phase 2+: `VOYAGE_API_KEY` (embeddings, unbuilt)
 
 ## Release version bump
 
-The header at `src/app/page.tsx:17` reads `pkg.version` from `package.json` — that one number is the user's only at-a-glance trust signal for "what's running". Treat it as load-bearing.
+The header at `packages/server/src/app/page.tsx:23` reads `pkg.version` from `packages/server/package.json` — that one number is the user's only at-a-glance trust signal for "what's running". Treat it as load-bearing. (In the monorepo the root, `@chronicles/server`, and `@chronicles/contracts` versions move together — currently `0.1.0`.)
 
 Whenever you bump the project version:
 
 1. **Bump on the release branch, not post-merge.** Same branch as the release PR, ideally as the first or last commit. Never on `main` after the merge — that creates a window where prod runs new code under the old version string.
-2. **Bump both files.** `package.json` *and* `package-lock.json` (both the top-level `"version"` and the one under `"packages": { "": { ... } }`). Single commit. Don't rely on `npm install` to fix the lockfile after the fact.
+2. **Bump the workspace versions together.** `packages/server/package.json` (the version-of-record the header reads) plus the root and `@chronicles/contracts` `package.json`, *and* `package-lock.json` (the top-level `"version"` and the matching `"packages": { ... }` entries). Single commit. Don't rely on `npm install` to fix the lockfile after the fact.
 3. **Restart the dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev` and start it again, then visually confirm the header on `/` shows the new version. Same goes for Railway: a redeploy is required.
 4. **Update the milestone exit criteria.** Each milestone doc lists "`package.json` reads `vX.Y.Z` on the release branch" as an exit criterion — keep that pattern (see `docs/plans/_template-milestone.md`).
 
@@ -114,9 +120,9 @@ If you ever see the header showing a different version than `package.json` on di
 
 ## Common Gotchas
 
-- Database must be running (`docker compose up -d`) before dev server or tests
-- Drizzle schema changes require `npm run db:generate` then `npm run db:migrate`
-- Hot-reload breaks on ORM model changes — restart dev server
-- Hot-reload also breaks on `package.json` changes (e.g. version bumps) — restart dev server
-- pgvector extension must exist before vector column migrations run
-- The `postgres` package (postgres-js) is used, NOT `pg` — different API
+- The default SQLite path needs no DB process — `migrations.ts` runs on boot. Only `PERSISTENCE=mongo` needs `docker compose up -d` (the Mongo replica set) first
+- `PERSISTENCE=mongo` requires `await initContainer()` at boot (the Mongo connection is async); the default SQLite path builds the container lazily and never loads `mongoose`
+- Tests default to SQLite (`npm test`); the Mongo adapter suite is separate (`npm run test:mongo`) and spins up `mongodb-memory-server`
+- `better-sqlite3` is a native module pinned in `serverExternalPackages` — never import it outside `infrastructure/persistence/sqlite/` (dependency-cruiser enforces this); same for `mongoose` outside `persistence/mongo/`
+- Hot-reload breaks on `package.json` changes (e.g. version bumps) — restart the dev server
+- `dependency-cruiser` boundary failures surface in `npm test` (via `pretest`) — fix the import direction, don't suppress the rule
