@@ -15,6 +15,7 @@ import type {
   DramaParticipant,
   DramaPort,
 } from '@/domain/ports/drama-port'
+import { withObjectRetry } from '@/infrastructure/llm/generate-object'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 
 // HaikuDramaPort (starship P3) — the live DramaPort adapter and the ONLY LLM seam
@@ -95,7 +96,8 @@ export class HaikuDramaPort implements DramaPort {
           ]
         : []
 
-    const { object } = await generateObject({
+    const { object } = await withObjectRetry(() =>
+      generateObject({
       model: anthropic(HAIKU_MODEL),
       schema: DramaBeatSchema,
       system: loadDramaBeatPrompt(),
@@ -117,7 +119,8 @@ export class HaikuDramaPort implements DramaPort {
       ]
         .filter((line) => line !== '')
         .join('\n'),
-    })
+      }),
+    )
 
     // Trust-but-verify: clamp the model to the co-located group so a stray id
     // never reaches relationship drift. (The Zod range already bounds delta.)

@@ -13,6 +13,7 @@ import type {
   CrewGeneratorInput,
   GeneratedCrew,
 } from '@/domain/ports/crew-generator'
+import { withObjectRetry } from '@/infrastructure/llm/generate-object'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 
 // GrokCrewGenerator (starship P1) — the live CrewGenerator adapter. One-shot
@@ -90,26 +91,28 @@ export class GrokCrewGenerator implements CrewGenerator {
       ? `The protagonist is named "${playerName}" — do not reuse this name for a crew member.`
       : 'The protagonist is unnamed for now.'
 
-    const { object } = await generateObject({
-      model: xai(NARRATOR_MODEL),
-      schema: CrewSchema,
-      system: loadCrewDressingPrompt(),
-      prompt: [
-        `PREMISE: ${premise}`,
-        '',
-        nameLine,
-        '',
-        `SHIP: ${template.name}`,
-        '',
-        'ROOM MANIFEST (rooms are fixed — reference by key):',
-        roomManifest,
-        '',
-        'CREW SLOTS (one crew member each, in order):',
-        crewSlots,
-        '',
-        'Dress this ship now.',
-      ].join('\n'),
-    })
+    const { object } = await withObjectRetry(() =>
+      generateObject({
+        model: xai(NARRATOR_MODEL),
+        schema: CrewSchema,
+        system: loadCrewDressingPrompt(),
+        prompt: [
+          `PREMISE: ${premise}`,
+          '',
+          nameLine,
+          '',
+          `SHIP: ${template.name}`,
+          '',
+          'ROOM MANIFEST (rooms are fixed — reference by key):',
+          roomManifest,
+          '',
+          'CREW SLOTS (one crew member each, in order):',
+          crewSlots,
+          '',
+          'Dress this ship now.',
+        ].join('\n'),
+      }),
+    )
 
     return object
   }
