@@ -120,8 +120,8 @@ async function main() {
   const roomName = (id) => (id == null ? '(none)' : placeById.get(id)?.name ?? `#${id}`)
 
   // Positions reflect the LAST EXECUTED tick (the loop runs tick = 0..TICKS-1),
-  // so the routine to check against is the band of tick TICKS-1. The world clock,
-  // by contrast, is set to tickToWorldTime(TICKS) — the next band to play.
+  // so the routine to check against is the band of tick TICKS-1 — and the world
+  // clock now matches it (clock follows positions: set to tickToWorldTime(TICKS-1)).
   const finalBand = tickToBand(TICKS - 1)
 
   console.log('')

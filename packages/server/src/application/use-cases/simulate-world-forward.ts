@@ -272,7 +272,13 @@ export async function simulateWorldForward(
     }
   }
 
-  await worlds.setWorldTime(worldId, tickToWorldTime(ticks))
+  // Clock follows positions: persist the band of the LAST LIVED tick (ticks-1),
+  // not the arrival band (ticks), so a joining player reads the same moment the
+  // NPCs are actually positioned for (e.g. crew in their night spots ⇒ clock says
+  // night, not the next morning). No ticks ⇒ nothing simulated, leave the clock.
+  if (ticks > 0) {
+    await worlds.setWorldTime(worldId, tickToWorldTime(ticks - 1))
+  }
 
   return {
     ticks,

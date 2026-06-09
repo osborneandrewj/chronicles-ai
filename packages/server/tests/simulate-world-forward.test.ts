@@ -291,13 +291,14 @@ describe('simulateWorldForward', () => {
     expect(fakes.adjustCalls[0]!.delta).toBeGreaterThan(0)
   })
 
-  it('advances the world clock to the label for N ticks', async () => {
+  it('advances the world clock to the LAST LIVED tick band (clock follows positions)', async () => {
     const fakes = buildFakes(roster, rels)
     await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
-    // 8 ticks → Day 3 morning (4 ticks/day; tick 8 rolls to day 3, band morning).
+    // 8 ticks run as tick 0..7; the last lived tick is 7 → Day 2, night (4 ticks/
+    // day). The clock matches where the NPCs actually ended, not the next band.
     expect(fakes.setWorldTimeCalls).toHaveLength(1)
-    expect(fakes.setWorldTimeCalls[0]).toEqual({ worldId: WORLD_ID, worldTime: 'Day 3 — morning' })
+    expect(fakes.setWorldTimeCalls[0]).toEqual({ worldId: WORLD_ID, worldTime: 'Day 2 — night' })
   })
 
   it('keeps an NPC with a malformed daily_loop at its starting room', async () => {
