@@ -183,6 +183,54 @@ P1 must close the rest **before** seeding/branching on them:
   whatever path reads timeline rows for narrator context — verify the SELECT carries
   them before relying on `provenance === 'sim'`.
 
+## P1 implementation spec (seed pipeline — binding for the build)
+P0 left the write repos as ports only and the place/character repos read-only.
+P1 adds the minimal write surface and the seed use case. Decisions are fixed here
+so the implementation stays coherent.
+
+**Write surface** (extend existing ports + add BOTH SQLite and Mongo adapters —
+CRUD includes create):
+- `WorldRepository.createBounded({ name, premise, initialStateJson, templateId }):
+  Promise<{ id: number }>` — inserts ONLY a `worlds` row with `spatial_mode='bounded'`.
+  It must NOT auto-seed a place/character/scene the way `lib/worlds.createWorld`
+  does for open worlds (the seeder writes its own rooms/crew).
+- `PlaceRepository.add({ world_id, name, description, kind, deck, layout_hint }):
+  Promise<{ id: number }>`.
+- `CharacterRepository.add({ world_id, name, description, is_player, current_place_id,
+  role, active_goal, daily_loop }): Promise<{ id: number }>` (daily_loop is JSON text).
+- `PlaceConnectionRepository.add` and `RelationshipRepository.upsert` already exist as
+  ports — implement their SQLite + Mongo adapters (neither has one yet).
+- Read-path fix: extend `lib/world-state`'s `Place` type + its SELECT to carry `deck`
+  + `layout_hint` so seeded decks read back (the flagged Place prerequisite).
+
+**CrewGenerator port** (`domain/ports/crew-generator.ts`) — the Grok seam:
+- In: `{ template: DeckPlanTemplate, premise: string, playerName?: string }`.
+- Out (Zod-validated in the adapter): `{ shipName, premise, roomDressing: [{ key,
+  description }], crew: [{ role, name, persona, goal, homeRoomKey, dailyLoop }] (3-5),
+  relationships: [{ fromRole, toRole, kind, valence (-1..1) }] }`.
+- Impls: `GrokCrewGenerator` (`infrastructure/world-gen/`) — `generateObject` with
+  `grok-4.3` via `@ai-sdk/xai`, model id from `infrastructure/llm/`, prompt from
+  `prompts/crew-dressing.md`. Plus a deterministic `StubCrewGenerator` for tests +
+  the offline script (no spend, no key).
+
+**SeedBoundedWorld use case** (`application/use-cases/seed-bounded-world.ts`):
+- Deps: `{ decks, crew, worlds, places, placeConnections, characters, relationships,
+  clock }`. Pure orchestration — no SQL/SDK.
+- Flow: getTemplate → createBounded world → write rooms (map `room.key` → new place id),
+  apply roomDressing → write edges (map keys → ids) → crew.generate → write crew
+  (`homeRoomKey` → `current_place_id`, daily_loop) → upsert relationships (role →
+  character id) → validate with `deck-graph.isConnected` (throw if not) → return
+  `{ worldId, placeIds, characterIds }`.
+
+**Offline script** `scripts/seed-ship.mjs`: build the container, swap in
+`StubCrewGenerator`, run `SeedBoundedWorld` against a temp SQLite DB
+(`DATABASE_PATH=/tmp/...`), print rooms + graph + crew + relationships, assert the
+graph is connected and crew count is 3-5. The real `GrokCrewGenerator` is wired in the
+container; a live Grok smoke test is a manual follow-up, not part of the automated run.
+
+**Deferred to P4:** the initial active scene + world cursor (needed for `/play`, not
+for the P1 "DB holds a connected ship + crew" proof).
+
 ## Risks / things to validate
 - **daily_loop place references** must point at real seeded rooms, not free text —
   enforce at seed time.
