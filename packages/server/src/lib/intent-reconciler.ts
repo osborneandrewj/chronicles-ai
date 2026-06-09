@@ -2,14 +2,12 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import type { CharacterRepository } from '@/domain/ports/character-repository'
+import type { NpcIntentRepository } from '@/domain/ports/npc-intent-repository'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
-import { db } from '@/lib/db'
-import {
-  attachIntentsToNarratorTurn,
-  getIntentsForPlayerTurn,
-  reconcileIntentsBatch,
-  type IntentDisposition,
-  type NpcIntentRow,
+import type {
+  IntentDisposition,
+  NpcIntentRow,
 } from '@/lib/npc-intents'
 
 // v0.6.9 — light reconciliation pass. Runs after the narrator turn is
@@ -76,12 +74,16 @@ export async function reconcileNpcIntentsForTurn({
   playerTurnId,
   narratorTurnId,
   narratorText,
+  characters,
+  npcIntents,
 }: {
   playerTurnId: number
   narratorTurnId: number
   narratorText: string
+  characters: CharacterRepository
+  npcIntents: NpcIntentRepository
 }): Promise<ReconciliationRunResult> {
-  const intents = getIntentsForPlayerTurn(playerTurnId).filter(
+  const intents = (await npcIntents.forPlayerTurn(playerTurnId)).filter(
     (row) => row.narrator_disposition === null,
   )
   if (intents.length === 0) {
@@ -95,17 +97,21 @@ export async function reconcileNpcIntentsForTurn({
 
   // Attach the narrator turn id up front so the row is at least cross-
   // referenced even if the LLM call fails.
-  attachIntentsToNarratorTurn(
+  await npcIntents.attachToNarratorTurn(
     intents.map((row) => row.id),
     narratorTurnId,
   )
 
   const characterNameById = new Map<number, string>()
-  const nameStmt = db.prepare<[number]>('SELECT name FROM characters WHERE id = ?')
+  const worldId = intents[0].world_id
+  const knownCharacters = await characters.forWorld(worldId)
+  const nameById = new Map(knownCharacters.map((c) => [c.id, c.name]))
   for (const row of intents) {
     if (characterNameById.has(row.character_id)) continue
-    const c = nameStmt.get(row.character_id) as { name: string } | undefined
-    characterNameById.set(row.character_id, c?.name ?? `character #${row.character_id}`)
+    characterNameById.set(
+      row.character_id,
+      nameById.get(row.character_id) ?? `character #${row.character_id}`,
+    )
   }
 
   const prompt = buildReconcilerPrompt(intents, characterNameById, narratorText)
@@ -129,7 +135,7 @@ export async function reconcileNpcIntentsForTurn({
     // reconciler should echo our ids back, but defense-in-depth is cheap.
     const validIds = new Set(intents.map((row) => row.id))
     const normalized = object.results.filter((r) => validIds.has(r.intent_id))
-    reconcileIntentsBatch(
+    await npcIntents.reconcileBatch(
       normalized.map((r) => ({
         intentId: r.intent_id,
         narratorTurnId,

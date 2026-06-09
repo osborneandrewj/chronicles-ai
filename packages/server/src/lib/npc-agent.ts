@@ -2,24 +2,35 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import type {
+  CharacterRepository,
+  NpcIntentRepository,
+  PlaceRepository,
+  ReverieRepository,
+  UnitOfWork,
+  WorldRepository,
+} from '@/domain/ports'
+import type { AgentNpcFields } from '@/domain/ports/character-repository'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
-import { db } from '@/lib/db'
 import { tolerateNulls } from '@/lib/llm-schema'
 import { appendFactWithProvenance, stripFactProvenance } from '@/lib/memorable-facts'
-import {
-  getRecentIntentOutcomesForCharacter,
-  insertNpcIntent,
-  type IntentVisibility,
-} from '@/lib/npc-intents'
+import { type IntentVisibility } from '@/lib/npc-intents'
 import { loadPrompt } from '@/lib/prompt-files'
-import {
-  addReveriesForCharacter,
-  canMintReverie,
-  getReveriesForCharacters,
-  reverieMintState,
-} from '@/lib/reveries'
+import { canMintReverie } from '@/lib/reveries'
 import { worldTimeBand } from '@/lib/world-time'
+
+// The injected persistence ports the NPC agent reads + writes through (P5b
+// strangle). The SQLite adapters delegate to the same byte-identical SQL the
+// helper used to issue inline; under PERSISTENCE=mongo they hit the collections.
+export type NpcAgentDeps = {
+  characters: CharacterRepository
+  npcIntents: NpcIntentRepository
+  places: PlaceRepository
+  reveries: ReverieRepository
+  unitOfWork: UnitOfWork
+  worlds: WorldRepository
+}
 
 // Per-NPC update emitted by the NPC agent. Each field is independently
 // optional; only fields named in the patch are touched. Names are matched
@@ -260,74 +271,6 @@ export function shouldSkipRoutineTick(
 
 export const NPC_AGENT_MODEL = HAIKU_MODEL
 
-type AgentNpcRow = {
-  id: number
-  name: string
-  description: string | null
-  personal_goals: string | null
-  current_focus: string | null
-  recent_activity: string | null
-  private_beliefs: string | null
-  reveries: string | null
-  relationship_to_player: string | null
-  long_term_agenda: string | null
-  tool_access: string | null
-  active_goal: string | null
-  current_attitude: string | null
-  current_place_id: number | null
-  current_place_name: string | null
-  agency_level: string
-  last_agent_tick_turn_id: number | null
-  in_transit_to_place_id: number | null
-  in_transit_to_name: string | null
-  arrival_world_time: string | null
-  last_known_situation: string | null
-  daily_loop: string | null
-}
-
-const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
-  SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
-         c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
-         c.reveries, c.daily_loop,
-         c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
-         c.last_agent_tick_turn_id,
-         c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
-         (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name,
-         (SELECT name FROM places WHERE id = c.in_transit_to_place_id) AS in_transit_to_name
-    FROM characters c
-   WHERE c.world_id = ?
-     AND c.agency_level IN ('local', 'nearby', 'distant', 'agent')
-     AND c.is_player = 0
-     AND c.status != 'dead'
-     AND (
-       c.agency_level IN ('local', 'agent')
-       OR c.last_agent_tick_turn_id IS NULL
-       OR (c.agency_level = 'nearby' AND ? - c.last_agent_tick_turn_id >= 2)
-       OR (c.agency_level = 'distant' AND ? - c.last_agent_tick_turn_id >= 5)
-       OR (? - c.last_agent_tick_turn_id >= 5)
-     )
-`)
-
-const playerLocationStmt = db.prepare<[number]>(`
-  SELECT c.current_place_id,
-         (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name
-    FROM characters c
-   WHERE c.world_id = ? AND c.is_player = 1
-   LIMIT 1
-`)
-
-const worldTimeStmt = db.prepare<[number]>('SELECT world_time FROM worlds WHERE id = ?')
-const settingRegionStmt = db.prepare<[number]>(
-  'SELECT setting_region FROM worlds WHERE id = ?',
-)
-const placesForWorldStmt = db.prepare<[number]>(
-  `SELECT id, name, osm_street, osm_neighborhood, osm_display_name, geo_status
-     FROM places WHERE world_id = ? ORDER BY id ASC`,
-)
-const setLastAgentTickStmt = db.prepare<[number, number]>(
-  `UPDATE characters SET last_agent_tick_turn_id = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-
 export type PlannedActionWithIntent = PlannedAction & {
   intent_id: number
   character_id: number
@@ -339,6 +282,7 @@ export type PlannedActionWithIntent = PlannedAction & {
 // `tickTurnId` is the player-turn id used for [t:N] provenance on activity
 // log entries — the narrator turn doesn't exist yet.
 export async function runNpcAgentTick(
+  deps: NpcAgentDeps,
   worldId: number,
   tickTurnId: number,
   premise: string,
@@ -349,27 +293,28 @@ export async function runNpcAgentTick(
   plans: PlannedActionWithIntent[]
   usage: LanguageModelUsage
 } | null> {
-  const agents = agentNpcsStmt.all(worldId, tickTurnId, tickTurnId, tickTurnId) as AgentNpcRow[]
+  const { characters, npcIntents, places, reveries, worlds } = deps
+
+  const agents = await characters.agentNpcsForTick(worldId, tickTurnId)
   if (agents.length === 0) return null
 
-  const player = playerLocationStmt.get(worldId) as
-    | { current_place_id: number | null; current_place_name: string | null }
-    | undefined
-  const { world_time: worldTime } = (worldTimeStmt.get(worldId) as { world_time: string | null }) ?? {
-    world_time: null,
+  const knownPlaces = await places.forWorld(worldId)
+  const placesByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
+
+  const allChars = await characters.forWorld(worldId)
+  const playerChar = allChars.find((c) => c.is_player === 1) ?? null
+  const playerPlaceName =
+    playerChar?.current_place_id != null
+      ? knownPlaces.find((p) => p.id === playerChar.current_place_id)?.name ?? null
+      : null
+  const player = {
+    current_place_id: playerChar?.current_place_id ?? null,
+    current_place_name: playerPlaceName,
   }
-  const { setting_region: settingRegion } =
-    (settingRegionStmt.get(worldId) as { setting_region: string | null }) ?? {
-      setting_region: null,
-    }
-  const knownPlaces = placesForWorldStmt.all(worldId) as Array<{
-    id: number
-    name: string
-    osm_street: string | null
-    osm_neighborhood: string | null
-    osm_display_name: string | null
-    geo_status: string
-  }>
+
+  const cursor = await worlds.cursor(worldId)
+  const worldTime = cursor.world_time
+  const settingRegion = (await worlds.getWorld(worldId))?.setting_region ?? null
 
   const priorNarration = recentTurns
     .filter((t) => t.role === 'assistant')
@@ -382,7 +327,7 @@ export async function runNpcAgentTick(
   // line in the STATE block. The raw `agents` fetch stays intact (used below
   // for last_agent_tick bookkeeping decisions); `tickable` is the subset we
   // actually send to the model and update this turn.
-  const playerPlaceId = player?.current_place_id ?? null
+  const playerPlaceId = player.current_place_id
   const tickable = agents.filter(
     (a) =>
       !shouldSkipRoutineTick(
@@ -399,7 +344,14 @@ export async function runNpcAgentTick(
 
   // Reveries now live in their own table (append-only). Batch-load them once so
   // each NPC's charged memories surface as plain text in the agent context.
-  const reveriesByChar = getReveriesForCharacters(tickable.map((a) => a.id))
+  const reveriesByChar = await reveries.forCharacters(tickable.map((a) => a.id))
+
+  // v0.6.9 — recent reconciled intent outcomes, pre-fetched per NPC (the per-row
+  // map below is sync, so the awaited reads happen here). Newest-first, capped.
+  const outcomesByChar = new Map<number, Awaited<ReturnType<typeof npcIntents.recentOutcomesForCharacter>>>()
+  for (const a of tickable) {
+    outcomesByChar.set(a.id, await npcIntents.recentOutcomesForCharacter(a.id, 3))
+  }
 
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
@@ -426,7 +378,7 @@ export async function runNpcAgentTick(
     current_attitude: a.current_attitude,
     current_place: a.current_place_name,
     present_with_protagonist:
-      a.current_place_id !== null && a.current_place_id === player?.current_place_id,
+      a.current_place_id !== null && a.current_place_id === player.current_place_id,
     recent_activity: lastNLines(stripFactProvenance(a.recent_activity), 3),
     // Journey state: where they're heading (if anywhere), when they should
     // arrive, and a short present-tense snapshot of physical state right now.
@@ -440,7 +392,7 @@ export async function runNpcAgentTick(
     // three lets the agent react to friction with the narrator (e.g. stop
     // planning a move the narrator keeps overriding) rather than pretending
     // every plan landed cleanly.
-    recent_plan_outcomes: getRecentIntentOutcomesForCharacter(a.id, 3).map((row) => ({
+    recent_plan_outcomes: (outcomesByChar.get(a.id) ?? []).map((row) => ({
       planned_action: row.planned_action,
       narrator_disposition: row.narrator_disposition,
       narrator_interpretation: row.narrator_interpretation,
@@ -468,7 +420,7 @@ export async function runNpcAgentTick(
         content: [
           `WORLD TIME: ${worldTime ?? '(unset)'}`,
           `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
-          `PROTAGONIST IS AT: ${player?.current_place_name ?? '(unknown)'}`,
+          `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
           '',
           'AGENT NPCs:',
           JSON.stringify(npcContext, null, 2),
@@ -486,9 +438,9 @@ export async function runNpcAgentTick(
     ],
   })
 
-  applyNpcAgentPatch(worldId, tickTurnId, object)
+  await applyNpcAgentPatch(deps, worldId, tickTurnId, object)
   for (const agent of tickable) {
-    setLastAgentTickStmt.run(tickTurnId, agent.id)
+    await characters.setLastAgentTick(tickTurnId, agent.id)
   }
 
   // Persist each planned action as an npc_intents row. Plans targeting NPCs
@@ -496,15 +448,7 @@ export async function runNpcAgentTick(
   // character_id, and an unrecognized name should never be reified). The
   // narrator turn id is filled in post-stream by the reconciler.
   const agentsByLower = new Map(tickable.map((a) => [a.name.toLowerCase(), a]))
-  const allCharsForResolve = db
-    .prepare<[number]>(
-      'SELECT id, name FROM characters WHERE world_id = ?',
-    )
-    .all(worldId) as Array<{ id: number; name: string }>
-  const charsByLower = new Map(allCharsForResolve.map((c) => [c.name.toLowerCase(), c.id]))
-  const placesByLower = new Map(
-    knownPlaces.map((p) => [p.name.toLowerCase(), p.id]),
-  )
+  const charsByLower = new Map(allChars.map((c) => [c.name.toLowerCase(), c.id]))
 
   const plansOut: PlannedActionWithIntent[] = []
   for (const plan of object.planned_actions ?? []) {
@@ -516,7 +460,7 @@ export async function runNpcAgentTick(
     const targetPlaceId = plan.target_place_name
       ? placesByLower.get(plan.target_place_name.toLowerCase()) ?? null
       : null
-    const intentId = insertNpcIntent({
+    const intentId = await npcIntents.insert({
       worldId,
       characterId: agent.id,
       playerTurnId: tickTurnId,
@@ -537,73 +481,38 @@ export async function runNpcAgentTick(
 
 // ---- Patch application ------------------------------------------------------
 
-const findAgentNpcByNameStmt = db.prepare<[number, string]>(
-  `SELECT id, recent_activity FROM characters
-    WHERE world_id = ?
-      AND lower(name) = lower(?)
-      AND agency_level IN ('local', 'nearby', 'distant', 'agent')
-      AND is_player = 0`,
-)
-const findPlaceByNameStmt = db.prepare<[number, string]>(
-  'SELECT id FROM places WHERE world_id = ? AND lower(name) = lower(?)',
-)
-const setFocusStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET current_focus = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setActivityStmt = db.prepare<[string | null, number]>(
-  `UPDATE characters SET recent_activity = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setPlaceStmt = db.prepare<[number, number]>(
-  `UPDATE characters SET current_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setPersonalGoalsStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET personal_goals = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setPrivateBeliefsStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET private_beliefs = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setDailyLoopIfEmptyStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET daily_loop = ?, updated_at = datetime('now')
-     WHERE id = ? AND (daily_loop IS NULL OR trim(daily_loop) = '')`,
-)
-const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setLongTermAgendaStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET long_term_agenda = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setToolAccessStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET tool_access = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setInTransitToStmt = db.prepare<[number | null, number]>(
-  `UPDATE characters SET in_transit_to_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setArrivalWorldTimeStmt = db.prepare<[string | null, number]>(
-  `UPDATE characters SET arrival_world_time = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-const setLastKnownSituationStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET last_known_situation = ?, updated_at = datetime('now') WHERE id = ?`,
-)
-
-export function applyNpcAgentPatch(
+export async function applyNpcAgentPatch(
+  deps: NpcAgentDeps,
   worldId: number,
   narratorTurnId: number,
   patch: NpcAgentPatch,
-): void {
+): Promise<void> {
   const updates = patch.npc_updates ?? []
   if (updates.length === 0) return
 
-  const tx = db.transaction(() => {
+  const { characters, places, reveries, unitOfWork } = deps
+
+  // Resolve place-name → id once (findPlaceByNameStmt matched ANY place in the
+  // world by lower-name). The agent only relocates within the known set.
+  const knownPlaces = await places.forWorld(worldId)
+  const placeIdByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
+
+  // Single transaction boundary (mirrors the SQLite db.transaction the patch
+  // applier used to wrap the whole loop). The Mongo sibling threads a session.
+  await unitOfWork.run(async () => {
     for (const u of updates) {
-      const existing = findAgentNpcByNameStmt.get(worldId, u.name) as
-        | { id: number; recent_activity: string | null }
-        | undefined
+      const existing = await characters.findAgentNpcByName(worldId, u.name)
       // Silently drop updates targeting non-agent NPCs, missing NPCs, or the
       // protagonist. This is a prompt-failure safety net, not data corruption.
       if (!existing) continue
 
+      // Collect the per-field writes (each was its own UPDATE; the adapter
+      // persists only the present keys). daily_loop + reveries have their own
+      // conditional paths and stay out of this patch.
+      const fields: AgentNpcFields = {}
+
       if (u.current_focus !== undefined) {
-        setFocusStmt.run(u.current_focus, existing.id)
+        fields.current_focus = u.current_focus
       }
       if (u.activity_append !== undefined) {
         const next = appendFactWithProvenance(
@@ -614,65 +523,63 @@ export function applyNpcAgentPatch(
         // appendFactWithProvenance returns null when the append is empty;
         // null would clobber existing activity to "no change" semantics —
         // skip the write entirely in that case.
-        if (next !== null) setActivityStmt.run(next, existing.id)
+        if (next !== null) fields.recent_activity = next
       }
       if (u.current_place_name !== undefined) {
-        const place = findPlaceByNameStmt.get(worldId, u.current_place_name) as
-          | { id: number }
-          | undefined
-        if (place) setPlaceStmt.run(place.id, existing.id)
+        const placeId = placeIdByLower.get(u.current_place_name.toLowerCase())
+        if (placeId !== undefined) fields.current_place_id = placeId
         // Unknown place: silently drop. Archivist owns place creation; the
         // NPC agent only relocates within the known set.
       }
       if (u.personal_goals !== undefined) {
-        setPersonalGoalsStmt.run(u.personal_goals, existing.id)
+        fields.personal_goals = u.personal_goals
       }
       if (u.private_beliefs !== undefined) {
-        setPrivateBeliefsStmt.run(u.private_beliefs, existing.id)
-      }
-      if (u.reveries_add !== undefined && u.reveries_add.length > 0) {
-        // v0.6.x: throttle creation — at most one new reverie per tick, and only
-        // once the per-NPC cooldown has elapsed. Deterministic; the prompt's
-        // "rarely" is just a nudge. addReveriesForCharacter still dedups + caps.
-        // NOTE: the schema allows an array, but we deliberately persist at most
-        // one per tick (cooldown throttle) and silently drop extras rather than
-        // failing the whole patch.
-        if (canMintReverie(reverieMintState(worldId, existing.id))) {
-          addReveriesForCharacter(worldId, existing.id, [u.reveries_add[0]], narratorTurnId)
-        }
-      }
-      if (u.daily_loop !== undefined) {
-        setDailyLoopIfEmptyStmt.run(JSON.stringify(u.daily_loop), existing.id)
+        fields.private_beliefs = u.private_beliefs
       }
       if (u.relationship_to_player !== undefined) {
-        setRelationshipToPlayerStmt.run(u.relationship_to_player, existing.id)
+        fields.relationship_to_player = u.relationship_to_player
       }
       if (u.long_term_agenda !== undefined) {
-        setLongTermAgendaStmt.run(u.long_term_agenda, existing.id)
+        fields.long_term_agenda = u.long_term_agenda
       }
       if (u.tool_access !== undefined) {
-        setToolAccessStmt.run(u.tool_access, existing.id)
+        fields.tool_access = u.tool_access
       }
       if (u.in_transit_to !== undefined) {
         if (u.in_transit_to === null) {
-          setInTransitToStmt.run(null, existing.id)
+          fields.in_transit_to_place_id = null
         } else {
-          const place = findPlaceByNameStmt.get(worldId, u.in_transit_to) as
-            | { id: number }
-            | undefined
-          if (place) setInTransitToStmt.run(place.id, existing.id)
+          const placeId = placeIdByLower.get(u.in_transit_to.toLowerCase())
+          if (placeId !== undefined) fields.in_transit_to_place_id = placeId
           // Unknown destination: silently drop, mirroring current_place_name.
         }
       }
       if (u.arrival_world_time !== undefined) {
-        setArrivalWorldTimeStmt.run(u.arrival_world_time, existing.id)
+        fields.arrival_world_time = u.arrival_world_time
       }
       if (u.last_known_situation !== undefined) {
-        setLastKnownSituationStmt.run(u.last_known_situation, existing.id)
+        fields.last_known_situation = u.last_known_situation
+      }
+
+      await characters.applyAgentNpcFields(existing.id, fields)
+
+      if (u.reveries_add !== undefined && u.reveries_add.length > 0) {
+        // v0.6.x: throttle creation — at most one new reverie per tick, and only
+        // once the per-NPC cooldown has elapsed. Deterministic; the prompt's
+        // "rarely" is just a nudge. reveries.add still dedups + caps.
+        // NOTE: the schema allows an array, but we deliberately persist at most
+        // one per tick (cooldown throttle) and silently drop extras rather than
+        // failing the whole patch.
+        if (canMintReverie(await reveries.mintState(worldId, existing.id))) {
+          await reveries.add(worldId, existing.id, [u.reveries_add[0]], narratorTurnId)
+        }
+      }
+      if (u.daily_loop !== undefined) {
+        await characters.setDailyLoopIfEmpty(existing.id, JSON.stringify(u.daily_loop))
       }
     }
   })
-  tx()
 }
 
 function formatKnownPlaceLine(p: {

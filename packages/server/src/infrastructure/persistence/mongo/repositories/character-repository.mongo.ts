@@ -8,6 +8,8 @@ import {
 import type { CharacterAgencyLevel } from '@/domain/entities'
 import type { Character } from '@/lib/world-state'
 import type {
+  AgentNpcFields,
+  AgentNpcRow,
   AppearancePromotionResult,
   ArchivistCharacterInsert,
   ArchivistCharacterMerge,
@@ -408,6 +410,151 @@ export class MongoCharacterRepository implements CharacterRepository {
     await this.ctx.models.Character.updateOne(
       { id: characterId },
       { $set: { agencyLevel: 'npc', activeGoal: null, currentFocus: null, updatedAt: now } },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors agentNpcsStmt: agent-tier, non-player, non-dead NPCs whose tier-based
+  // cadence is due this turn. The correlated place-name subqueries become a single
+  // id→name lookup over the world's places. `'agent'` is matched literally (a
+  // legacy tier the SQL still admits even though it is outside the enum).
+  async agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]> {
+    // `'agent'` is a legacy tier the SQL still admits even though it is outside
+    // the schema enum; cast the tier lists so the literal is accepted in $in.
+    const agentTiers = ['local', 'nearby', 'distant', 'agent'] as CharacterDoc['agencyLevel'][]
+    const everyTurnTiers = ['local', 'agent'] as CharacterDoc['agencyLevel'][]
+    const docs = await this.ctx.models.Character.find({
+      worldId,
+      agencyLevel: { $in: agentTiers },
+      isPlayer: false,
+      status: { $ne: 'dead' },
+      $or: [
+        { agencyLevel: { $in: everyTurnTiers } },
+        { lastAgentTickTurnId: null },
+        {
+          agencyLevel: 'nearby',
+          lastAgentTickTurnId: { $lte: tickTurnId - 2 },
+        },
+        {
+          agencyLevel: 'distant',
+          lastAgentTickTurnId: { $lte: tickTurnId - 5 },
+        },
+        { lastAgentTickTurnId: { $lte: tickTurnId - 5 } },
+      ],
+    })
+      .sort({ id: 1 })
+      .session(this.session ?? null)
+      .lean()
+    const places = await this.ctx.models.Place.find({ worldId })
+      .select({ id: 1, name: 1 })
+      .session(this.session ?? null)
+      .lean()
+    const nameById = new Map(places.map((p) => [p.id, p.name]))
+    return docs.map((d) => {
+      const c = mapCharacter(d)
+      return {
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        personal_goals: c.personal_goals,
+        current_focus: c.current_focus,
+        recent_activity: c.recent_activity,
+        private_beliefs: c.private_beliefs,
+        reveries: c.reveries,
+        relationship_to_player: c.relationship_to_player,
+        long_term_agenda: c.long_term_agenda,
+        tool_access: c.tool_access,
+        active_goal: c.active_goal,
+        current_attitude: c.current_attitude,
+        current_place_id: c.current_place_id,
+        current_place_name:
+          c.current_place_id !== null ? nameById.get(c.current_place_id) ?? null : null,
+        agency_level: c.agency_level,
+        last_agent_tick_turn_id: c.last_agent_tick_turn_id,
+        in_transit_to_place_id: c.in_transit_to_place_id,
+        in_transit_to_name:
+          c.in_transit_to_place_id !== null
+            ? nameById.get(c.in_transit_to_place_id) ?? null
+            : null,
+        arrival_world_time: c.arrival_world_time,
+        last_known_situation: c.last_known_situation,
+        daily_loop: c.daily_loop,
+      }
+    })
+  }
+
+  // setLastAgentTickStmt
+  async setLastAgentTick(turnId: number, characterId: number): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { lastAgentTickTurnId: turnId, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // findAgentNpcByNameStmt: exact-lower-name match scoped to agent-tier non-player
+  // rows. Returns only the two columns the patch applier reads.
+  async findAgentNpcByName(
+    worldId: number,
+    name: string,
+  ): Promise<{ id: number; recent_activity: string | null } | null> {
+    const agentTiers = ['local', 'nearby', 'distant', 'agent'] as CharacterDoc['agencyLevel'][]
+    const doc = await this.ctx.models.Character.findOne({
+      worldId,
+      nameKey: name.toLowerCase(),
+      agencyLevel: { $in: agentTiers },
+      isPlayer: false,
+    })
+      .select({ id: 1, recentActivity: 1 })
+      .session(this.session ?? null)
+      .lean()
+    return doc ? { id: doc.id, recent_activity: doc.recentActivity ?? null } : null
+  }
+
+  // Mirrors the agent's per-column UPDATE statements: only the keys present in
+  // `fields` are written. Collapses into one $set (each statement touched a
+  // distinct column, so the final row state is byte-identical) and bumps updatedAt.
+  async applyAgentNpcFields(characterId: number, fields: AgentNpcFields): Promise<void> {
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (fields.current_focus !== undefined) set.currentFocus = fields.current_focus
+    if (fields.recent_activity !== undefined) set.recentActivity = fields.recent_activity
+    if (fields.current_place_id !== undefined) set.currentPlaceId = fields.current_place_id
+    if (fields.personal_goals !== undefined) set.personalGoals = fields.personal_goals
+    if (fields.private_beliefs !== undefined) set.privateBeliefs = fields.private_beliefs
+    if (fields.relationship_to_player !== undefined) {
+      set.relationshipToPlayer = fields.relationship_to_player
+    }
+    if (fields.long_term_agenda !== undefined) set.longTermAgenda = fields.long_term_agenda
+    if (fields.tool_access !== undefined) set.toolAccess = fields.tool_access
+    if (fields.in_transit_to_place_id !== undefined) {
+      set.inTransitToPlaceId = fields.in_transit_to_place_id
+    }
+    if (fields.arrival_world_time !== undefined) {
+      set.arrivalWorldTime = fields.arrival_world_time
+    }
+    if (fields.last_known_situation !== undefined) {
+      set.lastKnownSituation = fields.last_known_situation
+    }
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: set },
+      { session: this.session },
+    )
+  }
+
+  // Mirrors setDailyLoopIfEmptyStmt: author the loop only when the column is
+  // currently null/blank. dailyLoop is stored as a native subdoc (the SQL stores
+  // JSON text); parse the incoming JSON to match the on-disk shape.
+  async setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void> {
+    let dailyLoop: Record<string, unknown> | null = null
+    try {
+      dailyLoop = JSON.parse(dailyLoopJson) as Record<string, unknown>
+    } catch {
+      dailyLoop = null
+    }
+    await this.ctx.models.Character.updateOne(
+      { id: characterId, $or: [{ dailyLoop: null }, { dailyLoop: { $exists: false } }] },
+      { $set: { dailyLoop, updatedAt: new Date() } },
       { session: this.session },
     )
   }

@@ -147,6 +147,33 @@ export class MongoReverieRepository implements ReverieRepository {
     await this.prune(targetCharacterId)
   }
 
+  // Mirrors `reverieMintState`: MAX(created_turn_id) is the NPC's last minted
+  // turn (turn ids are the monotone `seq`), and the cooldown counts this world's
+  // player turns inserted after it. `lastTurn === null` (no minted rows, or only
+  // backfilled NULLs) yields Infinity so the cooldown never blocks the next mint.
+  async mintState(
+    worldId: number,
+    characterId: number,
+  ): Promise<{ hasAny: boolean; playerTurnsSinceLast: number }> {
+    const rows = await this.ctx.models.Reverie.find({ characterId })
+      .select({ createdTurnId: 1 })
+      .lean()
+    const hasAny = rows.length > 0
+    const minted = rows
+      .map((r) => r.createdTurnId)
+      .filter((t): t is number => t !== null && t !== undefined)
+    if (minted.length === 0) {
+      return { hasAny, playerTurnsSinceLast: Number.POSITIVE_INFINITY }
+    }
+    const lastTurn = Math.max(...minted)
+    const playerTurnsSinceLast = await this.ctx.models.Turn.countDocuments({
+      worldId,
+      role: 'user',
+      seq: { $gt: lastTurn },
+    })
+    return { hasAny, playerTurnsSinceLast }
+  }
+
   // Keep the strongest, then most-recently-flared, then newest. Evict the rest.
   // Mirrors `pruneReveriesForCharacter` (spec §4.6) — runs in the active session.
   private async prune(characterId: number, max = MAX_REVERIES_PER_NPC): Promise<void> {

@@ -10,6 +10,8 @@ import {
 import { recordAppearancesAndAutoPromote } from '@/lib/npc-promotion'
 import type { Character } from '@/lib/world-state'
 import type {
+  AgentNpcFields,
+  AgentNpcRow,
   AppearancePromotionResult,
   ArchivistCharacterInsert,
   ArchivistCharacterMerge,
@@ -141,6 +143,79 @@ const renameCharacterStmt = db.prepare<[string, number]>(
 const setPlayersPlaceStmt = db.prepare<[number, number]>(
   `UPDATE characters SET current_place_id = ?, updated_at = datetime('now')
    WHERE world_id = ? AND is_player = 1`,
+)
+
+// Verbatim copies of the NPC agent's statements (lib/npc-agent.ts, P5b strangle).
+// Byte-identical SQL/columns/WHERE/cadence-arithmetic so the SQLite path stays
+// unchanged when the agent is rewired onto this port.
+const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
+  SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
+         c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
+         c.reveries, c.daily_loop,
+         c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
+         c.last_agent_tick_turn_id,
+         c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
+         (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name,
+         (SELECT name FROM places WHERE id = c.in_transit_to_place_id) AS in_transit_to_name
+    FROM characters c
+   WHERE c.world_id = ?
+     AND c.agency_level IN ('local', 'nearby', 'distant', 'agent')
+     AND c.is_player = 0
+     AND c.status != 'dead'
+     AND (
+       c.agency_level IN ('local', 'agent')
+       OR c.last_agent_tick_turn_id IS NULL
+       OR (c.agency_level = 'nearby' AND ? - c.last_agent_tick_turn_id >= 2)
+       OR (c.agency_level = 'distant' AND ? - c.last_agent_tick_turn_id >= 5)
+       OR (? - c.last_agent_tick_turn_id >= 5)
+     )
+`)
+const setLastAgentTickStmt = db.prepare<[number, number]>(
+  `UPDATE characters SET last_agent_tick_turn_id = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const findAgentNpcByNameStmt = db.prepare<[number, string]>(
+  `SELECT id, recent_activity FROM characters
+    WHERE world_id = ?
+      AND lower(name) = lower(?)
+      AND agency_level IN ('local', 'nearby', 'distant', 'agent')
+      AND is_player = 0`,
+)
+const setFocusStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET current_focus = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setActivityStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET recent_activity = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setPlaceStmt = db.prepare<[number, number]>(
+  `UPDATE characters SET current_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setPersonalGoalsStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET personal_goals = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setPrivateBeliefsStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET private_beliefs = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setDailyLoopIfEmptyStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET daily_loop = ?, updated_at = datetime('now')
+     WHERE id = ? AND (daily_loop IS NULL OR trim(daily_loop) = '')`,
+)
+const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setLongTermAgendaStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET long_term_agenda = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setToolAccessStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET tool_access = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setInTransitToStmt = db.prepare<[number | null, number]>(
+  `UPDATE characters SET in_transit_to_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setArrivalWorldTimeStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET arrival_world_time = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setLastKnownSituationStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET last_known_situation = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 
 // SQLite adapter for CharacterRepository (spec §5.1-P1). Dumb CRUD.
@@ -275,5 +350,75 @@ export class SqliteCharacterRepository implements CharacterRepository {
     return Promise.resolve(
       recordAppearancesAndAutoPromote(worldId, presentCharacters, turnId),
     )
+  }
+
+  agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]> {
+    const rows = agentNpcsStmt.all(
+      worldId,
+      tickTurnId,
+      tickTurnId,
+      tickTurnId,
+    ) as AgentNpcRow[]
+    return Promise.resolve(rows)
+  }
+
+  setLastAgentTick(turnId: number, characterId: number): Promise<void> {
+    setLastAgentTickStmt.run(turnId, characterId)
+    return Promise.resolve()
+  }
+
+  findAgentNpcByName(
+    worldId: number,
+    name: string,
+  ): Promise<{ id: number; recent_activity: string | null } | null> {
+    const row = findAgentNpcByNameStmt.get(worldId, name) as
+      | { id: number; recent_activity: string | null }
+      | undefined
+    return Promise.resolve(row ?? null)
+  }
+
+  // Runs each present field's UPDATE separately (byte-identical to the agent's
+  // per-column statements). Three-state semantics live in the use case: a key is
+  // present only when the patch named that field.
+  applyAgentNpcFields(characterId: number, fields: AgentNpcFields): Promise<void> {
+    if (fields.current_focus !== undefined) {
+      setFocusStmt.run(fields.current_focus, characterId)
+    }
+    if (fields.recent_activity !== undefined) {
+      setActivityStmt.run(fields.recent_activity, characterId)
+    }
+    if (fields.current_place_id !== undefined) {
+      setPlaceStmt.run(fields.current_place_id, characterId)
+    }
+    if (fields.personal_goals !== undefined) {
+      setPersonalGoalsStmt.run(fields.personal_goals, characterId)
+    }
+    if (fields.private_beliefs !== undefined) {
+      setPrivateBeliefsStmt.run(fields.private_beliefs, characterId)
+    }
+    if (fields.relationship_to_player !== undefined) {
+      setRelationshipToPlayerStmt.run(fields.relationship_to_player, characterId)
+    }
+    if (fields.long_term_agenda !== undefined) {
+      setLongTermAgendaStmt.run(fields.long_term_agenda, characterId)
+    }
+    if (fields.tool_access !== undefined) {
+      setToolAccessStmt.run(fields.tool_access, characterId)
+    }
+    if (fields.in_transit_to_place_id !== undefined) {
+      setInTransitToStmt.run(fields.in_transit_to_place_id, characterId)
+    }
+    if (fields.arrival_world_time !== undefined) {
+      setArrivalWorldTimeStmt.run(fields.arrival_world_time, characterId)
+    }
+    if (fields.last_known_situation !== undefined) {
+      setLastKnownSituationStmt.run(fields.last_known_situation, characterId)
+    }
+    return Promise.resolve()
+  }
+
+  setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void> {
+    setDailyLoopIfEmptyStmt.run(dailyLoopJson, characterId)
+    return Promise.resolve()
   }
 }

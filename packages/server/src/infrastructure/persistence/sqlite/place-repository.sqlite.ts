@@ -4,6 +4,7 @@ import { db, getPlace, getPlacesForWorld, insertBoundedPlace } from '@/lib/db'
 import type { Place } from '@/lib/world-state'
 import type {
   ArchivistPlaceInsert,
+  PlaceGeoResolution,
   PlaceInput,
   PlaceMerge,
   PlaceRepository,
@@ -56,6 +57,23 @@ const appendPlacePlayerNotesStmt = db.prepare<[string, string, number]>(
    WHERE id = ?`,
 )
 const placeNameByIdStmt = db.prepare<[number]>('SELECT name FROM places WHERE id = ?')
+// Verbatim copy of lib/place-resolver.ts's updateResolvedStmt (P5 strangle —
+// the geocode write-back). Byte-identical columns/datetime('now')/WHERE so the
+// SQLite resolve path stays unchanged after the resolver takes this port.
+const setGeoResolutionStmt = db.prepare<
+  [string, string | null, string | null, string | null, number | null, number | null, number]
+>(
+  `UPDATE places
+      SET geo_status = ?,
+          osm_display_name = ?,
+          osm_street = ?,
+          osm_neighborhood = ?,
+          osm_lat = ?,
+          osm_lng = ?,
+          geo_resolved_at = datetime('now'),
+          updated_at = datetime('now')
+    WHERE id = ?`,
+)
 
 // SQLite adapter for PlaceRepository (spec §5.1-P1). Dumb CRUD.
 export class SqlitePlaceRepository implements PlaceRepository {
@@ -121,6 +139,19 @@ export class SqlitePlaceRepository implements PlaceRepository {
 
   appendPlayerNotes(id: number, note: string): Promise<void> {
     appendPlacePlayerNotesStmt.run(note, note, id)
+    return Promise.resolve()
+  }
+
+  setGeoResolution(patch: PlaceGeoResolution): Promise<void> {
+    setGeoResolutionStmt.run(
+      patch.status,
+      patch.displayName,
+      patch.street,
+      patch.neighborhood,
+      patch.lat,
+      patch.lng,
+      patch.id,
+    )
     return Promise.resolve()
   }
 }

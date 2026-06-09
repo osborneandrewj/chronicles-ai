@@ -116,6 +116,25 @@ describe('architecture boundaries — grep guard', () => {
     expect(offenders).toEqual([])
   })
 
+  it('keeps narrate-turn off the @/lib/db SQLite singleton (P5b cutover)', () => {
+    // After the final strangle, the turn path obtains every persistence
+    // read/write from injected ports (via getContainer()); it must NOT reach
+    // back into the module-level better-sqlite3 singleton (`@/lib/db`). A
+    // direct `@/lib/db` import here is the cross-contamination bug under
+    // PERSISTENCE=mongo (a Mongo world id collides with a SQLite world id and
+    // pulls a DIFFERENT store's rows). Guard both turn-path entrypoints.
+    const libDbImport = /(?:from|import\()\s*['"]@\/lib\/db['"]/
+    const turnPathFiles = SOURCES.filter((f) =>
+      f.rel === 'infrastructure/narrator/narrate-turn.ts' || f.rel === 'lib/opening-turn.ts',
+    )
+    expect(turnPathFiles.length).toBe(2)
+    const offenders = turnPathFiles
+      .filter((f) => libDbImport.test(stripComments(f.text)))
+      .map((f) => f.rel)
+
+    expect(offenders).toEqual([])
+  })
+
   it('keeps every infrastructure module + route handler under server-only', () => {
     // A stray value-import of an infra/route module into a 'use client' file
     // must fail the build loudly (§3.7). Enforced by an `import 'server-only'`

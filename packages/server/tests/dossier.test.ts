@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest'
 
+import { getContainer } from '@/composition/container'
 import { applyArchivistPatch } from '@/lib/archivist'
-import { applyNpcAgentPatch } from '@/lib/npc-agent'
+import { applyNpcAgentPatch, type NpcAgentDeps } from '@/lib/npc-agent'
 import { db, insertTurn } from '@/lib/db'
 import { addReveriesForCharacter, getReveriesForCharacters } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
 import { formatDossierBlock, formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+
+// The NPC agent reads/writes through injected ports (P5b); on SQLite the
+// container adapters delegate to the same byte-identical SQL.
+function npcAgentDeps(): NpcAgentDeps {
+  const c = getContainer()
+  return {
+    characters: c.characters,
+    npcIntents: c.npcIntents,
+    places: c.places,
+    reveries: c.reveries,
+    unitOfWork: c.unitOfWork,
+    worlds: c.worlds,
+  }
+}
 
 function seedWorld(): { worldId: number; turnId: number } {
   const world = createWorld({
@@ -88,7 +103,7 @@ describe('story dossier state', () => {
       `UPDATE characters SET agency_level = 'local'
        WHERE world_id = ? AND name = 'Mara Vale'`,
     ).run(worldId)
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [
         {
           name: 'Mara Vale',

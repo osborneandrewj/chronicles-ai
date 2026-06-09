@@ -10,6 +10,8 @@ import {
 
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
 import { getContainer } from '@/composition/container'
+import type { CharacterRepository } from '@/domain/ports'
+import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -17,14 +19,12 @@ import {
   extractDeterministicPatch,
   extractPatch,
 } from '@/lib/archivist'
-import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
-import { getCharactersForWorld } from '@/lib/db'
 import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
-import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
+import { buildPlaceOccupancySnapshotVia, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { computeReverieFlares, getReveriesForCharacters } from '@/lib/reveries'
@@ -35,7 +35,6 @@ import {
   formatStateBlock,
   getNarratorWorldStateVia,
 } from '@/lib/world-state'
-import { getWorld } from '@/lib/worlds'
 
 // Infrastructure NarratorPort adapter (spec §3.5, §5.1-P5). Owns the AI-SDK
 // (`streamText`/`onFinish`/`toUIMessageStream`) AND the dense SQL+SDK pipeline
@@ -60,11 +59,21 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // appearance/promotion bumps). The SQLite adapters delegate to the same
   // `lib/*` functions, so behavior is byte-identical; under PERSISTENCE=mongo
   // they read/write the collections.
-  const { characters, dossiers, occupancy, places, reveries, scenes, turns, worlds } =
-    getContainer()
+  const {
+    characters,
+    dossiers,
+    npcIntents,
+    occupancy,
+    places,
+    reveries,
+    scenes,
+    turns,
+    unitOfWork,
+    worlds,
+  } = getContainer()
   const stateDeps = { characters, dossiers, occupancy, places, scenes, worlds }
 
-  const world = getWorld(worldId)
+  const world = await worlds.getWorld(worldId)
   // AdvanceTurn already gated world existence; this is a defensive re-read for
   // `premise`. If it somehow vanished, surface an empty stream.
   if (!world) {
@@ -87,7 +96,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   )
 
   // Lazy real-world geocoding — best-effort, never blocks the narrator.
-  await resolveUnresolvedPlaces(worldId).catch((err) => {
+  await resolveUnresolvedPlaces({ places, worlds }, worldId).catch((err) => {
     console.error('[place-resolver pre-narrator]', err)
   })
 
@@ -96,8 +105,10 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const recentForAgents = await turns.recentTurns(worldId, 4)
   const { stance, input_mode } = classification
   const shouldRunNpcAgent = shouldTickNpcAgent(stance, input_mode, postPromotionState)
+  const npcAgentDeps = { characters, npcIntents, places, reveries, unitOfWork, worlds }
   const npcAgentSettled = shouldRunNpcAgent
     ? await runNpcAgentTick(
+        npcAgentDeps,
         worldId,
         playerTurnId,
         world.premise,
@@ -115,7 +126,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // Deterministic occupancy snapshot — non-fatal.
   let turnOccupancy: PlaceOccupancy | null = null
   try {
-    turnOccupancy = buildPlaceOccupancySnapshot(worldId, playerTurnId)
+    turnOccupancy = await buildPlaceOccupancySnapshotVia(
+      { dossiers, occupancy, places, scenes, worlds },
+      worldId,
+      playerTurnId,
+    )
   } catch (err) {
     console.error('[place-population]', err)
   }
@@ -256,6 +271,8 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             playerTurnId,
             narratorTurnId: narratorTurn.id,
             narratorText: trimmed,
+            characters,
+            npcIntents,
           })
           await turns.mergeMetadata(narratorTurn.id, 'npc_intent_reconciler', {
             model: reconciliation.model,
@@ -282,7 +299,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           model: 'deterministic-archivist',
           patch: deterministicPatch,
         })
-        runDupDetector(worldId)
+        runDupDetector(characters, worldId)
         return
       }
       if (!runArchivistLlm) {
@@ -317,7 +334,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             usage: archivistUsage,
             patch,
           })
-          runDupDetector(worldId)
+          runDupDetector(characters, worldId)
         })
         .catch(async (err) => {
           await turns.mergeMetadata(narratorTurn.id, 'archivist', {
@@ -351,16 +368,19 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   return { chunks: chunks as ReadableStream<unknown>, completion }
 }
 
-function runDupDetector(worldId: number): void {
-  try {
-    for (const d of findLikelyDuplicateCharacters(getCharactersForWorld(worldId))) {
-      console.warn(
-        `[dup-detector] world ${worldId}: "${d.aName}" (#${d.aId}) ~ "${d.bName}" (#${d.bId}) — ${d.reason}`,
-      )
-    }
-  } catch (err) {
-    console.error('[dup-detector]', err)
-  }
+function runDupDetector(characters: CharacterRepository, worldId: number): void {
+  characters
+    .forWorld(worldId)
+    .then((chars) => {
+      for (const d of findLikelyDuplicateCharacters(chars)) {
+        console.warn(
+          `[dup-detector] world ${worldId}: "${d.aName}" (#${d.aId}) ~ "${d.bName}" (#${d.bId}) — ${d.reason}`,
+        )
+      }
+    })
+    .catch((err) => {
+      console.error('[dup-detector]', err)
+    })
 }
 
 function compactHistory(

@@ -6,6 +6,7 @@ import {
   getReveriesForCharacters,
   getReveriesForWorld,
   repointReveries,
+  reverieMintState,
   stampFlaredReveries,
   type ReverieInput,
   type ReverieRow,
@@ -46,5 +47,12 @@ export class SqliteReverieRepository implements ReverieRepository {
   repoint(sourceCharacterId: number, targetCharacterId: number): Promise<void> {
     repointReveries(sourceCharacterId, targetCharacterId)
     return Promise.resolve()
+  }
+
+  mintState(
+    worldId: number,
+    characterId: number,
+  ): Promise<{ hasAny: boolean; playerTurnsSinceLast: number }> {
+    return Promise.resolve(reverieMintState(worldId, characterId))
   }
 }

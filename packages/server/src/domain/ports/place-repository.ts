@@ -35,6 +35,20 @@ export type PlaceMerge = {
   kind: string | null
 }
 
+// A geocode resolution write-back (P5 — the lazy place-resolver). Mirrors
+// updateResolvedStmt: stamps the place's geo_status plus the OSM facts and
+// geo_resolved_at/updated_at. On a non-'ok' status the osm_* fields are null
+// (the resolver passes them as null), so plain-assignment is correct.
+export type PlaceGeoResolution = {
+  id: number
+  status: 'ok' | 'not_found' | 'unavailable'
+  displayName: string | null
+  street: string | null
+  neighborhood: string | null
+  lat: number | null
+  lng: number | null
+}
+
 // PlaceRepository (spec §3.4) — dumb CRUD over the `places` aggregate. Reads plus
 // `add`, the bounded-world room insert, and the archivist write surface (P4).
 // Async by mandate (spec §5.3).
@@ -51,4 +65,6 @@ export interface PlaceRepository {
   moveScenesToPlace(toId: number, fromId: number): Promise<void>
   delete(id: number): Promise<void>
   appendPlayerNotes(id: number, note: string): Promise<void>
+  /** Write back a geocode result (P5 lazy resolver). Mirrors updateResolvedStmt. */
+  setGeoResolution(patch: PlaceGeoResolution): Promise<void>
 }

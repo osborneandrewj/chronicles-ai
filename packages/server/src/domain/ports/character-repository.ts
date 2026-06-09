@@ -78,6 +78,55 @@ export type ArchivistCharacterMerge = {
   aliases: string | null
 }
 
+// A row read by the NPC agent's tick query (agentNpcsForTick). The flat
+// `characters` columns the agent reflects on, PLUS the two joined place names
+// (current_place_name / in_transit_to_name) the SQLite query resolves via a
+// correlated subquery. Distinct from the `Character` entity because of those
+// two adapter-resolved joins.
+export type AgentNpcRow = {
+  id: number
+  name: string
+  description: string | null
+  personal_goals: string | null
+  current_focus: string | null
+  recent_activity: string | null
+  private_beliefs: string | null
+  reveries: string | null
+  relationship_to_player: string | null
+  long_term_agenda: string | null
+  tool_access: string | null
+  active_goal: string | null
+  current_attitude: string | null
+  current_place_id: number | null
+  current_place_name: string | null
+  agency_level: string
+  last_agent_tick_turn_id: number | null
+  in_transit_to_place_id: number | null
+  in_transit_to_name: string | null
+  arrival_world_time: string | null
+  last_known_situation: string | null
+  daily_loop: string | null
+}
+
+// The NPC agent's per-character WRITE surface (applyAgentNpcFields). The use case
+// resolves WHICH fields the patch touches (and resolves place names → ids); the
+// adapter persists only the keys present (a partial UPDATE / $set), mirroring the
+// agent's per-field UPDATE statements. daily_loop has its own conditional setter
+// (setDailyLoopIfEmpty) and is NOT part of this patch.
+export type AgentNpcFields = {
+  current_focus?: string
+  recent_activity?: string
+  current_place_id?: number
+  personal_goals?: string
+  private_beliefs?: string
+  relationship_to_player?: string
+  long_term_agenda?: string
+  tool_access?: string
+  in_transit_to_place_id?: number | null
+  arrival_world_time?: string | null
+  last_known_situation?: string
+}
+
 // CharacterRepository (spec §3.4) — dumb CRUD over the `characters` aggregate.
 // Reads plus `add` (the bounded-world crew insert) and `setPlace` (the P2 sim
 // moving an NPC to a room). Name resolution / alias merge / promotion are
@@ -148,4 +197,37 @@ export interface CharacterRepository {
     presentCharacters: Character[],
     turnId: number,
   ): Promise<AppearancePromotionResult>
+  /**
+   * The NPC agent's tick-eligibility read (agentNpcsStmt): agent-tier, non-player,
+   * non-dead NPCs whose tier-based cadence is due this turn (`tickTurnId` is the
+   * player-turn id the cadence arithmetic is measured against). Returns the joined
+   * `AgentNpcRow` shape (flat columns + the two resolved place names).
+   */
+  agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]>
+  /**
+   * Stamp last_agent_tick_turn_id (setLastAgentTickStmt) after an NPC is ticked —
+   * the cadence bookkeeping the next `agentNpcsForTick` reads.
+   */
+  setLastAgentTick(turnId: number, characterId: number): Promise<void>
+  /**
+   * Resolve an agent-tier NPC by exact (case-insensitive) name within a world
+   * (findAgentNpcByNameStmt) for the patch applier. Returns `{ id, recent_activity }`
+   * (the only columns the applier needs), or null for a missing/non-agent/player row.
+   */
+  findAgentNpcByName(
+    worldId: number,
+    name: string,
+  ): Promise<{ id: number; recent_activity: string | null } | null>
+  /**
+   * Apply the NPC agent's per-field character updates (the agent's per-column
+   * UPDATE statements). Only the keys present in `fields` are written; each bumps
+   * updated_at. The use case owns which fields change and the place-name → id
+   * resolution. daily_loop is excluded (see setDailyLoopIfEmpty).
+   */
+  applyAgentNpcFields(characterId: number, fields: AgentNpcFields): Promise<void>
+  /**
+   * Author a daily_loop ONCE (setDailyLoopIfEmptyStmt): writes only when the row's
+   * daily_loop is currently null/blank, mirroring the SQL WHERE guard.
+   */
+  setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void>
 }

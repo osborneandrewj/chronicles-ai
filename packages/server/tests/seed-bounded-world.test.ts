@@ -137,6 +137,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     async moveScenesToPlace() {},
     async delete() {},
     async appendPlayerNotes() {},
+    async setGeoResolution() {},
   }
   const placeConnections: PlaceConnectionRepository = {
     async forWorld() {
@@ -177,6 +178,15 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     async recordAppearancesAndAutoPromote() {
       return { promoted: [], counted: 0, tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] } }
     },
+    async agentNpcsForTick() {
+      return []
+    },
+    async setLastAgentTick() {},
+    async findAgentNpcByName() {
+      return null
+    },
+    async applyAgentNpcFields() {},
+    async setDailyLoopIfEmpty() {},
   }
   const relationships: RelationshipRepository = {
     async forWorld() {

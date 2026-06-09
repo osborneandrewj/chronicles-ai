@@ -3,6 +3,7 @@ import 'server-only'
 import type { Place } from '@/lib/world-state'
 import type {
   ArchivistPlaceInsert,
+  PlaceGeoResolution,
   PlaceInput,
   PlaceMerge,
   PlaceRepository,
@@ -179,6 +180,30 @@ export class MongoPlaceRepository implements PlaceRepository {
     await this.ctx.models.Place.updateOne(
       { id },
       { $set: { playerNotes: next, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  // updateResolvedStmt — the geocode write-back. The SQLite UPDATE assigns every
+  // osm_* column plus geo_resolved_at=now; the Mongo geo facts live in the nested
+  // `geo` subdoc, so the whole subdoc is replaced (mapPlace reads the same shape).
+  async setGeoResolution(patch: PlaceGeoResolution): Promise<void> {
+    await this.ctx.models.Place.updateOne(
+      { id: patch.id },
+      {
+        $set: {
+          geo: {
+            displayName: patch.displayName,
+            street: patch.street,
+            neighborhood: patch.neighborhood,
+            lat: patch.lat,
+            lng: patch.lng,
+            status: patch.status,
+            resolvedAt: new Date(),
+          },
+          updatedAt: new Date(),
+        },
+      },
       { session: this.session },
     )
   }

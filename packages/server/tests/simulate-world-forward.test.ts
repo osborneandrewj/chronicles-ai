@@ -214,6 +214,11 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
       counted: 0,
       tiers: { local: [], nearby: [], distant: [], dormant: [], demoted: [] },
     }),
+    agentNpcsForTick: async () => [],
+    setLastAgentTick: async () => {},
+    findAgentNpcByName: async () => null,
+    applyAgentNpcFields: async () => {},
+    setDailyLoopIfEmpty: async () => {},
   }
   const placeConnections: PlaceConnectionRepository = {
     forWorld: async () => connections,
@@ -244,6 +249,7 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
     moveScenesToPlace: async () => {},
     delete: async () => {},
     appendPlayerNotes: async () => {},
+    setGeoResolution: async () => {},
   }
   const drama: DramaPort = {
     generateBeat: async (input) => {

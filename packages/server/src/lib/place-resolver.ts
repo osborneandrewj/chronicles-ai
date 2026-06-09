@@ -1,4 +1,6 @@
-import { db } from '@/lib/db'
+import type { Place } from '@/domain/entities'
+import type { PlaceRepository } from '@/domain/ports/place-repository'
+import type { WorldRepository } from '@/domain/ports/world-repository'
 import { lookupPlace, type PlaceLookupResult } from '@/lib/map-tools'
 
 // Lazy resolver: runs before the NPC agent / narrator and geocodes any places
@@ -11,61 +13,57 @@ import { lookupPlace, type PlaceLookupResult } from '@/lib/map-tools'
 const PER_LOOKUP_TIMEOUT_MS = 4000
 const MAX_PARALLEL = 4
 
-type UnresolvedRow = {
-  id: number
-  name: string
-  description: string | null
+// Read/write ports the lazy resolver needs (P5 strangle). The use case (or the
+// strangled narrate-turn/opening-turn caller) hands these in from the container;
+// the SQLite adapters delegate to the same `lib/db` reader + the verbatim
+// updateResolvedStmt, so the SQLite resolve path stays byte-identical. The
+// geocode seam (`lookupPlace`) stays a direct import — it's an outbound HTTP
+// adapter, not a store.
+export type ResolveUnresolvedPlacesDeps = {
+  worlds: Pick<WorldRepository, 'getWorld'>
+  places: Pick<PlaceRepository, 'forWorld' | 'setGeoResolution'>
 }
 
-const unresolvedPlacesStmt = db.prepare<[number]>(
-  `SELECT id, name, description FROM places
-    WHERE world_id = ? AND geo_status = 'unresolved'
-    ORDER BY id ASC`,
-)
-
-const settingRegionStmt = db.prepare<[number]>(
-  'SELECT setting_region FROM worlds WHERE id = ?',
-)
-
-const updateResolvedStmt = db.prepare<
-  [string, string | null, string | null, string | null, number | null, number | null, number]
->(
-  `UPDATE places
-      SET geo_status = ?,
-          osm_display_name = ?,
-          osm_street = ?,
-          osm_neighborhood = ?,
-          osm_lat = ?,
-          osm_lng = ?,
-          geo_resolved_at = datetime('now'),
-          updated_at = datetime('now')
-    WHERE id = ?`,
-)
-
-export async function resolveUnresolvedPlaces(worldId: number): Promise<void> {
-  const region =
-    (settingRegionStmt.get(worldId) as { setting_region: string | null } | undefined)
-      ?.setting_region ?? null
+export async function resolveUnresolvedPlaces(
+  deps: ResolveUnresolvedPlacesDeps,
+  worldId: number,
+): Promise<void> {
+  const world = await deps.worlds.getWorld(worldId)
+  const region = world?.setting_region ?? null
 
   // Fantasy / unspecified settings get no real-world bias. We still attempt
   // resolution (the place name might match a real landmark by accident — and
   // that's fine), but skip if there's clearly nothing to anchor: a missing
   // region AND a place name that looks like a generic scene label.
-  const rows = unresolvedPlacesStmt.all(worldId) as UnresolvedRow[]
+  const rows = (await deps.places.forWorld(worldId)).filter(
+    (p) => p.geo_status === 'unresolved',
+  )
   if (rows.length === 0) return
 
   for (let i = 0; i < rows.length; i += MAX_PARALLEL) {
     const batch = rows.slice(i, i + MAX_PARALLEL)
-    await Promise.all(batch.map((row) => resolveOne(row, region)))
+    await Promise.all(batch.map((row) => resolveOne(deps, row, region)))
   }
 }
 
-async function resolveOne(row: UnresolvedRow, region: string | null): Promise<void> {
+async function resolveOne(
+  deps: ResolveUnresolvedPlacesDeps,
+  row: Place,
+  region: string | null,
+): Promise<void> {
   const query = buildLookupQuery(row)
   if (!query) {
     // Nothing usable — mark unavailable so we don't keep checking on every
     // turn. The user can edit the place and re-resolve later if they want.
-    updateResolvedStmt.run('unavailable', null, null, null, null, null, row.id)
+    await deps.places.setGeoResolution({
+      id: row.id,
+      status: 'unavailable',
+      displayName: null,
+      street: null,
+      neighborhood: null,
+      lat: null,
+      lng: null,
+    })
     return
   }
 
@@ -79,37 +77,61 @@ async function resolveOne(row: UnresolvedRow, region: string | null): Promise<vo
     )
   } catch (err) {
     console.error(`[place-resolver] lookup failed for place=${row.id} (${row.name})`, err)
-    updateResolvedStmt.run('unavailable', null, null, null, null, null, row.id)
+    await deps.places.setGeoResolution({
+      id: row.id,
+      status: 'unavailable',
+      displayName: null,
+      street: null,
+      neighborhood: null,
+      lat: null,
+      lng: null,
+    })
     return
   } finally {
     clearTimeout(timeout)
   }
 
   if (result.status === 'ok') {
-    updateResolvedStmt.run(
-      'ok',
-      result.displayName ?? null,
-      result.street ?? null,
-      result.neighborhood ?? null,
-      typeof result.lat === 'number' ? result.lat : null,
-      typeof result.lng === 'number' ? result.lng : null,
-      row.id,
-    )
+    await deps.places.setGeoResolution({
+      id: row.id,
+      status: 'ok',
+      displayName: result.displayName ?? null,
+      street: result.street ?? null,
+      neighborhood: result.neighborhood ?? null,
+      lat: typeof result.lat === 'number' ? result.lat : null,
+      lng: typeof result.lng === 'number' ? result.lng : null,
+    })
     return
   }
 
   if (result.status === 'not_found') {
-    updateResolvedStmt.run('not_found', null, null, null, null, null, row.id)
+    await deps.places.setGeoResolution({
+      id: row.id,
+      status: 'not_found',
+      displayName: null,
+      street: null,
+      neighborhood: null,
+      lat: null,
+      lng: null,
+    })
     return
   }
 
   // 'unavailable' or 'error' — mark unavailable, don't retry next turn.
-  updateResolvedStmt.run('unavailable', null, null, null, null, null, row.id)
+  await deps.places.setGeoResolution({
+    id: row.id,
+    status: 'unavailable',
+    displayName: null,
+    street: null,
+    neighborhood: null,
+    lat: null,
+    lng: null,
+  })
 }
 
 // Prefer the place name; fall back to the first clause of the description if
 // the name is too generic ("Opening scene", "The office") to geocode usefully.
-function buildLookupQuery(row: UnresolvedRow): string | null {
+function buildLookupQuery(row: Place): string | null {
   const name = row.name.trim()
   if (!name) return null
   // Generic placeholder names that won't geocode meaningfully. We still try

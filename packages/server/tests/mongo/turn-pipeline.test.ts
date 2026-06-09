@@ -19,6 +19,7 @@ import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/reposit
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
 import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { buildPlaceOccupancySnapshotVia } from '@/lib/place-population'
 import { getNarratorWorldStateVia } from '@/lib/world-state'
 
 import { replSetAvailable, startReplSet, type ReplSetHandle } from './replset'
@@ -608,12 +609,55 @@ d('mongo turn pipeline (e2e)', () => {
     expect((await worlds.cursor(worldId)).world_time).toBe('late morning')
   })
 
-  // Final exit criterion of the cutover — un-skipped in Phase 5 once the opening
-  // turn + narrate-turn loop are wired through the container on Mongo.
-  it.skip('plays a turn end-to-end on Mongo (un-skipped in Phase 5)', () => {
-    // Placeholder: create → opening turn → player turn → archivist mutates the
-    // Mongo dossier/characters/places → narrator context reads them back, all on
-    // PERSISTENCE=mongo. Asserted here once Phase 5 routes narrate-turn through
-    // the injected Mongo port bag.
+  // P5b: the deterministic turn-path helper `buildPlaceOccupancySnapshotVia`
+  // (the occupancy strangle) now takes injected ports. Exercise it directly
+  // against the Mongo port set — no LLM — to prove the snapshot it builds is
+  // written to AND re-read from MONGO (not the colliding SQLite world id). This
+  // is the port-level slice of the turn loop that became Mongo in this phase;
+  // the LLM-bearing streaming e2e (xAI narrator + Haiku agents) still requires
+  // live keys + network and stays out of CI.
+  it('builds + reuses an occupancy snapshot on MONGO via the strangled turn-path helper (P5b)', async () => {
+    const worlds = new MongoWorldRepository(h.ctx)
+    const scenes = new MongoSceneRepository(h.ctx)
+    const places = new MongoPlaceRepository(h.ctx)
+    const occupancy = new MongoOccupancyRepository(h.ctx)
+    const dossiers = new MongoDossierRepository(h.ctx)
+
+    const { worldId } = await createWorld(
+      {
+        name: 'Padstow 1902',
+        premise: 'a working harbour on the Camel estuary',
+        initialState: {
+          time: 'morning',
+          location: 'Padstow quay — Cornwall',
+          identity: 'a fishmonger',
+        },
+      },
+      { worlds, extractSettingRegion: async () => null },
+    )
+
+    const playerTurn = await turnsFor(h).insert(worldId, 'user', 'Look around the quay.', null)
+    const deps = { dossiers, occupancy, places, scenes, worlds }
+
+    // First call builds + persists a snapshot into Mongo.
+    const first = await buildPlaceOccupancySnapshotVia(deps, worldId, playerTurn.id)
+    expect(first).not.toBeNull()
+
+    const seededPlaces = await places.forWorld(worldId)
+    const placeId = seededPlaces[0]!.id
+    const stored = await occupancy.latestSnapshot(worldId, placeId)
+    expect(stored).not.toBeNull()
+    expect(stored?.source_turn_id).toBe(playerTurn.id)
+    // The persisted JSON round-trips to the value the helper returned.
+    expect(JSON.parse(stored!.occupancy_json)).toEqual(first)
+
+    // Second call in the same scene REUSES the persisted snapshot (no re-roll):
+    // identical seed, identical value — proving the read came back from Mongo.
+    const second = await buildPlaceOccupancySnapshotVia(deps, worldId, playerTurn.id)
+    expect(second).toEqual(first)
   })
 })
+
+function turnsFor(h: ReplSetHandle): MongoTurnRepository {
+  return new MongoTurnRepository(h.ctx)
+}

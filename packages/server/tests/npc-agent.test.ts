@@ -1,11 +1,33 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { getContainer } from '@/composition/container'
 import { applyArchivistPatch } from '@/lib/archivist'
 import { parseDailyLoop } from '@/lib/daily-loop'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
-import { applyNpcAgentPatch, NpcAgentPatchSchema, repairNpcAgentText, shouldSkipRoutineTick } from '@/lib/npc-agent'
+import {
+  applyNpcAgentPatch,
+  NpcAgentPatchSchema,
+  repairNpcAgentText,
+  shouldSkipRoutineTick,
+  type NpcAgentDeps,
+} from '@/lib/npc-agent'
 import { getReveriesForCharacter } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
+
+// The NPC agent now reads/writes through injected ports (P5b strangle). On the
+// default SQLite path the container's adapters delegate to the same byte-identical
+// SQL these tests assert against, so they remain the characterization oracle.
+function npcAgentDeps(): NpcAgentDeps {
+  const c = getContainer()
+  return {
+    characters: c.characters,
+    npcIntents: c.npcIntents,
+    places: c.places,
+    reveries: c.reveries,
+    unitOfWork: c.unitOfWork,
+    worlds: c.worlds,
+  }
+}
 
 function seedWorld(name: string): { worldId: number; turnId: number } {
   const world = createWorld({
@@ -107,8 +129,8 @@ describe('applyNpcAgentPatch', () => {
     promoteToLocal(worldId, 'Marcus')
   })
 
-  it('overwrites current_focus on agent-tier NPC', () => {
-    applyNpcAgentPatch(worldId, turnId, {
+  it('overwrites current_focus on agent-tier NPC', async () => {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', current_focus: 'finishing the auth refactor' }],
     })
 
@@ -116,12 +138,12 @@ describe('applyNpcAgentPatch', () => {
     expect(marcus.current_focus).toBe('finishing the auth refactor')
   })
 
-  it('appends activity with [t:N] provenance, accumulating across patches', () => {
-    applyNpcAgentPatch(worldId, turnId, {
+  it('appends activity with [t:N] provenance, accumulating across patches', async () => {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', activity_append: 'walked to the breakroom' }],
     })
     const second = insertTurn(worldId, 'assistant', 'A later turn.', null)
-    applyNpcAgentPatch(worldId, second.id, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, second.id, {
       npc_updates: [{ name: 'Marcus', activity_append: 'took a call from David' }],
     })
 
@@ -136,7 +158,7 @@ describe('applyNpcAgentPatch', () => {
     await applyArchivistPatch(worldId, turnId, { places: [{ name: 'Breakroom' }] })
     const breakroomId = getPlacesForWorld(worldId).find((p) => p.name === 'Breakroom')!.id
 
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', current_place_name: 'Breakroom' }],
     })
     expect(getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!.current_place_id).toBe(
@@ -145,7 +167,7 @@ describe('applyNpcAgentPatch', () => {
 
     // Unknown place — silently dropped (NPC agent doesn't create places).
     const marcusBefore = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', current_place_name: 'Mars Orbit' }],
     })
     expect(getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!.current_place_id).toBe(
@@ -154,33 +176,33 @@ describe('applyNpcAgentPatch', () => {
     expect(getPlacesForWorld(worldId).find((p) => p.name === 'Mars Orbit')).toBeUndefined()
   })
 
-  it('drops updates for non-agent-tier NPCs', () => {
+  it('drops updates for non-agent-tier NPCs', async () => {
     // Donna is npc-tier; her current_focus should not change.
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Donna', current_focus: 'should not persist' }],
     })
     const donna = getCharactersForWorld(worldId).find((c) => c.name === 'Donna')!
     expect(donna.current_focus).toBeNull()
   })
 
-  it('drops updates targeting the player character', () => {
-    applyNpcAgentPatch(worldId, turnId, {
+  it('drops updates targeting the player character', async () => {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Andrew', current_focus: 'should not persist' }],
     })
     const andrew = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
     expect(andrew.current_focus).toBeNull()
   })
 
-  it('drops updates for unknown NPCs', () => {
-    expect(() =>
-      applyNpcAgentPatch(worldId, turnId, {
+  it('drops updates for unknown NPCs', async () => {
+    await expect(
+      applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
         npc_updates: [{ name: 'Ghost', current_focus: 'nope' }],
       }),
-    ).not.toThrow()
+    ).resolves.not.toThrow()
   })
 
-  it('overwrites personal_goals when set', () => {
-    applyNpcAgentPatch(worldId, turnId, {
+  it('overwrites personal_goals when set', async () => {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [
         {
           name: 'Marcus',
@@ -192,8 +214,8 @@ describe('applyNpcAgentPatch', () => {
     expect(marcus.personal_goals).toBe('Wants to leave by Q4.\nWorried about his father.')
   })
 
-  it('overwrites richer cognition fields when set', () => {
-    applyNpcAgentPatch(worldId, turnId, {
+  it('overwrites richer cognition fields when set', async () => {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [
         {
           name: 'Marcus',
@@ -214,9 +236,9 @@ describe('applyNpcAgentPatch', () => {
     expect(marcus.tool_access).toBe('Can query Covenant Security issue trackers and Slack history.')
   })
 
-  it('empty patch is a no-op', () => {
+  it('empty patch is a no-op', async () => {
     const before = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
-    applyNpcAgentPatch(worldId, turnId, {})
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {})
     const after = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
     expect(after.current_focus).toBe(before.current_focus)
     expect(after.recent_activity).toBe(before.recent_activity)
@@ -224,34 +246,34 @@ describe('applyNpcAgentPatch', () => {
 })
 
 describe('reveries_add cooldown gate', () => {
-  it('no-prior accept: first reverie mints when NPC has zero reveries', () => {
+  it('no-prior accept: first reverie mints when NPC has zero reveries', async () => {
     const { worldId, turnId } = seedWorld(`rev-gate-accept-${Math.random()}`)
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
     promoteToLocal(worldId, 'Nyx')
     const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
 
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'the hum of servers in an empty office', match_tags: ['servers'] }] }],
     })
 
     expect(getReveriesForCharacter(charId)).toHaveLength(1)
   })
 
-  it('within-cooldown drop: new reverie is dropped when cooldown has not elapsed', () => {
+  it('within-cooldown drop: new reverie is dropped when cooldown has not elapsed', async () => {
     const { worldId, turnId } = seedWorld(`rev-gate-cooldown-${Math.random()}`)
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
     promoteToLocal(worldId, 'Nyx')
     const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
 
     // Mint the first reverie
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'first memory', match_tags: [] }] }],
     })
     expect(getReveriesForCharacter(charId)).toHaveLength(1)
 
     // Attempt a second mint on the very next turn (no player turns have elapsed)
     const nextTurn = insertTurn(worldId, 'assistant', 'another narration', null)
-    applyNpcAgentPatch(worldId, nextTurn.id, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, nextTurn.id, {
       npc_updates: [{ name: 'Nyx', reveries_add: [{ text: 'second memory blocked by cooldown', match_tags: [] }] }],
     })
 
@@ -259,13 +281,13 @@ describe('reveries_add cooldown gate', () => {
     expect(getReveriesForCharacter(charId)).toHaveLength(1)
   })
 
-  it('multi-emit clamp: only the first of multiple reveries_add items is persisted', () => {
+  it('multi-emit clamp: only the first of multiple reveries_add items is persisted', async () => {
     const { worldId, turnId } = seedWorld(`rev-gate-clamp-${Math.random()}`)
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Nyx', 0)").run(worldId)
     promoteToLocal(worldId, 'Nyx')
     const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Nyx'").get(worldId) as { id: number }).id
 
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{
         name: 'Nyx',
         reveries_add: [
@@ -282,30 +304,30 @@ describe('reveries_add cooldown gate', () => {
 })
 
 describe('npc agent reverie authoring (append-only)', () => {
-  it('inserts reveries_add as rows and never deletes on omission', () => {
+  it('inserts reveries_add as rows and never deletes on omission', async () => {
     const { worldId, turnId } = seedWorld('rev-author')
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Mara', 0)").run(worldId)
     promoteToLocal(worldId, 'Mara')
     const charId = (db.prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Mara'").get(worldId) as { id: number }).id
 
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Mara', reveries_add: [{ text: 'burnt coffee recalls the outage', match_tags: ['coffee'] }] }],
     })
     expect(getReveriesForCharacter(charId)).toHaveLength(1)
 
-    applyNpcAgentPatch(worldId, turnId, { npc_updates: [{ name: 'Mara', current_focus: 'waiting' }] })
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, { npc_updates: [{ name: 'Mara', current_focus: 'waiting' }] })
     expect(getReveriesForCharacter(charId)).toHaveLength(1) // omission preserved
   })
 
-  it('authors daily_loop once and does not overwrite it later', () => {
+  it('authors daily_loop once and does not overwrite it later', async () => {
     const { worldId, turnId } = seedWorld('loop-author')
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
     promoteToLocal(worldId, 'Tomas')
 
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Tomas', daily_loop: { morning: { activity: 'opens the shop' } } }],
     })
-    applyNpcAgentPatch(worldId, turnId, {
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Tomas', daily_loop: { morning: { activity: 'DIFFERENT' } } }],
     })
     const row = db.prepare("SELECT daily_loop FROM characters WHERE world_id = ? AND name = 'Tomas'").get(worldId) as { daily_loop: string | null }
