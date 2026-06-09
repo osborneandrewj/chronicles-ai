@@ -322,6 +322,39 @@ rooms, so per-room memory wouldn't catch it).
 - `StubDramaPort` accepts the field (no behavior change). Keep beats on Haiku (locked).
 Verify offline (plumbing) with sim-ship; confirm actual variation with a live smoke re-run.
 
+## P4a implementation spec (creatable + playable Starship — binding)
+Make a bounded starship world reachable from the UI and land the player in it.
+First-cut join-design defaults (flagged for browser review, easy to change):
+- **Player** boards as a newcomer (identity "A newcomer just come aboard — name not
+  yet established." or the entered name), placed in the **Bridge** (entry room).
+- **Synchronous** creation for the first cut: seed (real Grok crew) → run the sim
+  (SIM_TICKS≈12, real Haiku beats) → add player + scene + cursor → opening turn →
+  redirect to /play. The "warming-up" background-task UX is the NEXT iteration.
+
+**Write surface** (ports + SQLite + Mongo adapters, mirror P1 delegation):
+- `SceneRepository.add({ world_id, place_id, title, scene_number, status }):
+  Promise<{ id: number }>` (status 'active').
+- `WorldRepository.setCursor(worldId: number, sceneId: number): Promise<void>` (sets
+  current_scene_id; world_time is already set by the sim, clock-follows-positions).
+
+**Orchestration** `application/use-cases/create-starship-world.ts`:
+- Deps: the seed deps + sim deps (drama+timeline+places) + characters (add player) +
+  scenes (add) + worlds (setCursor). Flow: seedBoundedWorld(crew=Grok) →
+  simulateWorldForward(ticks=SIM_TICKS) → characters.add player (is_player=1, Bridge) →
+  scenes.add (Bridge, active, scene_number 1) → worlds.setCursor(sceneId). Return
+  { worldId, sceneId }. Pure orchestration (no SQL/SDK/lib).
+
+**Driving adapter** `app/worlds/new/actions.ts` → `createStarshipWorldAction`:
+- Build CreateStarshipWorld from the container (real Grok crew + Haiku drama), run it,
+  then `generateOpeningTurn(worldId, premise)` (lib — adapters may use lib), redirect to
+  /play. Catch + surface a friendly error on failure (Grok/Haiku flake already retried).
+
+**UI** `app/worlds/new/QuickStartForm` (or a sibling): a DISTINCT section, visually set
+apart from the amber genre grid — a **sky/cyan** accented "Living world" card ("A crewed
+scout ship, already in motion before you board") with its own Launch button + pending
+state ("Launching your ship…"), separate from the genre "Generate world" flow. Shares the
+player-name field. Own server action (createStarshipWorldAction), own error surface.
+
 ## RESOLVED: clock follows positions
 The earlier clock/position mismatch (sim persisted the arrival band while positions were
 the last-lived band) is fixed: `SimulateWorldForward` now sets `world_time =
