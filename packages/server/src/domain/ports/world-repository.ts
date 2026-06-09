@@ -1,4 +1,16 @@
-import type { World, WorldSummary } from '@/lib/worlds'
+import type { InitialState, World, WorldSummary } from '@/lib/worlds'
+
+// Input for createOpen (P3 cutover). An open world is seeded eagerly: the
+// `worlds` row plus a starting place (derived from `initialState.location`), a
+// player character standing there, an active Scene 1, and the world cursor —
+// exactly the rows `lib/worlds.createWorld` writes today. `initialState` carries
+// the player's chosen identity/location/time (and optional name); the setting
+// region is computed by the use case and written via `setSettingRegion`.
+export type CreateOpenWorldInput = {
+  name: string
+  premise: string
+  initialState: InitialState
+}
 
 // Input for createBounded (starship P1). A bounded world is created *bare* — no
 // auto-seeded place/character/scene (unlike open-world creation, which seeds a
@@ -23,6 +35,13 @@ export interface WorldRepository {
    * Does NOT auto-seed a place/character/scene; the seeder writes those itself.
    */
   createBounded(input: CreateBoundedWorldInput): Promise<{ id: number }>
+  /**
+   * Seed an OPEN world: the `worlds` row + a starting place (derived from
+   * `initialState.location`), a player character there, an active Scene 1, and
+   * the world cursor (world_time + current_scene_id). Mirrors the open-world
+   * seed `lib/worlds.createWorld` writes today.
+   */
+  createOpen(input: CreateOpenWorldInput): Promise<{ id: number }>
   getWorld(id: number): Promise<World | null>
   listWorlds(): Promise<WorldSummary[]>
   listArchivedWorlds(): Promise<WorldSummary[]>
@@ -37,4 +56,6 @@ export interface WorldRepository {
    * current_scene_id; world_time is already set by the pre-sim.
    */
   setCursor(worldId: number, sceneId: number): Promise<void>
+  /** Set (or clear) the world's geocoding setting-region anchor. */
+  setSettingRegion(worldId: number, region: string | null): Promise<void>
 }

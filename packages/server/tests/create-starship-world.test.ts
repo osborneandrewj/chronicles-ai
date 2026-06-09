@@ -90,6 +90,9 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async createBounded() {
       return { id: worldId }
     },
+    async createOpen() {
+      return { id: worldId }
+    },
     async getWorld() {
       return null
     },
@@ -110,6 +113,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async setCursor(_id, sceneId) {
       store.cursor.current_scene_id = sceneId
     },
+    async setSettingRegion() {},
   }
 
   const places: CreateStarshipWorldDeps['places'] = {

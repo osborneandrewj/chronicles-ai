@@ -4,9 +4,11 @@ import { getWorldCursor } from '@/lib/db'
 import {
   archiveWorld,
   createBoundedWorld,
+  createWorld,
   getWorld,
   listArchivedWorlds,
   listWorlds,
+  setSettingRegion,
   setWorldSceneCursor,
   setWorldTime,
   unarchiveWorld,
@@ -15,6 +17,7 @@ import {
 } from '@/lib/worlds'
 import type {
   CreateBoundedWorldInput,
+  CreateOpenWorldInput,
   WorldRepository,
 } from '@/domain/ports/world-repository'
 
@@ -24,6 +27,11 @@ import type {
 export class SqliteWorldRepository implements WorldRepository {
   createBounded(input: CreateBoundedWorldInput): Promise<{ id: number }> {
     return Promise.resolve(createBoundedWorld(input))
+  }
+
+  createOpen(input: CreateOpenWorldInput): Promise<{ id: number }> {
+    const world = createWorld(input)
+    return Promise.resolve({ id: world.id })
   }
 
   getWorld(id: number): Promise<World | null> {
@@ -61,6 +69,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setCursor(worldId: number, sceneId: number): Promise<void> {
     setWorldSceneCursor(worldId, sceneId)
+    return Promise.resolve()
+  }
+
+  setSettingRegion(worldId: number, region: string | null): Promise<void> {
+    setSettingRegion(worldId, region)
     return Promise.resolve()
   }
 }

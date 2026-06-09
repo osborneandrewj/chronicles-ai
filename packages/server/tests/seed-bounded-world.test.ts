@@ -89,6 +89,9 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       rec.worldsCreated.push(input)
       return { id: 42 }
     },
+    async createOpen() {
+      return { id: 42 }
+    },
     async getWorld() {
       return null
     },
@@ -105,6 +108,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     },
     async setWorldTime() {},
     async setCursor() {},
+    async setSettingRegion() {},
   }
   const places: PlaceRepository = {
     async forWorld() {

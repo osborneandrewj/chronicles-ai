@@ -4,11 +4,12 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
 import { createStarshipWorld } from '@/application/use-cases/create-starship-world'
+import { createWorld, type CreateWorldInput } from '@/application/use-cases/create-world'
 import { getContainer } from '@/composition/container'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn } from '@/lib/opening-turn'
+import { extractSettingRegion } from '@/lib/region-extractor'
 import { generateWorldFromGenre } from '@/lib/world-generator'
-import { createWorld, setSettingRegionForWorld, type CreateWorldInput } from '@/lib/worlds'
 
 const CreateWorldSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120),
@@ -50,10 +51,13 @@ export type CreateWorldFormState = {
 // the player into /play. `redirect` throws by design, so it must be the caller's
 // last statement (and is therefore invoked here, not returned).
 async function createAndOpenWorld(input: CreateWorldInput): Promise<never> {
-  const world = createWorld(input)
-  await setSettingRegionForWorld(world.id, input.premise, input.initialState.location)
-  await generateOpeningTurn(world.id, input.premise)
-  redirect(`/worlds/${world.id}/play`)
+  const c = getContainer()
+  const { worldId } = await createWorld(input, {
+    worlds: c.worlds,
+    extractSettingRegion,
+  })
+  await generateOpeningTurn(worldId, input.premise)
+  redirect(`/worlds/${worldId}/play`)
 }
 
 export async function createWorldAction(

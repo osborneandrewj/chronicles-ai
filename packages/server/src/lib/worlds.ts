@@ -158,6 +158,14 @@ const setSettingRegionStmt = db.prepare<[string | null, number]>(
   'UPDATE worlds SET setting_region = ? WHERE id = ?',
 )
 
+// Sync write half of the setting-region update (no LLM call). The region is now
+// extracted by the CreateWorld use case; the SQLite WorldRepository adapter
+// delegates here to persist it. setSettingRegionForWorld keeps the combined
+// extract-then-write path for any remaining direct lib caller.
+export function setSettingRegion(worldId: number, region: string | null): void {
+  setSettingRegionStmt.run(region, worldId)
+}
+
 // One-shot Haiku extraction of a Nominatim-friendly region string from the
 // premise. Called from the new-world server action right after createWorld,
 // before the opening turn — so by the time the first player turn fires, the

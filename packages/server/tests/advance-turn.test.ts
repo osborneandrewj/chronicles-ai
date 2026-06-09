@@ -87,6 +87,7 @@ class FakeBackgroundTasks {
 function fakeWorld(exists: boolean): WorldRepository {
   return {
     createBounded: async () => ({ id: 1 }),
+    createOpen: async () => ({ id: 1 }),
     getWorld: async () => (exists ? ({ id: 1, premise: 'A test premise.' } as never) : null),
     listWorlds: async () => [],
     listArchivedWorlds: async () => [],
@@ -95,6 +96,7 @@ function fakeWorld(exists: boolean): WorldRepository {
     cursor: async () => ({ world_time: null, current_scene_id: null }),
     setWorldTime: async () => {},
     setCursor: async () => {},
+    setSettingRegion: async () => {},
   }
 }
 
