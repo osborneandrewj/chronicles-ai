@@ -88,7 +88,7 @@ export async function generateOpeningTurn(
       null,
       true, // isOpening — bootstrap the central thread + concrete place kind
     )
-    applyArchivistPatch(worldId, narratorTurn.id, patch)
+    await applyArchivistPatch(worldId, narratorTurn.id, patch)
     updateTurnMetadata(narratorTurn.id, {
       archivist: { model: ARCHIVIST_MODEL, usage: archivistUsage, patch },
     })

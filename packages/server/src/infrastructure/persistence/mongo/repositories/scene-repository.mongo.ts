@@ -21,6 +21,7 @@ export class MongoSceneRepository implements SceneRepository {
   async forWorld(worldId: number): Promise<Scene[]> {
     const docs = await this.ctx.models.Scene.find({ worldId })
       .sort({ sceneNumber: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return docs.map(mapScene)
   }
@@ -28,6 +29,7 @@ export class MongoSceneRepository implements SceneRepository {
   async activeForWorld(worldId: number): Promise<Scene | null> {
     const doc = await this.ctx.models.Scene.findOne({ worldId, status: 'active' })
       .sort({ sceneNumber: -1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc ? mapScene(doc) : null
   }
@@ -131,6 +133,7 @@ export class MongoSceneRepository implements SceneRepository {
     const doc = await this.ctx.models.Scene.findOne({ worldId })
       .sort({ sceneNumber: -1 })
       .select({ sceneNumber: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc?.sceneNumber ?? 0
   }
@@ -138,6 +141,7 @@ export class MongoSceneRepository implements SceneRepository {
   async currentSceneId(worldId: number): Promise<number | null> {
     const doc = await this.ctx.models.World.findOne({ id: worldId })
       .select({ currentSceneId: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc?.currentSceneId ?? null
   }
@@ -145,10 +149,12 @@ export class MongoSceneRepository implements SceneRepository {
   async currentScenePlaceId(worldId: number): Promise<number | null> {
     const world = await this.ctx.models.World.findOne({ id: worldId })
       .select({ currentSceneId: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     if (!world?.currentSceneId) return null
     const scene = await this.ctx.models.Scene.findOne({ id: world.currentSceneId })
       .select({ placeId: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return scene?.placeId ?? null
   }

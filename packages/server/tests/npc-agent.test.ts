@@ -95,10 +95,10 @@ describe('applyNpcAgentPatch', () => {
   let worldId: number
   let turnId: number
 
-  beforeEach(() => {
+  beforeEach(async () => {
     ;({ worldId, turnId } = seedWorld(`NpcAgent-${Math.random()}`))
     // Seed two NPCs: Marcus (local agent-tier) and Donna (npc-tier).
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Marcus', description: 'Senior engineer.', current_place_name: 'Covenant Security' },
         { name: 'Donna', description: 'Office manager.', current_place_name: 'Covenant Security' },
@@ -131,9 +131,9 @@ describe('applyNpcAgentPatch', () => {
     )
   })
 
-  it('relocates an agent NPC only when the place already exists', () => {
+  it('relocates an agent NPC only when the place already exists', async () => {
     // Pre-existing place — relocation should land.
-    applyArchivistPatch(worldId, turnId, { places: [{ name: 'Breakroom' }] })
+    await applyArchivistPatch(worldId, turnId, { places: [{ name: 'Breakroom' }] })
     const breakroomId = getPlacesForWorld(worldId).find((p) => p.name === 'Breakroom')!.id
 
     applyNpcAgentPatch(worldId, turnId, {

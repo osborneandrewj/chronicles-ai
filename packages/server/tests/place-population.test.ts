@@ -384,13 +384,13 @@ describe('occupancy in the narrator state block', () => {
 })
 
 describe('archivist relevance tags', () => {
-  it('persists relevance_tags on a thread and exposes them on the dossier', () => {
+  it('persists relevance_tags on a thread and exposes them on the dossier', async () => {
     const worldId = freshWorld()
     const turnId = (db.prepare(
       "INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x') RETURNING id",
     ).get(worldId) as { id: number }).id
 
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [
         {
           title: 'The missing courier',
@@ -406,30 +406,30 @@ describe('archivist relevance tags', () => {
     expect(JSON.parse(t!.relevance_tags_json)).toEqual(['bar', 'rumor', 'courier'])
   })
 
-  it('overwrites relevance_tags when an existing thread is updated with new tags', () => {
+  it('overwrites relevance_tags when an existing thread is updated with new tags', async () => {
     const worldId = freshWorld()
     const turnId = (db.prepare(
       "INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x') RETURNING id",
     ).get(worldId) as { id: number }).id
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [{ title: 'Thread A', kind: 'quest', relevance_tags: ['bar'] }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [{ title: 'Thread A', relevance_tags: ['docks', 'smuggling'] }],
     })
     const t = getStoryDossierForWorld(worldId).threads.find((x) => x.title === 'Thread A')
     expect(JSON.parse(t!.relevance_tags_json)).toEqual(['docks', 'smuggling'])
   })
 
-  it('preserves existing relevance_tags when an update omits them', () => {
+  it('preserves existing relevance_tags when an update omits them', async () => {
     const worldId = freshWorld()
     const turnId = (db.prepare(
       "INSERT INTO turns (world_id, role, content) VALUES (?, 'assistant', 'x') RETURNING id",
     ).get(worldId) as { id: number }).id
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [{ title: 'Thread B', kind: 'quest', relevance_tags: ['bar', 'rumor'] }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [{ title: 'Thread B', summary: 'updated summary' }],
     })
     const t = getStoryDossierForWorld(worldId).threads.find((x) => x.title === 'Thread B')

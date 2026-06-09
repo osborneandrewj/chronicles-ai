@@ -49,6 +49,7 @@ export class MongoDossierWriter implements DossierWriter {
         hidden: 1,
         relevanceTagsJson: 1,
       })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     if (!doc) return null
     return {
@@ -118,6 +119,7 @@ export class MongoDossierWriter implements DossierWriter {
       titleKey: title.toLowerCase(),
     })
       .select({ id: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc ? { id: doc.id } : null
   }
@@ -168,6 +170,7 @@ export class MongoDossierWriter implements DossierWriter {
       titleKey: title.toLowerCase(),
     })
       .select({ id: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc ? { id: doc.id } : null
   }
@@ -221,6 +224,7 @@ export class MongoDossierWriter implements DossierWriter {
       nameKey: name.toLowerCase(),
     })
       .select({ id: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return doc ? { id: doc.id } : null
   }

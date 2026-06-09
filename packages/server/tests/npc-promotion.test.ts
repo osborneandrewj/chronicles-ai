@@ -32,11 +32,11 @@ describe('recordAppearancesAndAutoPromote', () => {
   let worldId: number
   let tickTurnId: number
 
-  beforeEach(() => {
+  beforeEach(async () => {
     worldId = seedWorld(`Promo-${Math.random()}`)
     tickTurnId = 0
     const turn = insertTurn(worldId, 'assistant', 'seed', null)
-    applyArchivistPatch(worldId, turn.id, {
+    await applyArchivistPatch(worldId, turn.id, {
       characters: [
         { name: 'Marcus', description: 'Eng.', current_place_name: 'Covenant Security' },
         { name: 'Kyle', description: 'Eng.', current_place_name: 'Covenant Security' },
@@ -118,9 +118,9 @@ describe('recordAppearancesAndAutoPromote', () => {
     expect(result.counted).toBe(0)
   })
 
-  it('does not promote routine service workers into agent-tier NPCs', () => {
+  it('does not promote routine service workers into agent-tier NPCs', async () => {
     const turn = insertTurn(worldId, 'assistant', 'A USPS driver waits for a signature.', null)
-    applyArchivistPatch(worldId, turn.id, {
+    await applyArchivistPatch(worldId, turn.id, {
       characters: [
         {
           name: 'USPS driver',

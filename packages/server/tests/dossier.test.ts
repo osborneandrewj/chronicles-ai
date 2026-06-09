@@ -23,9 +23,9 @@ function seedWorld(): { worldId: number; turnId: number } {
 }
 
 describe('story dossier state', () => {
-  it('renders active story pressure into the narrator state block', () => {
+  it('renders active story pressure into the narrator state block', async () => {
     const { worldId, turnId } = seedWorld()
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [
         {
           title: 'Identify the relay fragment',
@@ -73,9 +73,9 @@ describe('story dossier state', () => {
     )
   })
 
-  it('renders NPC cognition into the narrator state block', () => {
+  it('renders NPC cognition into the narrator state block', async () => {
     const { worldId, turnId } = seedWorld()
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Mara Vale',
@@ -125,9 +125,9 @@ describe('story dossier state', () => {
     expect(block).toContain('diegetic tools: can query field records and auspex logs')
   })
 
-  it('marks the protagonist row as durable continuity in the narrator state block', () => {
+  it('marks the protagonist row as durable continuity in the narrator state block', async () => {
     const { worldId, turnId } = seedWorld()
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Andras Voss',
@@ -145,9 +145,9 @@ describe('story dossier state', () => {
     expect(block).toContain('carries a concealed bolt pistol')
   })
 
-  it('renders scene pacing context into the narrator state block', () => {
+  it('renders scene pacing context into the narrator state block', async () => {
     const { worldId, turnId } = seedWorld()
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       scene_context: {
         scene_mood: 'tense',
         pace: 'medium',
@@ -161,9 +161,9 @@ describe('story dossier state', () => {
     expect(block).toContain('pacing: mood tense; pace medium; focus action')
   })
 
-  it('renders NPC observations as behavior cues instead of prose-ready observations', () => {
+  it('renders NPC observations as behavior cues instead of prose-ready observations', async () => {
     const { worldId, turnId } = seedWorld()
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Mara Vale',

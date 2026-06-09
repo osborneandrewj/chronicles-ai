@@ -169,7 +169,9 @@ export class MongoWorldRepository implements WorldRepository {
   }
 
   async getWorld(id: number): Promise<World | null> {
-    const doc = await this.ctx.models.World.findOne({ id }).lean()
+    const doc = await this.ctx.models.World.findOne({ id })
+      .session(this.ctx.currentSession ?? null)
+      .lean()
     return doc ? mapWorld(doc) : null
   }
 
@@ -212,6 +214,7 @@ export class MongoWorldRepository implements WorldRepository {
   ): Promise<{ world_time: string | null; current_scene_id: number | null }> {
     const doc = await this.ctx.models.World.findOne({ id: worldId })
       .select({ worldTime: 1, currentSceneId: 1 })
+      .session(this.ctx.currentSession ?? null)
       .lean()
     return {
       world_time: doc?.worldTime ?? null,

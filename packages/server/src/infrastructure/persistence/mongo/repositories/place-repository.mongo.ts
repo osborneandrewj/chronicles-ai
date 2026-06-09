@@ -24,12 +24,17 @@ export class MongoPlaceRepository implements PlaceRepository {
   }
 
   async forWorld(worldId: number): Promise<Place[]> {
-    const docs = await this.ctx.models.Place.find({ worldId }).sort({ id: 1 }).lean()
+    const docs = await this.ctx.models.Place.find({ worldId })
+      .sort({ id: 1 })
+      .session(this.session ?? null)
+      .lean()
     return docs.map(mapPlace)
   }
 
   async byId(id: number): Promise<Place | null> {
-    const doc = await this.ctx.models.Place.findOne({ id }).lean()
+    const doc = await this.ctx.models.Place.findOne({ id })
+      .session(this.session ?? null)
+      .lean()
     return doc ? mapPlace(doc) : null
   }
 
@@ -65,19 +70,26 @@ export class MongoPlaceRepository implements PlaceRepository {
   async currentPlaceForWorld(worldId: number): Promise<Place | null> {
     const world = await this.ctx.models.World.findOne({ id: worldId })
       .select({ currentSceneId: 1 })
+      .session(this.session ?? null)
       .lean()
     if (!world?.currentSceneId) return null
     const scene = await this.ctx.models.Scene.findOne({ id: world.currentSceneId })
       .select({ placeId: 1 })
+      .session(this.session ?? null)
       .lean()
     if (!scene) return null
-    const place = await this.ctx.models.Place.findOne({ id: scene.placeId }).lean()
+    const place = await this.ctx.models.Place.findOne({ id: scene.placeId })
+      .session(this.session ?? null)
+      .lean()
     return place ? mapPlace(place) : null
   }
 
   // placeNameByIdStmt
   async nameById(id: number): Promise<string | null> {
-    const doc = await this.ctx.models.Place.findOne({ id }).select({ name: 1 }).lean()
+    const doc = await this.ctx.models.Place.findOne({ id })
+      .select({ name: 1 })
+      .session(this.session ?? null)
+      .lean()
     return doc?.name ?? null
   }
 
@@ -159,6 +171,7 @@ export class MongoPlaceRepository implements PlaceRepository {
   async appendPlayerNotes(id: number, note: string): Promise<void> {
     const doc = await this.ctx.models.Place.findOne({ id })
       .select({ playerNotes: 1 })
+      .session(this.session ?? null)
       .lean()
     const existing = doc?.playerNotes ?? null
     const next =

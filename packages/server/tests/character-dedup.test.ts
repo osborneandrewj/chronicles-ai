@@ -68,13 +68,13 @@ describe('findLikelyDuplicateCharacters', () => {
 })
 
 describe('getFullWorldState.potentialDuplicates', () => {
-  it('flags a descriptor + named pair at the same place', () => {
+  it('flags a descriptor + named pair at the same place', async () => {
     const world = createWorld({
       name: `Dup-${Math.random()}`,
       premise: 'x',
       initialState: { time: 't', location: 'Cornavin station', identity: 'i', playerName: 'Andrew' },
     })
-    applyArchivistPatch(world.id, 1, {
+    await applyArchivistPatch(world.id, 1, {
       characters: [
         { name: 'The Attendant at the Gates', current_place_name: 'Cornavin station' },
         { name: 'Jérôme Moreau', current_place_name: 'Cornavin station' },
@@ -86,7 +86,7 @@ describe('getFullWorldState.potentialDuplicates', () => {
 })
 
 describe('mergeCharacters reveries', () => {
-  it('merges reveries by re-pointing rows, deduped', () => {
+  it('merges reveries by re-pointing rows, deduped', async () => {
     const world = createWorld({
       name: `Rev-merge-${Math.random()}`,
       premise: 'x',
@@ -96,7 +96,7 @@ describe('mergeCharacters reveries', () => {
 
     // Seed two duplicate NPC rows (target "Robert", source "Bob") with
     // non-overlapping names so the soft-matcher won't auto-merge before we do.
-    applyArchivistPatch(world.id, turnId, {
+    await applyArchivistPatch(world.id, turnId, {
       characters: [
         { name: 'Robert', current_place_name: 'Cornavin station' },
         { name: 'Bob', current_place_name: 'Cornavin station' },
@@ -114,7 +114,7 @@ describe('mergeCharacters reveries', () => {
 
     // Public dedup path: the correction-channel `aliases` field asserts that
     // "Bob" is the same row as "Robert", driving runAliasMerges -> mergeCharacters.
-    applyArchivistPatch(world.id, turnId, {
+    await applyArchivistPatch(world.id, turnId, {
       characters: [{ name: 'Robert', aliases: ['Bob'] }],
     })
 

@@ -106,14 +106,14 @@ describe('applyArchivistPatch', () => {
     expect(cursor.current_scene_id).toBe(scenes[0].id)
   })
 
-  it('empty patch is a no-op', () => {
+  it('empty patch is a no-op', async () => {
     const before = {
       characters: getCharactersForWorld(worldId).length,
       places: getPlacesForWorld(worldId).length,
       scenes: getScenesForWorld(worldId).length,
       worldTime: getWorldCursor(worldId).world_time,
     }
-    applyArchivistPatch(worldId, turnId, {})
+    await applyArchivistPatch(worldId, turnId, {})
     expect({
       characters: getCharactersForWorld(worldId).length,
       places: getPlacesForWorld(worldId).length,
@@ -122,13 +122,13 @@ describe('applyArchivistPatch', () => {
     }).toEqual(before)
   })
 
-  it('current_time updates the world clock', () => {
-    applyArchivistPatch(worldId, turnId, { current_time: 'Dusk, lamps lit' })
+  it('current_time updates the world clock', async () => {
+    await applyArchivistPatch(worldId, turnId, { current_time: 'Dusk, lamps lit' })
     expect(getWorldCursor(worldId).world_time).toBe('Dusk, lamps lit')
   })
 
-  it('applies story dossier threads, clues, objectives, resources, and timeline events', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('applies story dossier threads, clues, objectives, resources, and timeline events', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       story_threads: [
         {
           title: 'Identify the relay fragment',
@@ -205,8 +205,8 @@ describe('applyArchivistPatch', () => {
     })
   })
 
-  it('classifies objective-bearing threads as quests (new + mystery upgrade), but leaves threats alone', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('classifies objective-bearing threads as quests (new + mystery upgrade), but leaves threats alone', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       // A bare objective referencing a brand-new thread title (no thread row).
       story_objectives: [{ title: 'Reach the spire', thread_title: 'The Spire Signal' }],
       // Threads the model labelled itself; objectives attach on the next turn.
@@ -215,7 +215,7 @@ describe('applyArchivistPatch', () => {
         { title: 'The Hostage Standoff', kind: 'threat', summary: 'A captor makes demands.' },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       story_objectives: [
         { title: 'Assess the silence', thread_title: 'The Dead Forge' },
         { title: 'Stall the captor', thread_title: 'The Hostage Standoff' },
@@ -231,7 +231,7 @@ describe('applyArchivistPatch', () => {
     expect(threads.find((t) => t.title === 'The Hostage Standoff')!.kind).toBe('threat')
   })
 
-  it('inserts a new character with description and place', () => {
+  it('inserts a new character with description and place', async () => {
     const patch: ArchivistPatch = {
       characters: [
         {
@@ -241,7 +241,7 @@ describe('applyArchivistPatch', () => {
         },
       ],
     }
-    applyArchivistPatch(worldId, turnId, patch)
+    await applyArchivistPatch(worldId, turnId, patch)
 
     const chars = getCharactersForWorld(worldId)
     expect(chars).toHaveLength(2)
@@ -254,11 +254,11 @@ describe('applyArchivistPatch', () => {
     expect(tom.current_place_id).toBe(places.find((p) => p.name === 'Mevagissey harbour')!.id)
   })
 
-  it('upserts character by case-insensitive name and preserves untouched fields', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('upserts character by case-insensitive name and preserves untouched fields', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', description: 'A fisherman.' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'tom', status: 'inactive' }], // lowercase, different field
     })
 
@@ -269,8 +269,8 @@ describe('applyArchivistPatch', () => {
     expect(tom.status).toBe('inactive') // updated
   })
 
-  it('canonicalizes short/full character names onto one row', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('canonicalizes short/full character names onto one row', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Marcus',
@@ -279,7 +279,7 @@ describe('applyArchivistPatch', () => {
         },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Marcus Reeves',
@@ -299,8 +299,8 @@ describe('applyArchivistPatch', () => {
     expect(marcusRows[0].current_attitude).toBe('resolute')
   })
 
-  it('canonicalizes full/short character names onto one row', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('canonicalizes full/short character names onto one row', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Jordana Osborne',
@@ -309,7 +309,7 @@ describe('applyArchivistPatch', () => {
         },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Jordana', active_goal: 'reach Andrew at work' }],
     })
 
@@ -321,14 +321,14 @@ describe('applyArchivistPatch', () => {
     expect(jordanaRows[0].active_goal).toBe('reach Andrew at work')
   })
 
-  it('does not soft-merge an ambiguous short character name', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('does not soft-merge an ambiguous short character name', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Marcus Reeves', description: 'One coworker.' },
         { name: 'Marcus Bell', description: 'Another coworker.' },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Marcus', description: 'Ambiguous Marcus reference.' }],
     })
 
@@ -338,9 +338,9 @@ describe('applyArchivistPatch', () => {
     expect(marcusRows).toHaveLength(3)
   })
 
-  it('renames a descriptor NPC to a revealed proper name via aliases, with no duplicate row', () => {
+  it('renames a descriptor NPC to a revealed proper name via aliases, with no duplicate row', async () => {
     // An agentic, descriptor-named NPC the player has been interrogating.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'The Attendant at the Gates', description: 'Station attendant.', current_attitude: 'terrified' },
       ],
@@ -352,7 +352,7 @@ describe('applyArchivistPatch', () => {
     // The reveal turn: the descriptor figure gives a proper name. The archivist
     // is expected to rename-and-alias the SAME row (not mint a new one) — the
     // exact shape prompt rule "A revealed name is the same person" requires.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Jérôme Moreau',
@@ -372,15 +372,15 @@ describe('applyArchivistPatch', () => {
     expect(matches[0].aliases ?? '').toContain('The Attendant at the Gates')
   })
 
-  it('reveals_name_of renames a descriptor row to the proper name, no duplicate', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('reveals_name_of renames a descriptor row to the proper name, no duplicate', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'The Attendant at the Gates', description: 'Station attendant.' }],
     })
     db.prepare(
       "UPDATE characters SET agency_level = 'local' WHERE world_id = ? AND lower(name) = lower('The Attendant at the Gates')",
     ).run(worldId)
 
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Jérôme Moreau', reveals_name_of: 'The Attendant at the Gates', active_goal: 'survive' },
       ],
@@ -395,11 +395,11 @@ describe('applyArchivistPatch', () => {
     expect(matches[0].aliases ?? '').toContain('The Attendant at the Gates')
   })
 
-  it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('appends memorable_facts with newline; multiple appends accumulate; each line suffixed with [t:N]', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'gave the player a silver locket' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'owes the harbourmaster two pounds' }],
     })
 
@@ -409,12 +409,12 @@ describe('applyArchivistPatch', () => {
     )
   })
 
-  it('different turn ids produce different [t:N] suffixes on memorable_facts', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('different turn ids produce different [t:N] suffixes on memorable_facts', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', memorable_facts_append: 'first fact' }],
     })
     const secondTurn = insertTurn(worldId, 'assistant', 'Another turn.', null)
-    applyArchivistPatch(worldId, secondTurn.id, {
+    await applyArchivistPatch(worldId, secondTurn.id, {
       characters: [{ name: 'Tom', memorable_facts_append: 'second fact' }],
     })
 
@@ -424,12 +424,12 @@ describe('applyArchivistPatch', () => {
     )
   })
 
-  it('appends observations on NPC insert and on subsequent update; each line suffixed with [t:N]', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('appends observations on NPC insert and on subsequent update; each line suffixed with [t:N]', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', observations_append: 'noticed Edith repeated the same question' }],
     })
     const secondTurn = insertTurn(worldId, 'assistant', 'Another turn.', null)
-    applyArchivistPatch(worldId, secondTurn.id, {
+    await applyArchivistPatch(worldId, secondTurn.id, {
       characters: [{ name: 'Tom', observations_append: 'watched Edith stare at the lamp without answering' }],
     })
 
@@ -439,8 +439,8 @@ describe('applyArchivistPatch', () => {
     )
   })
 
-  it('observations_append on the player is dropped silently (NPC-only field)', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('observations_append on the player is dropped silently (NPC-only field)', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Edith', observations_append: 'this should never persist' }],
     })
 
@@ -449,11 +449,11 @@ describe('applyArchivistPatch', () => {
     expect(edith.observations).toBeNull()
   })
 
-  it('omitting observations_append leaves existing observations unchanged', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('omitting observations_append leaves existing observations unchanged', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', observations_append: 'noticed something off' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', current_attitude: 'wary' }],
     })
 
@@ -462,9 +462,9 @@ describe('applyArchivistPatch', () => {
     expect(tom.current_attitude).toBe('wary')
   })
 
-  it('upserts place by case-insensitive name; idempotent on repeat', () => {
-    applyArchivistPatch(worldId, turnId, { places: [{ name: 'The Ship Inn', kind: 'tavern' }] })
-    applyArchivistPatch(worldId, turnId, {
+  it('upserts place by case-insensitive name; idempotent on repeat', async () => {
+    await applyArchivistPatch(worldId, turnId, { places: [{ name: 'The Ship Inn', kind: 'tavern' }] })
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'the ship inn', description: 'Smoky front room.' }],
     })
 
@@ -475,11 +475,11 @@ describe('applyArchivistPatch', () => {
     expect(inn.description).toBe('Smoky front room.') // updated on second call
   })
 
-  it('canonicalizes qualified and nested house place names', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('canonicalizes qualified and nested house place names', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: '33rd Street house', description: "Andrew and Jordana's home." }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       places: [
         { name: '33rd Street house - kitchen', kind: 'room' },
         { name: '33rd Street house, Spokane', description: 'A home in Spokane.' },
@@ -493,11 +493,11 @@ describe('applyArchivistPatch', () => {
     expect(house.kind).toBe('room')
   })
 
-  it('maps generic residential rooms to the current house instead of creating pseudo-places', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('maps generic residential rooms to the current house instead of creating pseudo-places', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'Kitchen' }],
       characters: [{ name: 'Jordana', current_place_name: 'Bedroom' }],
     })
@@ -510,15 +510,15 @@ describe('applyArchivistPatch', () => {
     expect(jordana.current_place_id).toBe(house.id)
   })
 
-  it('canonicalizes office and transit-flavored place variants', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('canonicalizes office and transit-flavored place variants', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       places: [
         { name: 'Covenant Security' },
         { name: 'House on Rosebury Ln' },
         { name: 'Spokane' },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       places: [
         { name: 'Covenant Security office' },
         { name: 'Covenant Security third floor' },
@@ -535,9 +535,9 @@ describe('applyArchivistPatch', () => {
     expect(places.filter((p) => p.name.startsWith('Spokane'))).toHaveLength(1)
   })
 
-  it("closes the active scene with a summary and turn pointer", () => {
+  it("closes the active scene with a summary and turn pointer", async () => {
     const scene = getActiveSceneForWorld(worldId)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       scene: { action: 'close', summary: 'Edith stepped onto the quay and the lamp went out.' },
     })
 
@@ -551,9 +551,9 @@ describe('applyArchivistPatch', () => {
     expect(row.closed_at_turn).toBe(turnId)
   })
 
-  it("opens a new scene; auto-closes the prior active scene and advances the world cursor", () => {
+  it("opens a new scene; auto-closes the prior active scene and advances the world cursor", async () => {
     const priorScene = getActiveSceneForWorld(worldId)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       scene: { action: 'open', title: 'Inside the Ship Inn', place_name: 'The Ship Inn' },
     })
 
@@ -574,8 +574,8 @@ describe('applyArchivistPatch', () => {
     expect(places.some((p) => p.name === 'The Ship Inn')).toBe(true)
   })
 
-  it('opening a scene also moves the player character to that place', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('opening a scene also moves the player character to that place', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       scene: { action: 'open', title: 'Inside the Ship Inn', place_name: 'The Ship Inn' },
     })
 
@@ -584,15 +584,15 @@ describe('applyArchivistPatch', () => {
     expect(player.current_place_id).toBe(shipInn.id)
   })
 
-  it("'keep_open' is a no-op for scenes", () => {
+  it("'keep_open' is a no-op for scenes", async () => {
     const before = getScenesForWorld(worldId).map((s) => ({ id: s.id, status: s.status }))
-    applyArchivistPatch(worldId, turnId, { scene: { action: 'keep_open' } })
+    await applyArchivistPatch(worldId, turnId, { scene: { action: 'keep_open' } })
     expect(getScenesForWorld(worldId).map((s) => ({ id: s.id, status: s.status }))).toEqual(before)
   })
 
-  it('updates active scene pacing context without changing scene identity', () => {
+  it('updates active scene pacing context without changing scene identity', async () => {
     const before = getActiveSceneForWorld(worldId)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       scene_context: {
         scene_mood: 'tense',
         pace: 'medium',
@@ -607,8 +607,8 @@ describe('applyArchivistPatch', () => {
     expect(after.focus).toBe('action')
   })
 
-  it('resolves character current_place_name against places listed earlier in the same patch', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('resolves character current_place_name against places listed earlier in the same patch', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'Lighthouse Cliff' }],
       characters: [{ name: 'Old Bran', current_place_name: 'Lighthouse Cliff' }],
     })
@@ -621,9 +621,9 @@ describe('applyArchivistPatch', () => {
   // (world 6, turns 389-403). The archivist relocates a cluster of NPCs to a
   // new place while dropping the protagonist's own location and the scene
   // action; deterministic code infers the move and advances player + cursor.
-  it('infers a player + cursor move when a cluster of NPCs relocates and the player row is omitted', () => {
+  it('infers a player + cursor move when a cluster of NPCs relocates and the player row is omitted', async () => {
     // Establish two NPCs present with the player at the harbour (scene 1 place).
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Micha', description: 'A paramedic.', current_place_name: 'Mevagissey harbour' },
         { name: 'Karen', description: 'A charge nurse.', current_place_name: 'Mevagissey harbour' },
@@ -641,7 +641,7 @@ describe('applyArchivistPatch', () => {
       'The team pulls into Sacred Heart and hurries inside.',
       null,
     )
-    applyArchivistPatch(worldId, travelTurn.id, {
+    await applyArchivistPatch(worldId, travelTurn.id, {
       characters: [
         { name: 'Micha', current_place_name: 'Sacred Heart Hospital' },
         { name: 'Karen', current_place_name: 'Sacred Heart Hospital' },
@@ -664,9 +664,9 @@ describe('applyArchivistPatch', () => {
     expect(player.current_place_id).toBe(hospital.id)
   })
 
-  it('does NOT fire when the patch moves the player away from the relocating NPC cluster (turn-403 shape)', () => {
+  it('does NOT fire when the patch moves the player away from the relocating NPC cluster (turn-403 shape)', async () => {
     // NPCs present with the player at the harbour.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Micha', description: 'A paramedic.', current_place_name: 'Mevagissey harbour' },
         { name: 'Karen', description: 'A charge nurse.', current_place_name: 'Mevagissey harbour' },
@@ -684,7 +684,7 @@ describe('applyArchivistPatch', () => {
       'Back at the harbour, you watch the ambulance leave for Sacred Heart.',
       null,
     )
-    applyArchivistPatch(worldId, turn.id, {
+    await applyArchivistPatch(worldId, turn.id, {
       characters: [
         { name: 'Micha', current_place_name: 'Sacred Heart Hospital' },
         { name: 'Karen', current_place_name: 'Sacred Heart Hospital' },
@@ -697,8 +697,8 @@ describe('applyArchivistPatch', () => {
     expect(getWorldCursor(worldId).current_scene_id).toBe(priorScene.id)
   })
 
-  it('inserts a new NPC with active_goal and current_attitude', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('inserts a new NPC with active_goal and current_attitude', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Innkeeper',
@@ -713,8 +713,8 @@ describe('applyArchivistPatch', () => {
     expect(ink.current_attitude).toBe('polite but probing')
   })
 
-  it('insert defaults: omitted goal/attitude → NULL on a new row', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('insert defaults: omitted goal/attitude → NULL on a new row', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Silent Watcher', description: 'A figure on the cliff path.' }],
     })
     const watcher = getCharactersForWorld(worldId).find((c) => c.name === 'Silent Watcher')!
@@ -722,14 +722,14 @@ describe('applyArchivistPatch', () => {
     expect(watcher.current_attitude).toBeNull()
   })
 
-  it('updates active_goal on an existing NPC; omitted means unchanged', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('updates active_goal on an existing NPC; omitted means unchanged', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Tom', description: 'Harbourmaster.', active_goal: 'avoid the constable' },
       ],
     })
     // Second patch omits active_goal entirely — must NOT clobber.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', current_attitude: 'gruff' }],
     })
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
@@ -737,53 +737,53 @@ describe('applyArchivistPatch', () => {
     expect(tom.current_attitude).toBe('gruff')
   })
 
-  it('explicit null clears active_goal (satisfied/abandoned)', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('explicit null clears active_goal (satisfied/abandoned)', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', active_goal: 'find the missing skipper' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', active_goal: null }],
     })
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.active_goal).toBeNull()
   })
 
-  it('changing active_goal replaces the prior value (not appended)', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('changing active_goal replaces the prior value (not appended)', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', active_goal: 'sell the catch' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', active_goal: 'warn the player about the storm' }],
     })
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.active_goal).toBe('warn the player about the storm')
   })
 
-  it('updates current_attitude; omitted means unchanged; null clears', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('updates current_attitude; omitted means unchanged; null clears', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', current_attitude: 'cautious, weighing his words' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', description: 'A harbourmaster, late 50s.' }], // attitude omitted
     })
     let tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.current_attitude).toBe('cautious, weighing his words')
     expect(tom.description).toBe('A harbourmaster, late 50s.')
 
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', current_attitude: null }],
     })
     tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
     expect(tom.current_attitude).toBeNull()
   })
 
-  it('goal/attitude updates do not disturb memorable_facts', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('goal/attitude updates do not disturb memorable_facts', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Tom', memorable_facts_append: 'gave the player a silver locket' },
       ],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Tom', active_goal: 'recover the locket' }],
     })
     const tom = getCharactersForWorld(worldId).find((c) => c.name === 'Tom')!
@@ -792,29 +792,29 @@ describe('applyArchivistPatch', () => {
   })
 
   // v0.6.6 — player canon channel
-  it('player_notes_append on the player adds a single line', () => {
+  it('player_notes_append on the player adds a single line', async () => {
     const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: player.name, player_notes_append: 'Drives a Subaru Outback' }],
     })
     const after = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
     expect(after.player_notes).toBe('Drives a Subaru Outback')
   })
 
-  it('player_notes_append accumulates lines across calls', () => {
+  it('player_notes_append accumulates lines across calls', async () => {
     const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: player.name, player_notes_append: 'Drives a Subaru Outback' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: player.name, player_notes_append: 'Has a sister Maeve in Boston' }],
     })
     const after = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
     expect(after.player_notes).toBe('Drives a Subaru Outback\nHas a sister Maeve in Boston')
   })
 
-  it('player_notes_append on a new character creates the row and writes the note', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('player_notes_append on a new character creates the row and writes the note', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Maeve',
@@ -828,11 +828,11 @@ describe('applyArchivistPatch', () => {
     expect(maeve.description).toBe("Player's sister.")
   })
 
-  it('place player_notes_append accumulates lines', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('place player_notes_append accumulates lines', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'Mevagissey harbour', player_notes_append: 'Where my grandfather worked' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       places: [{ name: 'Mevagissey harbour', player_notes_append: 'Mooring 14 is the family slip' }],
     })
     const place = getPlacesForWorld(worldId).find((p) =>
@@ -843,8 +843,8 @@ describe('applyArchivistPatch', () => {
     )
   })
 
-  it('aliases merges two existing NPC rows whose names do not overlap', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('aliases merges two existing NPC rows whose names do not overlap', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Bob', description: 'A drinker at the back of the pub.' },
         { name: 'Robert', description: 'Former lighthouse keeper.' },
@@ -852,7 +852,7 @@ describe('applyArchivistPatch', () => {
     })
     expect(getCharactersForWorld(worldId).filter((c) => /^(?:bob|robert)$/i.test(c.name))).toHaveLength(2)
 
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         { name: 'Robert', aliases: ['Bob'], player_notes_append: 'Bob is short for Robert' },
       ],
@@ -870,11 +870,11 @@ describe('applyArchivistPatch', () => {
     expect(remaining[0].player_notes).toBe('Bob is short for Robert')
   })
 
-  it('aliases is a no-op when the named alias does not exist', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('aliases is a no-op when the named alias does not exist', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Robert', description: 'Former lighthouse keeper.' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Robert', aliases: ['Bob'] }],
     })
     const remaining = getCharactersForWorld(worldId).filter((c) => c.name === 'Robert')
@@ -883,7 +883,7 @@ describe('applyArchivistPatch', () => {
 
   it('aliases merge preserves fresh scalar fields from the more recently updated row', async () => {
     // Create "Jordana" first, with stale scalar state.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Jordana',
@@ -898,7 +898,7 @@ describe('applyArchivistPatch', () => {
     // sub-second second patch would otherwise tie.
     await new Promise((resolve) => setTimeout(resolve, 1100))
     // Then "Jordana Osborne" with the *current* state.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'Jordana Osborne',
@@ -910,7 +910,7 @@ describe('applyArchivistPatch', () => {
     })
 
     // Player merges them via alias.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Jordana Osborne', aliases: ['Jordana'] }],
     })
 
@@ -926,14 +926,14 @@ describe('applyArchivistPatch', () => {
     expect(remaining[0].current_attitude).toBe('guarded but engaged')
   })
 
-  it('alias merge uses the patch-supplied name as the canonical even when target was older', () => {
-    applyArchivistPatch(worldId, turnId, {
+  it('alias merge uses the patch-supplied name as the canonical even when target was older', async () => {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Jordana', description: 'A clerk.' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Jordana Osborne', description: 'A clerk turned investigator.' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Jordana Osborne', aliases: ['Jordana'] }],
     })
     const remaining = getCharactersForWorld(worldId).filter((c) => /jordana/i.test(c.name))
@@ -941,12 +941,12 @@ describe('applyArchivistPatch', () => {
     expect(remaining[0].name).toBe('Jordana Osborne')
   })
 
-  it('aliases will not merge across the player/NPC boundary', () => {
+  it('aliases will not merge across the player/NPC boundary', async () => {
     const player = getCharactersForWorld(worldId).find((c) => c.is_player === 1)!
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Edith Stranger', description: 'A drifter said to share my name.' }],
     })
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: player.name, aliases: ['Edith Stranger'] }],
     })
     const everyone = getCharactersForWorld(worldId)
@@ -954,9 +954,9 @@ describe('applyArchivistPatch', () => {
     expect(everyone.find((c) => c.name === 'Edith Stranger')).toBeDefined()
   })
 
-  it('persists aliases on the canonical row and resolves new descriptors via them', () => {
+  it('persists aliases on the canonical row and resolves new descriptors via them', async () => {
     // First turn: archivist creates an unnamed figure.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'The Man at the Gyro Van',
@@ -971,7 +971,7 @@ describe('applyArchivistPatch', () => {
     // and lists the new descriptor as an alias on the existing row. Expect
     // the canonical row's aliases column to gain the new descriptor and the
     // total character count to NOT increase.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'The Man at the Gyro Van',
@@ -988,7 +988,7 @@ describe('applyArchivistPatch', () => {
     // Third turn: archivist references the figure by the alias only. Expect
     // resolveCharacter() to find the canonical row via its aliases list and
     // apply the update there — no new row created.
-    applyArchivistPatch(worldId, turnId, {
+    await applyArchivistPatch(worldId, turnId, {
       characters: [
         {
           name: 'The Man in the Canvas Vest',
@@ -1057,10 +1057,10 @@ describe('extractDeterministicPatch', () => {
 })
 
 describe('sanitizeArchivistPatch', () => {
-  it('drops unsupported player location moves from ordinary in-place bar turns', () => {
+  it('drops unsupported player location moves from ordinary in-place bar turns', async () => {
     const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
     const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
-    applyArchivistPatch(worldId, setupTurn.id, {
+    await applyArchivistPatch(worldId, setupTurn.id, {
       places: [{ name: '33rd Street house', description: "Edith's home." }],
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
@@ -1089,10 +1089,10 @@ describe('sanitizeArchivistPatch', () => {
     ).toEqual({ places: [{ name: '33rd Street house' }] })
   })
 
-  it('keeps narrator-supported scene moves', () => {
+  it('keeps narrator-supported scene moves', async () => {
     const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
     const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
-    applyArchivistPatch(worldId, setupTurn.id, {
+    await applyArchivistPatch(worldId, setupTurn.id, {
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
     })
@@ -1119,10 +1119,10 @@ describe('sanitizeArchivistPatch', () => {
     ).toEqual(patch)
   })
 
-  it('does not treat thinking about going home as physical travel', () => {
+  it('does not treat thinking about going home as physical travel', async () => {
     const { worldId } = seedWorld(`Sanitize-${Math.random()}`)
     const setupTurn = insertTurn(worldId, 'assistant', 'You find a stool at Tapped.', null)
-    applyArchivistPatch(worldId, setupTurn.id, {
+    await applyArchivistPatch(worldId, setupTurn.id, {
       places: [{ name: '33rd Street house', description: "Edith's home." }],
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
@@ -1152,20 +1152,20 @@ describe('sanitizeArchivistPatch', () => {
 })
 
 describe('applyArchivistPatch player-move scene invariant (A1)', () => {
-  it('opens a scene at the player new place when the patch moves the player without a scene action', () => {
+  it('opens a scene at the player new place when the patch moves the player without a scene action', async () => {
     const world = createWorld({
       name: 'Player Move',
       premise: 'A heist in Prague.',
       initialState: { time: 'Night', location: 'The vault', identity: 'A thief.', playerName: 'Reuben' },
     })
     const t1 = insertTurn(world.id, 'assistant', 'You stand in the vault.', null)
-    applyArchivistPatch(world.id, t1.id, {
+    await applyArchivistPatch(world.id, t1.id, {
       characters: [{ name: 'Abby', description: 'The driver.', current_place_name: 'The vault' }],
     })
     const before = getNarratorWorldState(world.id)
     const vaultSceneId = before.currentScene?.id
     const t2 = insertTurn(world.id, 'assistant', 'You step inside the safe house.', null)
-    applyArchivistPatch(world.id, t2.id, {
+    await applyArchivistPatch(world.id, t2.id, {
       characters: [{ name: 'Reuben', is_player: true, current_place_name: 'Safe house' }],
     })
     const after = getNarratorWorldState(world.id)
@@ -1173,21 +1173,21 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
     expect(after.currentPlace?.name).toBe('Safe house')
   })
 
-  it('does NOT auto-open when the player moves while the patch restates an NPC at the old scene place (backward-flip guard)', () => {
+  it('does NOT auto-open when the player moves while the patch restates an NPC at the old scene place (backward-flip guard)', async () => {
     const world = createWorld({
       name: 'Flip Guard',
       premise: 'A heist in Prague.',
       initialState: { time: 'Night', location: 'The hospital', identity: 'A medic.', playerName: 'Andrew' },
     })
     const t1 = insertTurn(world.id, 'assistant', 'You stand in the hospital with Micha.', null)
-    applyArchivistPatch(world.id, t1.id, {
+    await applyArchivistPatch(world.id, t1.id, {
       characters: [{ name: 'Micha', description: 'A colleague.', current_place_name: 'The hospital' }],
     })
     const before = getNarratorWorldState(world.id)
     const hospitalSceneId = before.currentScene?.id
     // Backward "home flip": player sent home while Micha is explicitly restated at the hospital.
     const t2 = insertTurn(world.id, 'assistant', 'The narrator wrongly snaps you home.', null)
-    applyArchivistPatch(world.id, t2.id, {
+    await applyArchivistPatch(world.id, t2.id, {
       characters: [
         { name: 'Andrew', is_player: true, current_place_name: 'Home' },
         { name: 'Micha', current_place_name: 'The hospital' },
@@ -1201,14 +1201,14 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
 })
 
 describe('applyArchivistPatch transit normalization (A1)', () => {
-  it('upserts a transit pseudo-place under its destination name', () => {
+  it('upserts a transit pseudo-place under its destination name', async () => {
     const world = createWorld({
       name: 'Transit Norm',
       premise: 'A heist in Prague.',
       initialState: { time: 'Night', location: 'The vault', identity: 'A thief.', playerName: 'Reuben' },
     })
     const turn = insertTurn(world.id, 'assistant', 'The van pulls away toward the safe house.', null)
-    applyArchivistPatch(world.id, turn.id, {
+    await applyArchivistPatch(world.id, turn.id, {
       places: [{ name: 'En route to safe house - Prague' }],
       characters: [{ name: 'Reuben', is_player: true, current_place_name: 'En route to safe house - Prague' }],
       scene: { action: 'open', title: 'In the van', place_name: 'En route to safe house - Prague' },

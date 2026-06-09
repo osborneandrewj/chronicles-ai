@@ -12,7 +12,7 @@ import {
 } from '@/lib/npc-intents'
 import { createWorld } from '@/lib/worlds'
 
-function seedWorld(name: string): { worldId: number; playerTurnId: number } {
+async function seedWorld(name: string): Promise<{ worldId: number; playerTurnId: number }> {
   const world = createWorld({
     name,
     premise: 'An office in Spokane. The protagonist has secrets.',
@@ -24,7 +24,7 @@ function seedWorld(name: string): { worldId: number; playerTurnId: number } {
     },
   })
   const turn = insertTurn(world.id, 'user', 'I look at Marcus.', null)
-  applyArchivistPatch(world.id, turn.id, {
+  await applyArchivistPatch(world.id, turn.id, {
     characters: [
       { name: 'Marcus', description: 'Senior engineer.', current_place_name: 'Covenant Security' },
     ],
@@ -47,8 +47,8 @@ describe('npc_intents persistence', () => {
   let playerTurnId: number
   let characterId: number
 
-  beforeEach(() => {
-    ;({ worldId, playerTurnId } = seedWorld(`NpcIntents-${Math.random()}`))
+  beforeEach(async () => {
+    ;({ worldId, playerTurnId } = await seedWorld(`NpcIntents-${Math.random()}`))
     characterId = marcusId(worldId)
   })
 

@@ -33,6 +33,7 @@ export class MongoCharacterRepository implements CharacterRepository {
   async forWorld(worldId: number): Promise<Character[]> {
     const docs = await this.ctx.models.Character.find({ worldId })
       .sort({ id: 1 })
+      .session(this.session ?? null)
       .lean()
     return docs.map(mapCharacter)
   }
@@ -43,6 +44,7 @@ export class MongoCharacterRepository implements CharacterRepository {
       currentPlaceId: placeId,
     })
       .sort({ id: 1 })
+      .session(this.session ?? null)
       .lean()
     return docs.map(mapCharacter)
   }
@@ -100,7 +102,9 @@ export class MongoCharacterRepository implements CharacterRepository {
     const doc = await this.ctx.models.Character.findOne({
       worldId,
       nameKey: name.toLowerCase(),
-    }).lean()
+    })
+      .session(this.session ?? null)
+      .lean()
     return doc ? mapCharacter(doc) : null
   }
 
@@ -268,7 +272,9 @@ export class MongoCharacterRepository implements CharacterRepository {
   // existing || char(10) || line. Read-modify-write the same way under the
   // session.
   async appendPlayerNotes(characterId: number, line: string): Promise<void> {
-    const doc = await this.ctx.models.Character.findOne({ id: characterId }).lean()
+    const doc = await this.ctx.models.Character.findOne({ id: characterId })
+      .session(this.session ?? null)
+      .lean()
     const existing = doc?.playerNotes ?? null
     const next =
       existing === null || existing.trim().length === 0
@@ -346,6 +352,7 @@ export class MongoCharacterRepository implements CharacterRepository {
       isPlayer: false,
       status: { $ne: 'dead' },
     })
+      .session(this.session ?? null)
       .lean()
 
     for (const d of rows) {

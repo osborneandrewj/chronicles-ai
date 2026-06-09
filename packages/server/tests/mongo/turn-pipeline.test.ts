@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { applyArchivistPatch } from '@/application/use-cases/apply-archivist-patch'
 import { createWorld } from '@/application/use-cases/create-world'
 import { seedBoundedWorld } from '@/application/use-cases/seed-bounded-world'
+import { MongoUnitOfWork } from '@/infrastructure/persistence/mongo/mongo-unit-of-work'
 import { MongoCharacterRepository } from '@/infrastructure/persistence/mongo/repositories/character-repository.mongo'
 import { MongoDossierRepository } from '@/infrastructure/persistence/mongo/repositories/dossier-repository.mongo'
 import { MongoDossierWriter } from '@/infrastructure/persistence/mongo/repositories/dossier-writer.mongo'
@@ -11,6 +13,7 @@ import { MongoPlaceRepository } from '@/infrastructure/persistence/mongo/reposit
 import { MongoRelationshipRepository } from '@/infrastructure/persistence/mongo/repositories/relationship-repository.mongo'
 import { MongoReverieRepository } from '@/infrastructure/persistence/mongo/repositories/reverie-repository.mongo'
 import { MongoSceneRepository } from '@/infrastructure/persistence/mongo/repositories/scene-repository.mongo'
+import { MongoTimelineWriter } from '@/infrastructure/persistence/mongo/repositories/timeline-writer.mongo'
 import { MongoTurnRepository } from '@/infrastructure/persistence/mongo/repositories/turn-repository.mongo'
 import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/repositories/world-repository.mongo'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
@@ -492,6 +495,117 @@ d('mongo turn pipeline (e2e)', () => {
     const resource = dossier.resources.find((r) => r.id === resId)
     expect(resource?.status).toBe('lost')
     expect(resource?.kind).toBe('tool') // COALESCE preserved
+  })
+
+  it('applies an ArchivistPatch through the use case against the MONGO ports (P4b)', async () => {
+    const worlds = new MongoWorldRepository(h.ctx)
+    const places = new MongoPlaceRepository(h.ctx)
+    const characters = new MongoCharacterRepository(h.ctx)
+    const scenes = new MongoSceneRepository(h.ctx)
+    const dossiers = new MongoDossierRepository(h.ctx)
+    const dossierWriter = new MongoDossierWriter(h.ctx)
+    const reveries = new MongoReverieRepository(h.ctx)
+    const timeline = new MongoTimelineWriter(h.ctx)
+    const turns = new MongoTurnRepository(h.ctx)
+    const unitOfWork = new MongoUnitOfWork(h.ctx)
+
+    const { worldId } = await createWorld(
+      {
+        name: 'Looe 1905',
+        premise: 'a twin harbour town facing the open Channel',
+        initialState: {
+          time: 'morning',
+          location: 'East Looe quay — Cornwall',
+          identity: 'a fish-buyer',
+        },
+      },
+      { worlds, extractSettingRegion: async () => null },
+    )
+
+    // createWorld seeds place #1 + active scene #1 + the player character. A
+    // narrator turn must exist for the timeline-event / source-turn bookkeeping.
+    const narratorTurn = await turns.insert(
+      worldId,
+      'assistant',
+      'The pilchard boats come in on the morning tide.',
+      null,
+    )
+    const sceneId = await scenes.currentSceneId(worldId)
+    expect(sceneId).not.toBeNull()
+
+    // A representative patch: a new NPC, a story thread, a scene-context dial,
+    // a world-clock advance, and a timeline beat tied to the thread.
+    await applyArchivistPatch(
+      {
+        worldId,
+        turnId: narratorTurn.id,
+        patch: {
+          current_time: 'late morning',
+          scene_context: { scene_mood: 'tense', pace: 'slow', focus: 'environment' },
+          characters: [
+            {
+              name: 'Salome Roskilly',
+              description: 'a fish-buyer with a ledger and a sharp tongue',
+              status: 'active',
+              active_goal: 'corner the morning catch',
+              memorable_facts_append: 'outbid the Plymouth men last season',
+            },
+          ],
+          story_threads: [
+            {
+              title: 'The short-weighted catch',
+              kind: 'mystery',
+              status: 'active',
+              summary: 'the morning landings keep coming up light on the scale',
+            },
+          ],
+          timeline_events: [
+            {
+              title: 'The tide brought the boats in light',
+              summary: 'the catch landed under weight for the third day running',
+              thread_title: 'The short-weighted catch',
+              importance: 3,
+            },
+          ],
+        },
+      },
+      {
+        places,
+        characters,
+        scenes,
+        worlds,
+        dossierWriter,
+        timeline,
+        reveries,
+        unitOfWork,
+      },
+    )
+
+    // ── The NPC was inserted into Mongo ───────────────────────────────────
+    const npc = (await characters.forWorld(worldId)).find((c) => c.name === 'Salome Roskilly')
+    expect(npc).toBeDefined()
+    expect(npc?.is_player).toBe(0)
+    expect(npc?.active_goal).toBe('corner the morning catch')
+    expect(npc?.memorable_facts).toContain('outbid the Plymouth men last season')
+
+    // ── The story thread + timeline event landed in Mongo ─────────────────
+    const dossier = await dossiers.forWorld(worldId)
+    const thread = dossier.threads.find((t) => t.title === 'The short-weighted catch')
+    expect(thread).toBeDefined()
+    expect(thread?.status).toBe('active')
+    const event = dossier.timeline.find((e) => e.title === 'The tide brought the boats in light')
+    expect(event).toBeDefined()
+    expect(event?.thread_id).toBe(thread?.id)
+    expect(event?.world_time).toBe('late morning')
+
+    // ── The active scene's context was updated in Mongo ───────────────────
+    const updatedScene = (await scenes.forWorld(worldId)).find((s) => s.id === sceneId)
+    expect(updatedScene?.scene_mood).toBe('tense')
+    expect(updatedScene?.pace).toBe('slow')
+    expect(updatedScene?.focus).toBe('environment')
+
+    // ── The world clock advanced in Mongo ─────────────────────────────────
+    expect((await worlds.cursor(worldId)).world_time).toBe('late morning')
   })
 
   // Final exit criterion of the cutover — un-skipped in Phase 5 once the opening

@@ -277,7 +277,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       const runArchivistLlm = shouldRunArchivistLlm(playerText, trimmed, !!deterministicPatch)
 
       if (!runArchivistLlm && deterministicPatch) {
-        applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
+        await applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
         await turns.mergeMetadata(narratorTurn.id, 'archivist', {
           model: 'deterministic-archivist',
           patch: deterministicPatch,
@@ -311,7 +311,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         bootstrapDossier,
       )
         .then(async ({ patch, usage: archivistUsage }) => {
-          applyArchivistPatch(worldId, narratorTurn.id, patch)
+          await applyArchivistPatch(worldId, narratorTurn.id, patch)
           await turns.mergeMetadata(narratorTurn.id, 'archivist', {
             model: ARCHIVIST_MODEL,
             usage: archivistUsage,

@@ -48,7 +48,7 @@ function loadStoredPatches(): Map<number, ArchivistPatch> {
 }
 
 describe.skipIf(!existsSync(BACKUP))('Call-In Case replay (v0.6.10 invariant)', () => {
-  it('fires on the first NPC relocation (389), holds through 391-401, and not on the 403 home flip', () => {
+  it('fires on the first NPC relocation (389), holds through 391-401, and not on the 403 home flip', async () => {
     const patches = loadStoredPatches()
     expect(patches.size).toBe(NARRATOR_TURNS.length)
 
@@ -74,7 +74,7 @@ describe.skipIf(!existsSync(BACKUP))('Call-In Case replay (v0.6.10 invariant)', 
     // failure mode). With them pre-placed, the restatement is correctly a
     // no-op and the lone hospital relocation wins the vote.
     const seedTurn = insertTurn(world.id, 'assistant', 'turn-388 home state', null)
-    applyArchivistPatch(world.id, seedTurn.id, {
+    await applyArchivistPatch(world.id, seedTurn.id, {
       characters: [
         'Jordana Osborne',
         'James Osborne',
@@ -91,7 +91,7 @@ describe.skipIf(!existsSync(BACKUP))('Call-In Case replay (v0.6.10 invariant)', 
     const cursorAfter = new Map<number, number | null>()
     for (const turnNumber of NARRATOR_TURNS) {
       const turn = insertTurn(world.id, 'assistant', `replay narrator turn ${turnNumber}`, null)
-      applyArchivistPatch(world.id, turn.id, patches.get(turnNumber)!)
+      await applyArchivistPatch(world.id, turn.id, patches.get(turnNumber)!)
       cursorAfter.set(turnNumber, getWorldCursor(world.id).current_scene_id)
     }
 

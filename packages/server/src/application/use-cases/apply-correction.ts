@@ -58,7 +58,7 @@ export type ApplyCorrectionDeps = {
     recent: RecentTurn[],
   ) => Promise<CorrectionPatchResult>
   /** Apply the extracted patch (fused merge txn). Owns the SQL. */
-  applyPatch: (worldId: number, turnId: number, patch: unknown) => void
+  applyPatch: (worldId: number, turnId: number, patch: unknown) => Promise<void>
 }
 
 export type ApplyCorrectionResult = {
@@ -103,7 +103,7 @@ export async function applyCorrection(
   const turnId = latest?.id ?? null
 
   try {
-    applyPatch(worldId, turnId ?? 0, result.patch)
+    await applyPatch(worldId, turnId ?? 0, result.patch)
   } catch (err) {
     throw new CorrectionApplyFailed(err)
   }
