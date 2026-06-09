@@ -497,6 +497,15 @@ export function insertBoundedCharacter(input: {
   return { id: row.id }
 }
 
+// Bounded-world sim write (starship P2): move an NPC to a room (or clear it).
+const setCharacterPlaceStmt = db.prepare<[number | null, number]>(
+  'UPDATE characters SET current_place_id = ? WHERE id = ?',
+)
+
+export function setCharacterPlace(characterId: number, placeId: number | null): void {
+  setCharacterPlaceStmt.run(placeId, characterId)
+}
+
 // --- place_connections (v26): bounded-world topology graph (starship P1) ---
 
 const insertPlaceConnectionStmt = db.prepare<

@@ -100,6 +100,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
     async cursor() {
       return { world_time: null, current_scene_id: null }
     },
+    async setWorldTime() {},
   }
   const places: PlaceRepository = {
     async forWorld() {
@@ -132,6 +133,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       rec.charactersAdded.push(character)
       return { id: nextCharacterId++ }
     },
+    async setPlace() {},
   }
   const relationships: RelationshipRepository = {
     async forWorld() {

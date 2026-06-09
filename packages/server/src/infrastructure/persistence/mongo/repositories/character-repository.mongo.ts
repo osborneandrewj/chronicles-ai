@@ -67,4 +67,14 @@ export class MongoCharacterRepository implements CharacterRepository {
     )
     return { id }
   }
+
+  // Bounded-world sim write (starship P2): move a character to a room (or clear
+  // it). Mirrors the SQLite UPDATE; stamps updatedAt like the sibling writes.
+  async setPlace(characterId: number, placeId: number | null): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { currentPlaceId: placeId, updatedAt: new Date() } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

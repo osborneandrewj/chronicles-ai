@@ -97,4 +97,14 @@ export class MongoWorldRepository implements WorldRepository {
       current_scene_id: doc?.currentSceneId ?? null,
     }
   }
+
+  // Bounded-world sim write (starship P2): advance only worldTime, leaving the
+  // scene cursor untouched (the player-less pre-sim has no active scene yet).
+  async setWorldTime(worldId: number, worldTime: string): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { worldTime } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

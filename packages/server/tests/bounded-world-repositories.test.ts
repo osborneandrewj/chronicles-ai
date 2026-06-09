@@ -114,6 +114,48 @@ describe('SqliteCharacterRepository.add', () => {
   })
 })
 
+describe('SqliteCharacterRepository.setPlace', () => {
+  it('round-trips current_place_id (move, then clear)', async () => {
+    const worldId = await createWorld(`setplace-${Math.random()}`)
+    const { id: bridge } = await places.add({
+      world_id: worldId,
+      name: 'Bridge',
+      description: null,
+      kind: 'room',
+      deck: 'A',
+      layout_hint: null,
+    })
+    const { id: charId } = await characters.add({
+      world_id: worldId,
+      name: 'Pilot',
+      description: null,
+      is_player: 0,
+      current_place_id: null,
+      role: 'pilot',
+      active_goal: null,
+      daily_loop: null,
+    })
+
+    await characters.setPlace(charId, bridge)
+    let crew = await characters.forWorld(worldId)
+    expect(crew[0]?.current_place_id).toBe(bridge)
+
+    await characters.setPlace(charId, null)
+    crew = await characters.forWorld(worldId)
+    expect(crew[0]?.current_place_id).toBeNull()
+  })
+})
+
+describe('SqliteWorldRepository.setWorldTime', () => {
+  it('updates world_time without touching the scene cursor', async () => {
+    const worldId = await createWorld(`worldtime-${Math.random()}`)
+    await worlds.setWorldTime(worldId, 'Day 6 — night')
+    const cursor = await worlds.cursor(worldId)
+    expect(cursor.world_time).toBe('Day 6 — night')
+    expect(cursor.current_scene_id).toBeNull()
+  })
+})
+
 describe('SqlitePlaceConnectionRepository', () => {
   it('adds edges and reads them back for the world', async () => {
     const worldId = await createWorld(`conn-${Math.random()}`)

@@ -270,6 +270,17 @@ SimulateWorldForward for 24 ticks → print final positions + world time + drift
 relationships; assert every NPC's final room matches its routine for the final tick's
 band and the clock advanced. (Extends the P1 seed-script pattern; stub crew, no spend.)
 
+## Open decision for P4 (surfaced in P2 — needs a call + browser check)
+P2's sim persists the clock and the positions for DIFFERENT moments, on purpose:
+`world_time = tickToWorldTime(ticks)` (the band the player *arrives* into, e.g. "Day 7
+— morning"), but NPC positions are the last *lived* tick, `tickToBand(ticks − 1)` (e.g.
+night). So a fresh-joined player can read "morning" while the night crew are still in
+their bunks. P4 must reconcile this — either (a) set `world_time` to the last lived band
+so clock matches positions, or (b) at join, advance NPCs one movement step to the arrival
+band so positions match the clock (nicer narratively). Decide WITH a browser turn, since
+it only matters at the join hand-off. The P2 behavior is deliberate + tested; don't churn
+it before then.
+
 ## Risks / things to validate
 - **daily_loop place references** must point at real seeded rooms, not free text —
   enforce at seed time.

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CharacterRelationship } from '@/domain/entities'
-import { applyDrift, driftFromOutcome } from '@/domain/services/relationship-drift'
+import {
+  applyDrift,
+  coLocationOutcome,
+  driftFromOutcome,
+} from '@/domain/services/relationship-drift'
 
 // Pure valence-delta application for the bounded-world pre-sim (P2). A beat
 // outcome maps to a small signed delta; applyDrift folds it into a relationship's
@@ -36,6 +40,20 @@ describe('driftFromOutcome', () => {
   it('keeps the signed deltas symmetric and small', () => {
     expect(driftFromOutcome('positive')).toBe(-driftFromOutcome('negative'))
     expect(Math.abs(driftFromOutcome('positive'))).toBeLessThanOrEqual(0.2)
+  })
+})
+
+describe('coLocationOutcome', () => {
+  it("maps a positive valence to 'positive' (allies bond when together)", () => {
+    expect(coLocationOutcome(0.4)).toBe('positive')
+  })
+
+  it("maps a zero valence to 'positive' (the boundary is inclusive)", () => {
+    expect(coLocationOutcome(0)).toBe('positive')
+  })
+
+  it("maps a negative valence to 'negative' (rivals chafe)", () => {
+    expect(coLocationOutcome(-0.3)).toBe('negative')
   })
 })
 

@@ -10,6 +10,13 @@ const DRIFT_STEP = 0.1
 const VALENCE_MIN = -1
 const VALENCE_MAX = 1
 
+// Deterministic co-location drift trigger (P2). Two co-located NPCs bond when
+// their standing is already non-negative (allies warm up together) and chafe
+// when it is negative (rivals grate). Pure sign test on the working valence.
+export function coLocationOutcome(valence: number): BeatOutcome {
+  return valence >= 0 ? 'positive' : 'negative'
+}
+
 export function driftFromOutcome(outcome: BeatOutcome): number {
   switch (outcome) {
     case 'positive':

@@ -66,6 +66,15 @@ const insertSceneStmt = db.prepare<[number, number]>(
 const setWorldCursorStmt = db.prepare<[string, number, number]>(
   'UPDATE worlds SET world_time = ?, current_scene_id = ? WHERE id = ?',
 )
+const setWorldTimeStmt = db.prepare<[string, number]>(
+  'UPDATE worlds SET world_time = ? WHERE id = ?',
+)
+
+// Bounded-world sim write (starship P2): advance only world_time, leaving the
+// scene cursor untouched (the player-less pre-sim has no active scene yet).
+export function setWorldTime(worldId: number, worldTime: string): void {
+  setWorldTimeStmt.run(worldTime, worldId)
+}
 
 export type CreateWorldInput = {
   name: string

@@ -4,6 +4,7 @@ import {
   getCharactersForWorld,
   getCharactersInPlace,
   insertBoundedCharacter,
+  setCharacterPlace,
 } from '@/lib/db'
 import type { Character } from '@/lib/world-state'
 import type {
@@ -23,5 +24,10 @@ export class SqliteCharacterRepository implements CharacterRepository {
 
   add(character: CharacterInput): Promise<{ id: number }> {
     return Promise.resolve(insertBoundedCharacter(character))
+  }
+
+  setPlace(characterId: number, placeId: number | null): Promise<void> {
+    setCharacterPlace(characterId, placeId)
+    return Promise.resolve()
   }
 }

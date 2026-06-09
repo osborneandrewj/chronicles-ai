@@ -7,6 +7,7 @@ import {
   getWorld,
   listArchivedWorlds,
   listWorlds,
+  setWorldTime,
   unarchiveWorld,
   type World,
   type WorldSummary,
@@ -50,5 +51,10 @@ export class SqliteWorldRepository implements WorldRepository {
     worldId: number,
   ): Promise<{ world_time: string | null; current_scene_id: number | null }> {
     return Promise.resolve(getWorldCursor(worldId))
+  }
+
+  setWorldTime(worldId: number, worldTime: string): Promise<void> {
+    setWorldTime(worldId, worldTime)
+    return Promise.resolve()
   }
 }

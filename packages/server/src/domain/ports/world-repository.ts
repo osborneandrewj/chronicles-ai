@@ -30,4 +30,6 @@ export interface WorldRepository {
   unarchiveWorld(id: number): Promise<void>
   /** (world_time, current_scene_id) cursor for a world. */
   cursor(worldId: number): Promise<{ world_time: string | null; current_scene_id: number | null }>
+  /** Advance only world_time (the P2 pre-sim clock), leaving the scene cursor. */
+  setWorldTime(worldId: number, worldTime: string): Promise<void>
 }

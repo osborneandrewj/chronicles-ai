@@ -16,11 +16,13 @@ export type CharacterInput = {
 }
 
 // CharacterRepository (spec §3.4) — dumb CRUD over the `characters` aggregate.
-// Reads plus `add`, the bounded-world crew insert. Name resolution / alias merge /
-// promotion are deciding logic that stays out of the adapter (P4). Async by
-// mandate (spec §5.3).
+// Reads plus `add` (the bounded-world crew insert) and `setPlace` (the P2 sim
+// moving an NPC to a room). Name resolution / alias merge / promotion are
+// deciding logic that stays out of the adapter (P4). Async by mandate (spec §5.3).
 export interface CharacterRepository {
   forWorld(worldId: number): Promise<Character[]>
   inPlace(worldId: number, placeId: number): Promise<Character[]>
   add(character: CharacterInput): Promise<{ id: number }>
+  /** Move a character to a room (or clear its room when null). */
+  setPlace(characterId: number, placeId: number | null): Promise<void>
 }
