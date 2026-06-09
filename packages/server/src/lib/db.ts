@@ -541,6 +541,41 @@ export function getPlaceConnectionsForWorld(worldId: number): PlaceConnection[] 
   return placeConnectionsForWorldStmt.all(worldId) as PlaceConnection[]
 }
 
+// --- timeline_events (v28): sim-provenance append (starship P3) ---
+
+const insertTimelineEventStmt = db.prepare<
+  [number, number | null, number | null, string | null, string, string, number, number | null, string]
+>(
+  `INSERT INTO timeline_events
+     (world_id, turn_id, thread_id, world_time, title, summary, importance,
+      sim_tick, provenance, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+)
+
+export function insertTimelineEvent(input: {
+  world_id: number
+  turn_id: number | null
+  thread_id: number | null
+  world_time: string | null
+  title: string
+  summary: string
+  importance: number
+  sim_tick: number | null
+  provenance: string
+}): void {
+  insertTimelineEventStmt.run(
+    input.world_id,
+    input.turn_id,
+    input.thread_id,
+    input.world_time,
+    input.title,
+    input.summary,
+    input.importance,
+    input.sim_tick,
+    input.provenance,
+  )
+}
+
 // --- character_relationships (v27): the relationship graph (starship P1) ---
 
 const relationshipsForWorldStmt = db.prepare<[number]>(

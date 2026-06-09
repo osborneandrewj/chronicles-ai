@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// Offline proof for starship P2 (the deterministic forward sim). Builds the
-// SQLite container against a throwaway temp DB, seeds a scout ship with the
-// deterministic StubCrewGenerator (free, reproducible, no API key), then runs the
-// SimulateWorldForward use case for 24 ticks of pure NPC movement + co-location +
-// relationship drift with NO LLM. It reads the result back through the repos and
-// prints the world time after the run, each NPC's final room, and every
-// relationship's valence (before -> after). It asserts the world clock advanced,
-// every NPC ended in the room its daily_loop assigns for the final tick's band,
-// and at least one relationship drifted from co-location — exiting non-zero on any
-// failure.
+// Offline proof for starship P2 + P3 (the deterministic forward sim + the
+// threshold-gated LLM beat seam). Builds the SQLite container against a throwaway
+// temp DB, seeds a scout ship with the deterministic StubCrewGenerator (free,
+// reproducible, no API key), then runs the SimulateWorldForward use case for 24
+// ticks. P2: pure NPC movement + co-location + relationship drift. P3: when a
+// co-located group has enough seeded tension and the cooldown has elapsed, it
+// spends ONE structured beat via the deterministic StubDramaPort (no spend) and
+// the real SqliteTimelineWriter appends it as a provenance='sim' timeline event.
+// It reads the result back through the repos and prints the world time after the
+// run, each NPC's final room, every relationship's valence (before -> after), and
+// every provenance='sim' timeline beat written. It asserts the world clock
+// advanced, every NPC ended in the room its daily_loop assigns for the final
+// tick's band, at least one relationship drifted, and at least one sim beat was
+// written — exiting non-zero on any failure.
 //
 // Run with the repo's tsx runner + the react-server condition (so the
 // `server-only` markers on the adapters resolve to a no-op), exactly like the
@@ -43,6 +47,10 @@ const { simulateWorldForward } = await import(
 const { StubCrewGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
 )
+const { StubDramaPort } = await import(
+  '@/infrastructure/world-gen/stub-drama-port'
+)
+const { db } = await import('@/lib/db')
 const { SCOUT_TEMPLATE_ID } = await import(
   '@/infrastructure/world-gen/scout-template'
 )
@@ -81,14 +89,21 @@ async function main() {
   const startRelationships = await c.relationships.forWorld(worldId)
   const startValenceById = new Map(startRelationships.map((r) => [r.id, r.valence]))
 
-  // Run the deterministic forward sim.
+  // Run the forward sim. cooldownTicks/tensionThreshold are set so the seeded
+  // ally tension (StubCrewGenerator emits valence 0.4 ally edges, |valence| >=
+  // 0.3) clears the gate and beats fire when co-located crew share a room. The
+  // real SqliteTimelineWriter persists each beat; the StubDramaPort generates them
+  // free + deterministically (no spend).
   const simResult = await simulateWorldForward(
-    { worldId, ticks: TICKS },
+    { worldId, ticks: TICKS, cooldownTicks: 3, tensionThreshold: 0.3 },
     {
       characters: c.characters,
       placeConnections: c.placeConnections,
       relationships: c.relationships,
       worlds: c.worlds,
+      places: c.places,
+      drama: new StubDramaPort(),
+      timeline: c.timeline,
       clock: c.clock,
     },
   )
@@ -138,7 +153,26 @@ async function main() {
     )
   }
 
-  // Assertions — the P2 proof.
+  // Read the provenance='sim' timeline beats back through the raw DB handle (no
+  // onion read port for timeline_events yet; this is an offline script).
+  const simBeats = db
+    .prepare(
+      `SELECT sim_tick, world_time, title, summary
+         FROM timeline_events
+        WHERE world_id = ? AND provenance = 'sim'
+        ORDER BY sim_tick, id`,
+    )
+    .all(worldId)
+
+  console.log('')
+  console.log(`SIM BEATS (provenance='sim') (${simBeats.length}):`)
+  for (const beat of simBeats) {
+    console.log(
+      `  tick ${beat.sim_tick} [${beat.world_time ?? '(none)'}] — ${beat.title}`,
+    )
+  }
+
+  // Assertions — the P2 + P3 proof.
   // 1. The world clock advanced past the start.
   if (endWorldTime == null) {
     console.error('FAIL: world time was not set by the sim')
@@ -175,10 +209,26 @@ async function main() {
     process.exit(1)
   }
 
+  // 4. At least one threshold-gated sim beat was written to the timeline.
+  if (simBeats.length < 1) {
+    console.error(
+      'FAIL: no provenance=\'sim\' timeline beat written — the gated beat seam never fired',
+    )
+    process.exit(1)
+  }
+  if (simResult.beats !== simBeats.length) {
+    console.error(
+      `FAIL: result reported ${simResult.beats} beats but ${simBeats.length} ` +
+        'sim timeline events were persisted',
+    )
+    process.exit(1)
+  }
+
   console.log('')
   console.log(
     `OK: simulated ${TICKS} ticks; crew ended on routine ` +
       `(${driftedCount} relationship${driftedCount === 1 ? '' : 's'} drifted, ` +
+      `${simBeats.length} beat${simBeats.length === 1 ? '' : 's'} written, ` +
       `world time ${endWorldTime})`,
   )
 }

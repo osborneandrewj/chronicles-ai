@@ -2,12 +2,18 @@ import { describe, expect, it } from 'vitest'
 
 import { simulateWorldForward } from '@/application/use-cases/simulate-world-forward'
 import type { SimulateWorldForwardDeps } from '@/application/use-cases/simulate-world-forward'
-import type { Character, CharacterRelationship, PlaceConnection } from '@/domain/entities'
+import type { Character, CharacterRelationship, Place, PlaceConnection } from '@/domain/entities'
 import type {
   CharacterRepository,
   Clock,
+  DramaBeat,
+  DramaBeatInput,
+  DramaPort,
   PlaceConnectionRepository,
+  PlaceRepository,
   RelationshipRepository,
+  TimelineEventInput,
+  TimelineWriter,
   WorldRepository,
 } from '@/domain/ports'
 
@@ -106,17 +112,61 @@ function relationship(overrides: Partial<CharacterRelationship>): CharacterRelat
   }
 }
 
+function place(overrides: Partial<Place>): Place {
+  return {
+    id: 0,
+    world_id: WORLD_ID,
+    name: 'room',
+    description: null,
+    kind: null,
+    deck: null,
+    layout_hint: null,
+    player_notes: null,
+    osm_display_name: null,
+    osm_street: null,
+    osm_neighborhood: null,
+    osm_lat: null,
+    osm_lng: null,
+    geo_status: 'unresolved',
+    geo_resolved_at: null,
+    created_at: '',
+    updated_at: '',
+    ...overrides,
+  }
+}
+
+const ROOMS: Place[] = [
+  place({ id: BRIDGE, name: 'Bridge' }),
+  place({ id: MESS, name: 'Mess' }),
+  place({ id: QUARTERS, name: 'Quarters' }),
+]
+
 type Fakes = {
   deps: SimulateWorldForwardDeps
   setPlaceCalls: Array<{ characterId: number; placeId: number | null }>
   adjustCalls: Array<{ relationshipId: number; delta: number }>
   setWorldTimeCalls: Array<{ worldId: number; worldTime: string }>
+  beatCalls: DramaBeatInput[]
+  appendCalls: TimelineEventInput[]
+}
+
+// A canned beat: nudges the (CAPTAIN, COOK) edge by +0.5 so a beat is clearly
+// distinguishable from the +0.1 deterministic co-location step.
+function cannedBeat(input: DramaBeatInput): DramaBeat {
+  return {
+    title: `Beat in ${input.place_name}`,
+    summary: 'A canned drama beat for the test.',
+    participant_ids: input.participants.map((p) => p.character_id),
+    valenceDeltas: [{ from_character_id: CAPTAIN_ID, to_character_id: COOK_ID, delta: 0.5 }],
+  }
 }
 
 function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
   const setPlaceCalls: Fakes['setPlaceCalls'] = []
   const adjustCalls: Fakes['adjustCalls'] = []
   const setWorldTimeCalls: Fakes['setWorldTimeCalls'] = []
+  const beatCalls: DramaBeatInput[] = []
+  const appendCalls: TimelineEventInput[] = []
 
   // A line graph: bridge ── mess ── quarters (two bidirectional corridors).
   const connections: PlaceConnection[] = [
@@ -164,13 +214,31 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
       setWorldTimeCalls.push({ worldId, worldTime })
     },
   } as unknown as WorldRepository
+  const places: PlaceRepository = {
+    forWorld: async () => ROOMS,
+    byId: async (id) => ROOMS.find((p) => p.id === id) ?? null,
+    add: async () => ({ id: 0 }),
+  }
+  const drama: DramaPort = {
+    generateBeat: async (input) => {
+      beatCalls.push(input)
+      return cannedBeat(input)
+    },
+  }
+  const timeline: TimelineWriter = {
+    append: async (event) => {
+      appendCalls.push(event)
+    },
+  }
   const clock: Clock = { now: () => new Date(0), today: () => '1970-01-01' }
 
   return {
-    deps: { characters, placeConnections, relationships, worlds, clock },
+    deps: { characters, placeConnections, relationships, worlds, places, drama, timeline, clock },
     setPlaceCalls,
     adjustCalls,
     setWorldTimeCalls,
+    beatCalls,
+    appendCalls,
   }
 }
 
@@ -188,7 +256,7 @@ describe('simulateWorldForward', () => {
 
   it('moves NPCs to their routine target for the final band and persists final positions', async () => {
     const fakes = buildFakes(roster, rels)
-    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8 }, fakes.deps)
+    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
     // tick 7 = 'night': captain + cook in MESS, loner in QUARTERS.
     const byId = new Map(result.finalPositions.map((p) => [p.characterId, p.placeId]))
@@ -206,7 +274,7 @@ describe('simulateWorldForward', () => {
 
   it('drifts co-located allies positive and persists a single valence delta', async () => {
     const fakes = buildFakes(roster, rels)
-    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8 }, fakes.deps)
+    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
     // Captain + cook share MESS at evening (tick 2,6) and night (tick 3,7); the
     // cook is always in MESS. Each co-located tick bonds +0.1 from 0.2.
@@ -225,7 +293,7 @@ describe('simulateWorldForward', () => {
 
   it('advances the world clock to the label for N ticks', async () => {
     const fakes = buildFakes(roster, rels)
-    await simulateWorldForward({ worldId: WORLD_ID, ticks: 8 }, fakes.deps)
+    await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
     // 8 ticks → Day 3 morning (4 ticks/day; tick 8 rolls to day 3, band morning).
     expect(fakes.setWorldTimeCalls).toHaveLength(1)
@@ -234,7 +302,7 @@ describe('simulateWorldForward', () => {
 
   it('keeps an NPC with a malformed daily_loop at its starting room', async () => {
     const fakes = buildFakes(roster, rels)
-    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8 }, fakes.deps)
+    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
     const drifter = result.finalPositions.find((p) => p.characterId === DRIFTER_ID)
     expect(drifter?.placeId).toBe(QUARTERS) // never moved
@@ -244,9 +312,99 @@ describe('simulateWorldForward', () => {
 
   it('excludes the player from the sim entirely', async () => {
     const fakes = buildFakes(roster, rels)
-    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8 }, fakes.deps)
+    const result = await simulateWorldForward({ worldId: WORLD_ID, ticks: 8, tensionThreshold: 2 }, fakes.deps)
 
     expect(result.finalPositions.some((p) => p.characterId === PLAYER_ID)).toBe(false)
     expect(fakes.setPlaceCalls.some((c) => c.characterId === PLAYER_ID)).toBe(false)
+  })
+})
+
+// P3 — threshold-gated LLM beats. Same line graph, but the captain and cook are
+// RIVALS (valence −0.5, |−0.5| ≥ the 0.3 threshold) and share the MESS at several
+// ticks. With the threshold met, a beat fires; a large cooldown proves the per-room
+// suppression of a second immediate beat; the canned beat's +0.5 delta (not the
+// −0.1 deterministic rival-chafe) is what moves the relationship that tick.
+describe('simulateWorldForward — gated drama beats (P3)', () => {
+  // role lives in current_focus, goal in active_goal (P1 storage); enriched into the
+  // DramaParticipant the beat reasons over.
+  const beatRoster: Character[] = [
+    character({
+      id: CAPTAIN_ID,
+      current_place_id: BRIDGE,
+      daily_loop: JSON.stringify(CAPTAIN_LOOP),
+      current_focus: 'captain',
+      active_goal: 'keep the ship on course',
+    }),
+    character({
+      id: COOK_ID,
+      current_place_id: MESS,
+      daily_loop: JSON.stringify(COOK_LOOP),
+      current_focus: 'cook',
+      active_goal: 'feed a restless crew',
+    }),
+    character({ id: PLAYER_ID, is_player: 1, current_place_id: BRIDGE }),
+  ]
+  // Captain + cook are rivals — tension above the default 0.3 threshold.
+  const rivalRels: CharacterRelationship[] = [
+    relationship({ id: 10, from_character_id: CAPTAIN_ID, to_character_id: COOK_ID, kind: 'rival', valence: -0.5 }),
+  ]
+
+  it('fires a gated beat, appends a sim timeline event, and applies the beat delta over deterministic drift', async () => {
+    const fakes = buildFakes(beatRoster, rivalRels)
+    // Large cooldown so only the FIRST co-located tick fires a beat.
+    const result = await simulateWorldForward(
+      { worldId: WORLD_ID, ticks: 8, cooldownTicks: 100, tensionThreshold: 0.3 },
+      fakes.deps,
+    )
+
+    // Captain + cook first co-locate in MESS at tick 2 (evening). Exactly one beat.
+    expect(result.beats).toBe(1)
+    expect(fakes.beatCalls).toHaveLength(1)
+    const call = fakes.beatCalls[0]!
+    expect(call.sim_tick).toBe(2)
+    expect(call.place_id).toBe(MESS)
+    expect(call.place_name).toBe('Mess')
+    expect(call.participants.map((p) => p.character_id).sort()).toEqual([CAPTAIN_ID, COOK_ID])
+    // Enrichment: role from current_focus, goal from active_goal.
+    const captain = call.participants.find((p) => p.character_id === CAPTAIN_ID)!
+    expect(captain.role).toBe('captain')
+    expect(captain.goal).toBe('keep the ship on course')
+
+    // A provenance='sim' timeline event was appended with the beat's tick.
+    expect(fakes.appendCalls).toHaveLength(1)
+    const event = fakes.appendCalls[0]!
+    expect(event.provenance).toBe('sim')
+    expect(event.sim_tick).toBe(2)
+    expect(event.turn_id).toBeNull()
+    expect(event.title).toBe('Beat in Mess')
+
+    // The beat supersedes the deterministic chafe on its tick. Co-location ticks for
+    // the captain + cook are 2,3,6,7. At tick 2 the beat applies +0.5 (NOT the −0.1
+    // rival chafe), taking −0.5 → 0.0. The cooldown blocks further beats, so ticks
+    // 3,6,7 each apply the now-positive +0.1 deterministic drift: 0.0 → 0.3. Had the
+    // beat tick ALSO chafed, the start of that chain would be −0.6, not 0.0.
+    const drifted = result.drifted.find((d) => d.relationshipId === 10)
+    expect(drifted).toBeDefined()
+    expect(drifted!.valence).toBeCloseTo(0.3, 6)
+    expect(drifted!.from).toBe(CAPTAIN_ID)
+    expect(drifted!.to).toBe(COOK_ID)
+    // Single net adjustValence delta = final − original = 0.3 − (−0.5) = 0.8.
+    expect(fakes.adjustCalls).toHaveLength(1)
+    expect(fakes.adjustCalls[0]!.relationshipId).toBe(10)
+    expect(fakes.adjustCalls[0]!.delta).toBeCloseTo(0.8, 6)
+  })
+
+  it('cooldown suppresses a second immediate beat in the same room', async () => {
+    const fakes = buildFakes(beatRoster, rivalRels)
+    // Cooldown 100 over 8 ticks: even though captain + cook share MESS at ticks
+    // 2,3,6,7, only one beat may fire.
+    const result = await simulateWorldForward(
+      { worldId: WORLD_ID, ticks: 8, cooldownTicks: 100, tensionThreshold: 0.3 },
+      fakes.deps,
+    )
+
+    expect(result.beats).toBe(1)
+    expect(fakes.beatCalls).toHaveLength(1)
+    expect(fakes.appendCalls).toHaveLength(1)
   })
 })

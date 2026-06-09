@@ -7,6 +7,7 @@ import type {
   CorrectionRepository,
   DeckPlanProvider,
   DossierRepository,
+  DramaPort,
   Logger,
   MemoryRepository,
   NpcIntentRepository,
@@ -17,6 +18,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   SpeechSynthesizer,
+  TimelineWriter,
   TtsCacheRepository,
   TurnRepository,
   UnitOfWork,
@@ -37,6 +39,7 @@ import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place
 import { SqliteRelationshipRepository } from '@/infrastructure/persistence/sqlite/relationship-repository.sqlite'
 import { SqliteReverieRepository } from '@/infrastructure/persistence/sqlite/reverie-repository.sqlite'
 import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene-repository.sqlite'
+import { SqliteTimelineWriter } from '@/infrastructure/persistence/sqlite/timeline-writer.sqlite'
 import { SqliteTtsCacheRepository } from '@/infrastructure/persistence/sqlite/tts-cache-repository.sqlite'
 import { SqliteTurnRepository } from '@/infrastructure/persistence/sqlite/turn-repository.sqlite'
 import { SqliteUnitOfWork } from '@/infrastructure/persistence/sqlite/unit-of-work.sqlite'
@@ -46,6 +49,7 @@ import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
 import { GrokCrewGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
+import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
 
 // Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
 // constructs concrete infrastructure adapters. Everything else depends on the
@@ -71,6 +75,7 @@ export type Container = {
   relationships: RelationshipRepository
   scenes: SceneRepository
   dossiers: DossierRepository
+  timeline: TimelineWriter
   reveries: ReverieRepository
   npcIntents: NpcIntentRepository
   occupancy: OccupancyRepository
@@ -82,6 +87,7 @@ export type Container = {
   backgroundTasks: BackgroundTasks
   decks: DeckPlanProvider
   crewGenerator: CrewGenerator
+  drama: DramaPort
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -122,6 +128,7 @@ function buildSqlite(): Container {
     relationships: new SqliteRelationshipRepository(),
     scenes: new SqliteSceneRepository(),
     dossiers: new SqliteDossierRepository(),
+    timeline: new SqliteTimelineWriter(),
     reveries: new SqliteReverieRepository(),
     npcIntents: new SqliteNpcIntentRepository(),
     occupancy: new SqliteOccupancyRepository(),
@@ -133,6 +140,7 @@ function buildSqlite(): Container {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredDeckPlanProvider(),
     crewGenerator: new GrokCrewGenerator(),
+    drama: new HaikuDramaPort(),
   }
 }
 
@@ -180,6 +188,7 @@ export async function initContainer(): Promise<Container> {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredDeckPlanProvider(),
     crewGenerator: new GrokCrewGenerator(),
+    drama: new HaikuDramaPort(),
     ...repos,
   })
 }
