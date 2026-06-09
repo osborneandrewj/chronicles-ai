@@ -270,6 +270,43 @@ SimulateWorldForward for 24 ticks → print final positions + world time + drift
 relationships; assert every NPC's final room matches its routine for the final tick's
 band and the clock advanced. (Extends the P1 seed-script pattern; stub crew, no spend.)
 
+## P3 implementation spec (threshold-gated LLM beats — binding)
+Adds the one LLM seam to the sim: when co-located NPCs have tension/bond and the
+cooldown elapsed, spend ONE structured beat that records a timeline event and nudges
+relationships. Deterministic co-location drift (P2) remains the default; a beat
+SUPERSEDES it for that group/tick. Beats are **Haiku** (`HAIKU_MODEL`) per the
+drama-port design + cost discipline — flagged for a possible Grok swap at P4.
+
+**Adapters:**
+- `HaikuDramaPort` (`infrastructure/world-gen/`) implementing `DramaPort.generateBeat`
+  — `generateObject` with `HAIKU_MODEL` via `@ai-sdk/anthropic`, Zod-validated
+  `DramaBeat` (title, summary, participant_ids, valenceDeltas), system prompt from
+  `prompts/drama-beat.md`. Plus a deterministic `StubDramaPort` (tests + offline script).
+- `TimelineWriter` SQLite + Mongo adapters (P0 left the port only) — INSERT a
+  `timeline_events` row (turn_id null, sim_tick set, provenance='sim').
+
+**SimulateWorldForward changes** — add deps `{ places: PlaceRepository, drama: DramaPort,
+  timeline: TimelineWriter }` and config `{ cooldownTicks=3, tensionThreshold=0.3 }`:
+- Load places.forWorld → `placeNameById`. Enrich the NPC roster with name + role
+  (read WHERE P1's `characters.add` stored role — check the adapter) + goal (`active_goal`).
+- Per tick, per co-located group: gather the relationships whose both endpoints are in
+  the group; `shouldEmitBeat({ characterIds, relationships, currentTick: tick,
+  lastBeatTick: lastBeatTickByPlace[place], cooldownTicks, tensionThreshold })`.
+  - Gated TRUE → `drama.generateBeat(DramaBeatInput{ ... participants, relationships,
+    threads: [] })` → `timeline.append({ provenance:'sim', sim_tick:tick, world_time:
+    tickToWorldTime(tick), place_id, title, summary, importance })`; apply each
+    `valenceDelta` to the matching working relationship edge via `applyDrift`; set
+    `lastBeatTickByPlace[place]=tick`. (Skip deterministic drift for this group this tick.)
+  - Gated FALSE → the P2 deterministic co-location drift for the group's edges.
+- Persist end-state exactly as P2 (positions, net valence deltas, clock). Timeline beats
+  are written as they occur (the only per-tick persistence; still compact — ambient moves
+  are never logged).
+
+**Wiring + proof:** container wires `drama` (HaikuDramaPort) + `timeline` (TimelineWriter).
+`scripts/sim-ship.mjs` runs with `StubDramaPort` (no spend), prints the `provenance='sim'`
+timeline beats written, and asserts ≥1 beat fired given the seeded tension. Live Haiku beat
+smoke is manual (with the Grok crew smoke at P4).
+
 ## Open decision for P4 (surfaced in P2 — needs a call + browser check)
 P2's sim persists the clock and the positions for DIFFERENT moments, on purpose:
 `world_time = tickToWorldTime(ticks)` (the band the player *arrives* into, e.g. "Day 7
