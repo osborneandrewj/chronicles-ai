@@ -90,7 +90,7 @@ export type AdvanceTurnDeps = {
   runMetaCommand: (text: string, worldId: number) => string
 
   /** Read the world's active scene id (the player turn is stamped with it). */
-  activeSceneId: (worldId: number) => number | null
+  activeSceneId: (worldId: number) => Promise<number | null>
 
   /**
    * The pre-stream pipeline body (classify → geocode → npc-agent → occupancy →
@@ -201,7 +201,7 @@ export async function advanceTurn(
   }
 
   // ── PRE-STREAM transaction boundary: persist the player turn (fail-closed) ─
-  const activeSceneId = deps.activeSceneId(worldId)
+  const activeSceneId = await deps.activeSceneId(worldId)
   if (insertUserTurn) {
     await turns.insert(worldId, 'user', playerText, activeSceneId)
   }

@@ -120,7 +120,7 @@ function buildDeps(
     dailyTokenLimit: () => 50000,
     isMetaCommand: () => false,
     runMetaCommand: () => '',
-    activeSceneId: () => null,
+    activeSceneId: async () => null,
     buildNarration: o.buildNarration ?? (async () => emptyNarration()),
   }
 }

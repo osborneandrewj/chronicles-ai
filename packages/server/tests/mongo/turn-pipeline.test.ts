@@ -3,13 +3,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createWorld } from '@/application/use-cases/create-world'
 import { seedBoundedWorld } from '@/application/use-cases/seed-bounded-world'
 import { MongoCharacterRepository } from '@/infrastructure/persistence/mongo/repositories/character-repository.mongo'
+import { MongoDossierRepository } from '@/infrastructure/persistence/mongo/repositories/dossier-repository.mongo'
+import { MongoOccupancyRepository } from '@/infrastructure/persistence/mongo/repositories/occupancy-repository.mongo'
 import { MongoPlaceConnectionRepository } from '@/infrastructure/persistence/mongo/repositories/place-connection-repository.mongo'
 import { MongoPlaceRepository } from '@/infrastructure/persistence/mongo/repositories/place-repository.mongo'
 import { MongoRelationshipRepository } from '@/infrastructure/persistence/mongo/repositories/relationship-repository.mongo'
+import { MongoSceneRepository } from '@/infrastructure/persistence/mongo/repositories/scene-repository.mongo'
 import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/repositories/world-repository.mongo'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
 import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { getNarratorWorldStateVia } from '@/lib/world-state'
 
 import { replSetAvailable, startReplSet, type ReplSetHandle } from './replset'
 
@@ -72,6 +76,50 @@ d('mongo turn pipeline (e2e)', () => {
     expect(seededPlaces).toHaveLength(1)
     const seededCharacters = await characters.forWorld(worldId)
     expect(seededCharacters.some((c) => c.is_player === 1)).toBe(true)
+  })
+
+  it('assembles narrator context from MONGO via getNarratorWorldStateVia (port-driven read)', async () => {
+    const worlds = new MongoWorldRepository(h.ctx)
+    const scenes = new MongoSceneRepository(h.ctx)
+    const places = new MongoPlaceRepository(h.ctx)
+    const characters = new MongoCharacterRepository(h.ctx)
+    const occupancy = new MongoOccupancyRepository(h.ctx)
+    const dossiers = new MongoDossierRepository(h.ctx)
+
+    const { worldId } = await createWorld(
+      {
+        name: 'Polperro 1901',
+        premise: 'a smuggler village waking to the modern age',
+        initialState: {
+          time: 'dusk',
+          location: 'Polperro quay — Cornwall',
+          identity: 'a customs officer',
+        },
+      },
+      { worlds, extractSettingRegion: async () => null },
+    )
+
+    // The P2 assembler now sources its rows from the injected READ PORTS — here
+    // the Mongo port set — so this asserts the assembled context reads MONGO,
+    // not SQLite.
+    const state = await getNarratorWorldStateVia(
+      { worlds, scenes, places, characters, occupancy, dossiers },
+      worldId,
+    )
+
+    // Active scene + its place come back from Mongo.
+    expect(state.currentScene).not.toBeNull()
+    expect(state.currentPlace).not.toBeNull()
+    const seededPlaces = await places.forWorld(worldId)
+    expect(state.currentPlace?.id).toBe(seededPlaces[0]?.id)
+
+    // The seeded player character is present and among the known characters.
+    const seededCharacters = await characters.forWorld(worldId)
+    expect(state.knownCharacters.map((c) => c.id).sort()).toEqual(
+      seededCharacters.map((c) => c.id).sort(),
+    )
+    expect(state.presentCharacters.some((c) => c.is_player === 1)).toBe(true)
+    expect(state.knownPlaces.map((p) => p.id)).toContain(seededPlaces[0]?.id)
   })
 
   it('seeds a BOUNDED world via SeedBoundedWorld (StubCrewGenerator), readable through the ports', async () => {

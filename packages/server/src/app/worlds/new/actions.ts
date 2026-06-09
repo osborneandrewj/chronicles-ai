@@ -7,7 +7,7 @@ import { createStarshipWorld } from '@/application/use-cases/create-starship-wor
 import { createWorld, type CreateWorldInput } from '@/application/use-cases/create-world'
 import { getContainer } from '@/composition/container'
 import { isGenre } from '@/lib/genres'
-import { generateOpeningTurn } from '@/lib/opening-turn'
+import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
 import { generateWorldFromGenre } from '@/lib/world-generator'
 
@@ -56,8 +56,20 @@ async function createAndOpenWorld(input: CreateWorldInput): Promise<never> {
     worlds: c.worlds,
     extractSettingRegion,
   })
-  await generateOpeningTurn(worldId, input.premise)
+  await generateOpeningTurn(openingTurnDeps(c), worldId, input.premise)
   redirect(`/worlds/${worldId}/play`)
+}
+
+// The read ports `generateOpeningTurn` assembles narrator context from (P2).
+function openingTurnDeps(c: ReturnType<typeof getContainer>): OpeningTurnDeps {
+  return {
+    characters: c.characters,
+    dossiers: c.dossiers,
+    occupancy: c.occupancy,
+    places: c.places,
+    scenes: c.scenes,
+    worlds: c.worlds,
+  }
 }
 
 export async function createWorldAction(
@@ -150,7 +162,7 @@ export async function createStarshipWorldAction(
       { ...c, crew: c.crewGenerator },
     )
     worldId = result.worldId
-    await generateOpeningTurn(worldId, STARSHIP_PREMISE)
+    await generateOpeningTurn(openingTurnDeps(c), worldId, STARSHIP_PREMISE)
   } catch (err) {
     console.error('[starship launch failed]', err)
     return { error: "Couldn't launch the ship — try again." }

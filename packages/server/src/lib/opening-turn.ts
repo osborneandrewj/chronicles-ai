@@ -1,12 +1,17 @@
 import { xai } from '@ai-sdk/xai'
 import { generateText } from 'ai'
 
+import type { SceneRepository } from '@/domain/ports'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import { ARCHIVIST_MODEL, applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { isOverDailyLimit } from '@/lib/cost-cap'
-import { getActiveSceneForWorld, insertTurn, updateTurnMetadata } from '@/lib/db'
+import { insertTurn, updateTurnMetadata } from '@/lib/db'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
-import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+import {
+  formatStateBlock,
+  getNarratorWorldStateVia,
+  type NarratorWorldStateDeps,
+} from '@/lib/world-state'
 
 // Trailing directive that nudges the narrator into the "Opening a new world"
 // branch of NARRATOR_BASE. The system prompt already carries the length /
@@ -23,16 +28,27 @@ const OPENING_DIRECTIVE =
 // Returns silently on failures so a flaky LLM call doesn't block world
 // creation entirely; the player can send their own first turn if the opening
 // never lands. Console-logs surface in Railway logs for diagnosis.
-export async function generateOpeningTurn(worldId: number, premise: string): Promise<void> {
+// Read ports the opening turn reads (P2 cutover): the narrator-context assembler
+// plus the active-scene lookup. The server action hands these in from the
+// container; SQLite delegates to the same `lib/db` readers (byte-identical).
+export type OpeningTurnDeps = NarratorWorldStateDeps & {
+  scenes: Pick<SceneRepository, 'activeForWorld'>
+}
+
+export async function generateOpeningTurn(
+  deps: OpeningTurnDeps,
+  worldId: number,
+  premise: string,
+): Promise<void> {
   if (await isOverDailyLimit()) {
     console.warn('[opening-turn] daily token cap reached; skipping opening for world', worldId)
     return
   }
 
-  const priorState = getNarratorWorldState(worldId)
+  const priorState = await getNarratorWorldStateVia(deps, worldId)
   const stateBlock = formatStateBlock(priorState)
   const premiseBlock = formatPremiseBlock(premise)
-  const activeSceneId = getActiveSceneForWorld(worldId)?.id ?? null
+  const activeSceneId = (await deps.scenes.activeForWorld(worldId))?.id ?? null
 
   let text: string
   let narratorUsage: Awaited<ReturnType<typeof generateText>>['usage']

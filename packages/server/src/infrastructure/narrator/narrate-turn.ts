@@ -9,6 +9,7 @@ import {
 } from 'ai'
 
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
+import { getContainer } from '@/composition/container'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -22,7 +23,6 @@ import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-recon
 import {
   getCharactersForWorld,
   insertTurn,
-  recentTurns,
   updateTurnMetadata,
 } from '@/lib/db'
 import { narratorMapTools } from '@/lib/map-tools'
@@ -38,7 +38,7 @@ import {
   collectSceneTags,
   formatSceneDigestForClassifier,
   formatStateBlock,
-  getNarratorWorldState,
+  getNarratorWorldStateVia,
 } from '@/lib/world-state'
 import { getWorld } from '@/lib/worlds'
 
@@ -60,6 +60,12 @@ const FULL_HISTORY_TURNS = 6
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
 
+  // Read ports for the narrator-context assembler (P2 cutover). The SQLite
+  // adapters delegate to the same `lib/db` readers, so the assembled state is
+  // byte-identical; under PERSISTENCE=mongo they read the collections.
+  const { characters, dossiers, occupancy, places, scenes, turns, worlds } = getContainer()
+  const stateDeps = { characters, dossiers, occupancy, places, scenes, worlds }
+
   const world = getWorld(worldId)
   // AdvanceTurn already gated world existence; this is a defensive re-read for
   // `premise`. If it somehow vanished, surface an empty stream.
@@ -68,7 +74,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   }
 
   // State is read before the classifier so it can see who's present and where.
-  const priorState = getNarratorWorldState(worldId)
+  const priorState = await getNarratorWorldStateVia(stateDeps, worldId)
 
   // Update NPC attention tiers before the NPC agent call.
   const promotion = recordAppearancesAndAutoPromote(
@@ -88,8 +94,8 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   })
 
   // NPC agent failure must NEVER block the narrator — degrade to plan-less.
-  const postPromotionState = getNarratorWorldState(worldId)
-  const recentForAgents = recentTurns(worldId, 4)
+  const postPromotionState = await getNarratorWorldStateVia(stateDeps, worldId)
+  const recentForAgents = await turns.recentTurns(worldId, 4)
   const { stance, input_mode } = classification
   const shouldRunNpcAgent = shouldTickNpcAgent(stance, input_mode, postPromotionState)
   const npcAgentSettled = shouldRunNpcAgent
@@ -117,7 +123,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   }
 
   // Re-read so the just-persisted occupancy snapshot is visible.
-  const narratorState = getNarratorWorldState(worldId)
+  const narratorState = await getNarratorWorldStateVia(stateDeps, worldId)
   const recentNarratorProse = recentForAgents
     .filter((t) => t.role === 'assistant')
     .map((t) => t.content)
@@ -152,7 +158,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   })
   const premiseBlock = formatPremiseBlock(world.premise)
 
-  const allRecent = recentTurns(worldId, NARRATOR_HISTORY_TURNS)
+  const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_TURNS)
   const priorHistory = allRecent.slice(0, -1)
   const historyMessages = compactHistory(priorHistory)
   const presentNpcCount = narratorState.presentCharacters.filter((c) => c.is_player !== 1).length
@@ -284,7 +290,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         return
       }
 
-      const archivistRecent = recentTurns(worldId, 4).map((t) => ({
+      const archivistRecent = (await turns.recentTurns(worldId, 4)).map((t) => ({
         role: t.role,
         content: t.content,
       }))

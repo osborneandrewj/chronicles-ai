@@ -18,7 +18,6 @@ import { appendDbTurnId } from '@/app/api/chat/append-db-turn-id'
 import { getContainer } from '@/composition/container'
 import { narrateTurn } from '@/infrastructure/narrator/narrate-turn'
 import { dailyTokenLimit, isOverDailyLimit, todaysTokens } from '@/lib/cost-cap'
-import { getActiveSceneForWorld } from '@/lib/db'
 import { isMetaCommand, runMetaCommand } from '@/lib/meta-commands'
 
 // Thin inbound adapter (spec §3.5, §5.1-P5). Parses messages[]→playerText,
@@ -51,7 +50,7 @@ export async function POST(req: Request) {
     return new Response('Missing or invalid worldId', { status: 400 })
   }
 
-  const { worlds, turns, backgroundTasks } = getContainer()
+  const { scenes, worlds, turns, backgroundTasks } = getContainer()
 
   // World existence is checked before body parsing (preserved ordering: an
   // unknown world 404s regardless of body shape). AdvanceTurn re-checks too.
@@ -95,7 +94,7 @@ export async function POST(req: Request) {
         dailyTokenLimit,
         isMetaCommand,
         runMetaCommand,
-        activeSceneId: (id) => getActiveSceneForWorld(id)?.id ?? null,
+        activeSceneId: async (id) => (await scenes.activeForWorld(id))?.id ?? null,
         buildNarration: narrateTurn,
       },
     )

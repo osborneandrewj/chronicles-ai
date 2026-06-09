@@ -4,6 +4,16 @@ import type {
   Place,
   Scene,
 } from '@/domain/entities'
+import type {
+  CharacterRepository,
+  DossierRepository,
+  OccupancyRepository,
+  PlaceRepository,
+  ReverieRepository,
+  SceneRepository,
+  TurnRepository,
+  WorldRepository,
+} from '@/domain/ports'
 import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
 import {
   getActiveSceneForWorld,
@@ -96,6 +106,58 @@ export function getNarratorWorldState(worldId: number): NarratorWorldState {
   }
 }
 
+// Read ports the narrator-context assembler needs each turn. The use case (or
+// the strangled narrate-turn/opening-turn caller) hands these in from the
+// container; the SQLite adapters delegate to the same `lib/db` readers the
+// legacy sync path uses, so the assembled state is byte-identical.
+export type NarratorWorldStateDeps = {
+  worlds: Pick<WorldRepository, 'cursor'>
+  scenes: Pick<SceneRepository, 'activeForWorld'>
+  places: Pick<PlaceRepository, 'byId' | 'forWorld'>
+  characters: Pick<CharacterRepository, 'forWorld' | 'inPlace'>
+  occupancy: Pick<OccupancyRepository, 'latestSnapshot'>
+  dossiers: Pick<DossierRepository, 'forWorld'>
+}
+
+// Port-driven twin of getNarratorWorldState. SAME assembly/dedup/formatting —
+// only the row SOURCE changes (injected read ports instead of `@/lib/db`). The
+// SQLite adapters delegate to the identical readers, so SQLite stays byte-green
+// (P2 cutover); the Mongo adapters read the collections.
+export async function getNarratorWorldStateVia(
+  deps: NarratorWorldStateDeps,
+  worldId: number,
+): Promise<NarratorWorldState> {
+  const cursor = await deps.worlds.cursor(worldId)
+  const activeScene = await deps.scenes.activeForWorld(worldId)
+  const currentPlace = activeScene?.place_id ? await deps.places.byId(activeScene.place_id) : null
+
+  const knownCharacters = await deps.characters.forWorld(worldId)
+  const knownPlaces = await deps.places.forWorld(worldId)
+  const player = knownCharacters.filter((c) => c.is_player === 1)
+  const npcsInPlace = currentPlace
+    ? (await deps.characters.inPlace(worldId, currentPlace.id)).filter((c) => c.is_player === 0)
+    : []
+
+  const occupancyRow = currentPlace
+    ? await deps.occupancy.latestSnapshot(worldId, currentPlace.id)
+    : null
+  const occupancy =
+    occupancyRow && occupancyRow.scene_id === (activeScene?.id ?? null)
+      ? parseOccupancyRow(occupancyRow)
+      : null
+
+  return {
+    worldTime: cursor.world_time,
+    currentScene: activeScene,
+    currentPlace,
+    presentCharacters: [...player, ...npcsInPlace],
+    knownCharacters,
+    knownPlaces,
+    dossier: await deps.dossiers.forWorld(worldId),
+    occupancy,
+  }
+}
+
 // Deterministic scene tags for reverie flare-matching. Sources: the active
 // place's profile match_tags (the same vocabulary the occupancy sim is built
 // from) and the relevance tags of active story threads. Pure read of state.
@@ -135,6 +197,49 @@ export function getFullWorldState(worldId: number): FullWorldState {
     places: getPlacesForWorld(worldId),
     scenes: getScenesForWorld(worldId),
     dossier: getStoryDossierForWorld(worldId),
+    turnTimestamps,
+    turnNumbers,
+    potentialDuplicates: findLikelyDuplicateCharacters(characters),
+    reveriesByCharacter,
+  }
+}
+
+// Read ports the inspector's full-state assembler needs. Same delegation
+// discipline as NarratorWorldStateDeps.
+export type FullWorldStateDeps = {
+  worlds: Pick<WorldRepository, 'cursor'>
+  turns: Pick<TurnRepository, 'turnTimestamps'>
+  characters: Pick<CharacterRepository, 'forWorld'>
+  places: Pick<PlaceRepository, 'forWorld'>
+  scenes: Pick<SceneRepository, 'forWorld'>
+  dossiers: Pick<DossierRepository, 'forWorld'>
+  reveries: Pick<ReverieRepository, 'forWorld'>
+}
+
+// Port-driven twin of getFullWorldState. SAME assembly — only the row SOURCE
+// changes (injected read ports). SQLite stays byte-green via delegation.
+export async function getFullWorldStateVia(
+  deps: FullWorldStateDeps,
+  worldId: number,
+): Promise<FullWorldState> {
+  const cursor = await deps.worlds.cursor(worldId)
+  const orderedTurns = await deps.turns.turnTimestamps(worldId)
+  const turnTimestamps = Object.fromEntries(
+    orderedTurns.map((turn) => [turn.id, turn.created_at]),
+  )
+  const turnNumbers = buildTurnNumberMap(orderedTurns.map((turn) => turn.id))
+  const characters = await deps.characters.forWorld(worldId)
+  const reveriesByCharacter: Record<number, ReverieRow[]> = {}
+  for (const r of await deps.reveries.forWorld(worldId)) {
+    ;(reveriesByCharacter[r.character_id] ??= []).push(r)
+  }
+  return {
+    worldTime: cursor.world_time,
+    currentSceneId: cursor.current_scene_id,
+    characters,
+    places: await deps.places.forWorld(worldId),
+    scenes: await deps.scenes.forWorld(worldId),
+    dossier: await deps.dossiers.forWorld(worldId),
     turnTimestamps,
     turnNumbers,
     potentialDuplicates: findLikelyDuplicateCharacters(characters),
