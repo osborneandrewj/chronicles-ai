@@ -7,6 +7,7 @@ import type {
   GeneratedCrewMember,
   GeneratedRelationship,
 } from '@/domain/ports/crew-generator'
+import { sample } from '@/domain/services/name-pool'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 
 // StubCrewGenerator (starship P1) — a deterministic, LLM-free CrewGenerator for
@@ -15,14 +16,36 @@ import type { WorldTimeBand } from '@/domain/services/world-clock'
 // daily loop to that crew member's real home room plus the first room as a shared
 // gathering space, and emits a simple ally chain between consecutive crew roles.
 // No API key, no spend, fully reproducible — same template in, same crew out.
+//
+// Names are drawn from the NamePool via a seeded sample so offline/test crews are
+// diverse. The seed is derived from the template id (simple string hash) so the
+// same template always yields the same names — determinism is preserved.
 
-const FIXED_NAMES = ['Vance', 'Okonkwo', 'Renn', 'Sable', 'Idris']
 const BANDS: WorldTimeBand[] = ['morning', 'midday', 'evening', 'night']
+
+/** Simple djb2-style hash of a string → 32-bit unsigned integer. */
+function hashString(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h
+}
+
+/** Derive up to `count` names from the NamePool using a template-keyed seed. */
+function namesForTemplate(templateId: string, count: number): string[] {
+  const seed = hashString(templateId)
+  const pairs = sample(['sci-fi', 'space', 'generic'], count, { seed })
+  // Use "<Given> <Surname>" format; fall back to "Crew N" if the pool is exhausted.
+  return pairs.map((p) => `${p.given} ${p.surname}`)
+}
 
 export class StubCrewGenerator implements CrewGenerator {
   async generate(input: CrewGeneratorInput): Promise<GeneratedCrew> {
     const { template } = input
     const sharedRoomKey = template.rooms[0]?.key ?? ''
+
+    const pooledNames = namesForTemplate(template.id, template.crew.length)
 
     const crew: GeneratedCrewMember[] = template.crew.map((slot, index) => {
       const homeRoomKey = slot.homeRoomKey
@@ -38,7 +61,7 @@ export class StubCrewGenerator implements CrewGenerator {
       }
       return {
         role: slot.role,
-        name: FIXED_NAMES[index] ?? `Crew ${index + 1}`,
+        name: pooledNames[index] ?? `Crew ${index + 1}`,
         persona: `The ${slot.role}. ${slot.description}`,
         goal: `Carry out ${slot.role} duties through the voyage.`,
         homeRoomKey,

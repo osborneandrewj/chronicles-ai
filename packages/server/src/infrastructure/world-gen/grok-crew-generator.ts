@@ -13,8 +13,27 @@ import type {
   CrewGeneratorInput,
   GeneratedCrew,
 } from '@/domain/ports/crew-generator'
+import { sample } from '@/domain/services/name-pool'
 import { withObjectRetry } from '@/infrastructure/llm/generate-object'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
+
+// ── Name-pool helpers (infrastructure-only) ───────────────────────────────────
+// A tiny djb2-style string hash produces a deterministic seed from the template
+// id + premise so each world gets a stable-but-varied name candidate list without
+// any wall-clock or Math.random calls.
+
+function hashString(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h
+}
+
+/** Derive a 32-bit seed from the template id and premise string. */
+function nameSeed(templateId: string, premise: string): number {
+  return (hashString(templateId) ^ hashString(premise)) >>> 0
+}
 
 // GrokCrewGenerator (starship P1) — the live CrewGenerator adapter. One-shot
 // structured Grok call (mirrors lib/world-generator.ts's generateObject pattern,
@@ -81,6 +100,17 @@ export class GrokCrewGenerator implements CrewGenerator {
   async generate(input: CrewGeneratorInput): Promise<GeneratedCrew> {
     const { template, premise, playerName } = input
 
+    // Sample a candidate name list from the NamePool using a deterministic seed
+    // so each world/premise gets a varied but reproducible suggestion set.
+    // TODO(B8): wire recently-used surnames from a repository query and pass them
+    //   as `exclude` here, so the avoid-list prevents cross-world surname repeats.
+    const avoidList: string[] = []
+    const seed = nameSeed(template.id, premise)
+    const candidates = sample(['sci-fi', 'space', 'generic'], 12, { seed, exclude: avoidList })
+    const candidateLines = candidates
+      .map((c) => `${c.given} ${c.surname}`)
+      .join(', ')
+
     const roomManifest = template.rooms
       .map((r) => `- key="${r.key}" name="${r.name}": ${r.description}`)
       .join('\n')
@@ -108,6 +138,9 @@ export class GrokCrewGenerator implements CrewGenerator {
           '',
           'CREW SLOTS (one crew member each, in order):',
           crewSlots,
+          '',
+          `CANDIDATE NAMES: ${candidateLines}`,
+          `RECENTLY USED (avoid these surnames): ${avoidList.length > 0 ? avoidList.join(', ') : '(none)'}`,
           '',
           'Dress this ship now.',
         ].join('\n'),
