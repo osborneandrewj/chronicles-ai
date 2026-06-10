@@ -10,6 +10,7 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 # Fields
 - `arcEngineId` — echo the given arc engine id exactly.
 - `question` — the personal hook (Ludlum): who is the player really, why are they here, whose memory/identity is this? The "newest crew member" is the surface; the truth is bigger.
+- `institutionName` — a short, evocative proper name the staff use for the institution or program (2–4 words); a designation or codename, e.g. "The Cradle Program", "Project Silhouette", "The Meridian Initiative". It must NOT name the archetype — no "bunker", "ship", "lab", "monastery", or similar physical descriptor.
 - `institution` — the program and its TRUE purpose behind the friendly face (Crichton/Westworld hubris; Clancy black-program secrecy).
 - `hiddenTruth` — what running the simulations is really for, and the ticking consequence if it continues.
 - `antagonist` — who inside will burn the player to stay hidden. `allies` — who is secretly on their side.

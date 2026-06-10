@@ -3,6 +3,19 @@ import 'server-only'
 import type { MetaStoryBible } from '@/domain/entities'
 import type { MetaStoryGenerator, MetaStoryGeneratorInput } from '@/domain/ports'
 
+// Keyed off known arc-engine ids so the name never echoes the archetype label.
+const STUB_INSTITUTION_NAMES: Record<string, string> = {
+  'erased-operative': 'The Silhouette Program',
+  'memory-hunt': 'Project Meridian',
+  'countdown-vessel': 'The Cradle Initiative',
+  'mirror-faction': 'Operation Palladian',
+  'ghost-cartographer': 'The Threshold Bureau',
+}
+
+function stubInstitutionName(arcEngineId: string): string {
+  return STUB_INSTITUTION_NAMES[arcEngineId] ?? 'The Vantage Program'
+}
+
 // Deterministic MetaStoryGenerator (Phase C, C8) — builds a coherent bible from
 // the chosen arc engine without any LLM spend. Backs tests/offline runs; the
 // Grok adapter produces the richer, punched-up version in prod. Same inputs →
@@ -13,6 +26,7 @@ export class StubMetaStoryGenerator implements MetaStoryGenerator {
     const bible: MetaStoryBible = {
       arcEngineId: arcEngine.id,
       question: `Who is the newcomer to ${hubName}, really — and why were they brought here?`,
+      institutionName: stubInstitutionName(arcEngine.id),
       institution: `${hubName} presents itself as a friendly posting, but it runs the simulations for a purpose it does not disclose.`,
       hiddenTruth: arcEngine.premise,
       antagonist: 'A senior member of the institution who will burn the newcomer to keep the program buried.',
