@@ -80,7 +80,7 @@ export class StubEnsembleGenerator implements EnsembleGenerator {
     }
 
     return {
-      shipName: template.name,
+      worldName: template.name,
       premise: input.premise,
       roomDressing: template.rooms.map((r) => ({ key: r.key, description: r.description })),
       crew,

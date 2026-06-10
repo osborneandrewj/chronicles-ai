@@ -52,7 +52,7 @@ export type GeneratedRoomDressing = {
 }
 
 export type GeneratedEnsemble = {
-  shipName: string
+  worldName: string
   premise: string
   roomDressing: GeneratedRoomDressing[]
   crew: GeneratedCompanion[]

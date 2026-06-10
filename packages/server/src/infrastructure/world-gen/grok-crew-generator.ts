@@ -40,7 +40,7 @@ function nameSeed(templateId: string, premise: string): number {
 // but Grok via @ai-sdk/xai instead of Haiku, and living in infrastructure). It
 // turns an authored deck-plan template + premise into a dressed crew: ship name,
 // room descriptions, 3–5 crew with time-banded daily loops, and a relationship
-// graph. The system prompt is loaded at runtime from prompts/crew-dressing.md so
+// graph. The system prompt is loaded at runtime from prompts/ensemble-dressing.md so
 // it stays git-diffable; Zod validates the model output, and a deterministic
 // StubEnsembleGenerator backs tests + the offline seed script with no spend.
 
@@ -50,7 +50,7 @@ const DAILY_LOOP_ENTRY = z.object({
 })
 
 const CrewSchema = z.object({
-  shipName: z.string().min(1).max(120),
+  worldName: z.string().min(1).max(120),
   premise: z.string().min(20).max(2000),
   roomDressing: z
     .array(
@@ -92,7 +92,7 @@ const CrewSchema = z.object({
 
 function loadCrewDressingPrompt(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-  const file = path.resolve(moduleDir, '../../../prompts', 'crew-dressing.md')
+  const file = path.resolve(moduleDir, '../../../prompts', 'ensemble-dressing.md')
   return readFileSync(file, 'utf8').trim()
 }
 

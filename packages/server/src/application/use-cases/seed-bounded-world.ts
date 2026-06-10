@@ -108,7 +108,7 @@ export async function seedBoundedWorld(
   const { id: worldId } = await worlds.createBounded({
     name,
     premise,
-    initialStateJson: JSON.stringify({ premise: dressing.premise, ship_name: dressing.shipName }),
+    initialStateJson: JSON.stringify({ premise: dressing.premise, world_name: dressing.worldName }),
     templateId,
   })
 

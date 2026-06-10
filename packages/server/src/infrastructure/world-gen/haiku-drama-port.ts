@@ -22,7 +22,7 @@ import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 // in the forward sim. A pure domain gate (beat-gating) decides WHETHER to spend a
 // beat; this adapter generates one when authorized. One-shot structured Haiku call
 // (mirrors lib/world-generator.ts's generateObject pattern). The system prompt is
-// loaded at runtime from prompts/drama-beat.md so it stays git-diffable; Zod
+// loaded at runtime from prompts/ensemble-beat.md so it stays git-diffable; Zod
 // validates + constrains the model output (deltas scoped to the group, in a small
 // range), and a deterministic StubDramaPort backs tests + the offline sim script
 // with no spend. The beat is a compact structured event summary — NOT generated
@@ -47,7 +47,7 @@ const DramaBeatSchema = z.object({
 
 function loadDramaBeatPrompt(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url))
-  const file = path.resolve(moduleDir, '../../../prompts', 'drama-beat.md')
+  const file = path.resolve(moduleDir, '../../../prompts', 'ensemble-beat.md')
   return readFileSync(file, 'utf8').trim()
 }
 
