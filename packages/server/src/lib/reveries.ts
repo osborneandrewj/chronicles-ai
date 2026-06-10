@@ -2,6 +2,7 @@ import type { ReverieInput, ReverieRow } from '@/domain/entities'
 import {
   MAX_REVERIES_PER_NPC,
   clampIntensity,
+  decayedIntensity,
   normalizeReverieTag,
   normalizeReverieText,
 } from '@/domain/services/reverie-flare'
@@ -15,8 +16,12 @@ export type { FlareCandidate, ReverieInput, ReverieRow } from '@/domain/entities
 export {
   MAX_REVERIES_PER_NPC,
   REVERIE_COOLDOWN_TURNS,
+  REVERIE_FLARE_COOLDOWN_TURN_IDS,
+  REVERIE_FLARE_DECAY,
+  REVERIE_INTENSITY_FLOOR,
   canMintReverie,
   computeReverieFlares,
+  decayedIntensity,
   normalizeReverieTag,
   normalizeReverieText,
 } from '@/domain/services/reverie-flare'
@@ -34,8 +39,8 @@ const reveriesForWorldStmt = db.prepare<[number]>(
   'SELECT * FROM npc_reveries WHERE world_id = ? ORDER BY character_id ASC, id ASC',
 )
 const deleteReverieStmt = db.prepare<[number]>('DELETE FROM npc_reveries WHERE id = ?')
-const stampFlaredStmt = db.prepare<[number, number]>(
-  'UPDATE npc_reveries SET last_flared_turn_id = ? WHERE id = ?',
+const stampFlaredStmt = db.prepare<[number, number, number]>(
+  'UPDATE npc_reveries SET last_flared_turn_id = ?, intensity = ? WHERE id = ?',
 )
 const repointReverieStmt = db.prepare<[number, number]>(
   'UPDATE npc_reveries SET character_id = ? WHERE id = ?',
@@ -75,10 +80,21 @@ export function getReveriesForWorld(worldId: number): ReverieRow[] {
   return (reveriesForWorldStmt.all(worldId) as RawReverieRow[]).map(hydrate)
 }
 
+const reverieIntensityStmt = db.prepare<[number]>(
+  'SELECT intensity FROM npc_reveries WHERE id = ?',
+)
+
+// Stamp the flare turn AND decay the reverie's intensity toward the floor, so a
+// motif that keeps matching the standing scene gradually loses its slot (Phase A
+// anti-repetition). Best-effort; a missing row is skipped.
 export function stampFlaredReveries(reverieIds: number[], turnId: number): void {
   if (reverieIds.length === 0) return
   const tx = db.transaction(() => {
-    for (const id of reverieIds) stampFlaredStmt.run(turnId, id)
+    for (const id of reverieIds) {
+      const row = reverieIntensityStmt.get(id) as { intensity: number } | undefined
+      if (!row) continue
+      stampFlaredStmt.run(turnId, decayedIntensity(row.intensity), id)
+    }
   })
   tx()
 }

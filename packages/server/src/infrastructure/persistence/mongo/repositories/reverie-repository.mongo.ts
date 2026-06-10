@@ -2,6 +2,8 @@ import 'server-only'
 
 import {
   MAX_REVERIES_PER_NPC,
+  REVERIE_FLARE_DECAY,
+  REVERIE_INTENSITY_FLOOR,
   clampIntensity,
   normalizeReverieTag,
   normalizeReverieText,
@@ -104,9 +106,20 @@ export class MongoReverieRepository implements ReverieRepository {
 
   async stampFlared(reverieIds: number[], turnId: number): Promise<void> {
     if (reverieIds.length === 0) return
+    // Aggregation-pipeline update: stamp the flare turn AND decay intensity
+    // toward the floor in one pass (mirrors the pure decayedIntensity helper).
     await this.ctx.models.Reverie.updateMany(
       { id: { $in: reverieIds } },
-      { $set: { lastFlaredTurnId: turnId } },
+      [
+        {
+          $set: {
+            lastFlaredTurnId: turnId,
+            intensity: {
+              $max: [REVERIE_INTENSITY_FLOOR, { $multiply: ['$intensity', REVERIE_FLARE_DECAY] }],
+            },
+          },
+        },
+      ],
       { session: this.session },
     )
   }

@@ -7,6 +7,26 @@ export const MAX_REVERIES_PER_NPC = 3
 // prompt's "rarely" is only a nudge. Tunable.
 export const REVERIE_COOLDOWN_TURNS = 15
 
+// Flare cooldown (Phase A — anti-repetition). A reverie that flared recently is
+// suppressed so its snapshot text rotates instead of re-injecting verbatim every
+// turn (root cause of the "shoulders locked, data pad glowing" tic storm). The
+// window is measured in `turns.id` units; the live pipeline stamps a flare with
+// the player (user) turn id, and a turn inserts ~2 rows (user + narrator), so
+// ~2 ids ≈ 1 player turn. Default 6 ids (~3 player turns) reliably prevents the
+// same reverie flaring two turns running while still letting motifs return later.
+export const REVERIE_FLARE_COOLDOWN_TURN_IDS = 6
+
+// On each flare the reverie's stored intensity decays toward a floor, so a motif
+// that keeps matching the standing scene gradually loses its slot to fresher
+// reveries (rotation + softening). Applied in the repository write path.
+export const REVERIE_FLARE_DECAY = 0.8
+export const REVERIE_INTENSITY_FLOOR = 0.15
+
+// Pure: the intensity a reverie should carry after flaring once.
+export function decayedIntensity(intensity: number): number {
+  return Math.max(REVERIE_INTENSITY_FLOOR, clampIntensity(intensity) * REVERIE_FLARE_DECAY)
+}
+
 // Pure decision: may this NPC mint a new reverie this tick? The first one (no
 // reveries yet) is always free; afterwards a full cooldown must have elapsed.
 export function canMintReverie(
@@ -36,15 +56,31 @@ export function clampIntensity(value: number | undefined): number {
 export function computeReverieFlares(
   candidates: FlareCandidate[],
   sceneTags: string[],
-  opts: { perTurnCap?: number; presentCharacterIds?: number[] },
+  opts: {
+    perTurnCap?: number
+    presentCharacterIds?: number[]
+    // Current `turns.id`. When provided, a candidate that flared within
+    // `flareCooldownTurnIds` of it is excluded so motifs rotate instead of
+    // re-injecting the identical snapshot. Omit for the legacy (no-cooldown) behaviour.
+    currentTurnId?: number
+    flareCooldownTurnIds?: number
+  },
 ): number[] {
   const perTurnCap = opts.perTurnCap ?? 2
   const present = new Set(opts.presentCharacterIds ?? [])
   const sceneSet = new Set(sceneTags.map(normalizeReverieTag))
+  const cooldown = opts.flareCooldownTurnIds ?? REVERIE_FLARE_COOLDOWN_TURN_IDS
 
   type Scored = { id: number; character_id: number; score: number; intensity: number }
   const winnerByChar = new Map<number, Scored>()
   for (const c of candidates) {
+    if (
+      opts.currentTurnId != null &&
+      c.last_flared_turn_id != null &&
+      opts.currentTurnId - c.last_flared_turn_id < cooldown
+    ) {
+      continue // flared too recently — let the motif rest and rotate
+    }
     const overlap = c.match_tags.reduce(
       (n, t) => (sceneSet.has(normalizeReverieTag(t)) ? n + 1 : n),
       0,

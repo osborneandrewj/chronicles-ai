@@ -26,4 +26,7 @@ export type FlareCandidate = {
   character_id: number
   match_tags: string[]
   intensity: number
+  // Last `turns.id` this reverie flared on (null = never). Used by the flare
+  // cooldown to suppress a reverie that flared too recently.
+  last_flared_turn_id?: number | null
 }

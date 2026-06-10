@@ -166,12 +166,14 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     character_id: r.character_id,
     match_tags: r.match_tags,
     intensity: r.intensity,
+    last_flared_turn_id: r.last_flared_turn_id,
   }))
   const presentNpcIds = narratorState.presentCharacters
     .filter((c) => c.is_player !== 1)
     .map((c) => c.id)
   const flaringReverieIds = computeReverieFlares(flareCandidates, sceneTags, {
     presentCharacterIds: presentNpcIds,
+    currentTurnId: playerTurnId,
   })
   try {
     await reveries.stampFlared(flaringReverieIds, playerTurnId)

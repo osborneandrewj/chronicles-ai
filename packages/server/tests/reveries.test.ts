@@ -5,6 +5,7 @@ import {
   addReveriesForCharacter,
   canMintReverie,
   computeReverieFlares,
+  decayedIntensity,
   getReveriesForCharacter,
   MAX_REVERIES_PER_NPC,
   normalizeReverieTag,
@@ -45,6 +46,48 @@ describe('computeReverieFlares', () => {
     const flaring = computeReverieFlares(candidates, ['x'], { perTurnCap: 2, presentCharacterIds: [12] })
     expect(flaring).toContain(3) // present NPC always included
     expect(flaring).toHaveLength(2)
+  })
+
+  it('suppresses a reverie that flared within the cooldown window', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('x'), intensity: 1, last_flared_turn_id: 98 },
+    ]
+    // currentTurnId 100, default cooldown 6 ids: 100 - 98 = 2 < 6 -> suppressed.
+    expect(computeReverieFlares(candidates, ['x'], { currentTurnId: 100 })).toEqual([])
+  })
+
+  it('allows a reverie whose last flare is older than the cooldown window', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('x'), intensity: 1, last_flared_turn_id: 80 },
+    ]
+    expect(computeReverieFlares(candidates, ['x'], { currentTurnId: 100 })).toEqual([1])
+  })
+
+  it('rotates to a rested reverie when the recent winner is on cooldown', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('x'), intensity: 0.9, last_flared_turn_id: 99 },
+      { id: 2, character_id: 10, match_tags: tags('x'), intensity: 0.4, last_flared_turn_id: null },
+    ]
+    // The strong reverie just flared; the weaker, rested one takes the slot.
+    expect(computeReverieFlares(candidates, ['x'], { currentTurnId: 100 })).toEqual([2])
+  })
+
+  it('ignores the cooldown when no currentTurnId is supplied (legacy behaviour)', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('x'), intensity: 1, last_flared_turn_id: 99 },
+    ]
+    expect(computeReverieFlares(candidates, ['x'], {})).toEqual([1])
+  })
+})
+
+describe('decayedIntensity', () => {
+  it('decays intensity toward the floor on each flare', () => {
+    expect(decayedIntensity(1)).toBeCloseTo(0.8)
+    expect(decayedIntensity(0.8)).toBeCloseTo(0.64)
+  })
+  it('never decays below the floor', () => {
+    expect(decayedIntensity(0.1)).toBe(0.15)
+    expect(decayedIntensity(0)).toBe(0.15)
   })
 })
 
