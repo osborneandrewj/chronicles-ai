@@ -246,33 +246,33 @@ CREATE TABLE simulation_session (
 
 ### Steps
 
-- [ ] **C1 — World layering + bible column.** Migration v31 (SQLite) + Mongo model fields
+- [x] **C1 — World layering + bible column.** Migration v31 (SQLite) + Mongo model fields
   (`worldLayer`, `parentWorldId`, `metaStory`). `domain/entities/world.ts` +
   `domain/ports/world-repository.ts` + both adapters: expose the new fields. Per-`world_id`
   aggregates unchanged.
 
-- [ ] **C2 — `SimulationSession` entity + repository.** NEW `domain/entities/session.ts`,
+- [x] **C2 — `SimulationSession` entity + repository.** NEW `domain/entities/session.ts`,
   `domain/ports/session-repository.ts`, SQLite + Mongo adapters, container wiring (both
   builders). CRUD + `getActiveForPlayer`, `flip(status)`, `setAwoken`.
 
-- [ ] **C3 — `EnterSubworld` use case.** Seed/link a loose `open` simulation
+- [x] **C3 — `EnterSubworld` use case.** Seed/link a loose `open` simulation
   (`parent_world_id = hub`, the picked `GenrePreset.hiddenPremise`), drop the player in, set
   session `in_subworld`. The hub itself is seeded by `CreateBoundedWorld` with
   `pickHubArchetype()` (friendly-ensemble default) **silently** — never the first scene.
 
-- [ ] **C4 — Session-driven route resolution.** The chat route resolves the **active**
+- [x] **C4 — Session-driven route resolution.** The chat route resolves the **active**
   `world_id` from the session (sub-world while playing, hub after awakening); `advanceTurn`
   stays world-id-driven and untouched.
 
-- [ ] **C5 — `detectSubworldExit` + post-stream wiring.** NEW pure
+- [x] **C5 — `detectSubworldExit` + post-stream wiring.** NEW pure
   `domain/services/detect-subworld-exit.ts` (death/awakening signals → `Exit | null`). Wire
   into `narrate-turn` post-stream alongside the other enrichers (fail-open).
 
-- [ ] **C6 — `ReturnToHub` use case.** Reuse the drop-in recipe to place the player in the
+- [x] **C6 — `ReturnToHub` use case.** Reuse the drop-in recipe to place the player in the
   hub's `simulationRoomKey` room, open a scene, `setCursor`, flip session `in_hub`, set
   `has_awoken=true`. This is the reveal.
 
-- [ ] **C7 — `concealmentView` gate (server-side).** NEW pure
+- [x] **C7 — `concealmentView` gate (server-side).** NEW pure
   `domain/services/concealment-view.ts`: given session + world, decide visible scope. Apply in
   `application/use-cases/inspect-world.ts` and the **query port** so the inspector payload,
   world list, world title, and any route JSON are scoped to the sub-world until `has_awoken`.
@@ -281,7 +281,7 @@ CREATE TABLE simulation_session (
   inspect/list/route responses contain no hub world, no parent id, no sim room, no premise;
   after `has_awoken`, the hub is inspectable.
 
-- [ ] **C8 — Meta-Story Bible generation.** NEW `domain/entities/meta-story.ts`
+- [x] **C8 — Meta-Story Bible generation.** NEW `domain/entities/meta-story.ts`
   (`MetaStoryBible` shape: Question, Institution, HiddenTruth, Antagonist/Allies, escalation
   ladder, bleed motifs, endgame fork) + a data library `world-gen/arc-engines/` (Erased
   Operative / Memory Hunt / Drift / Black Program / Breach — structures, not IP). NEW
@@ -291,12 +291,12 @@ CREATE TABLE simulation_session (
   rendered to player/inspector. *Accept:* a generated bible has a coherent ladder + ≥1 bleed
   motif + an endgame fork.
 
-- [ ] **C9 — One-way bleed.** NEW pure `domain/services/select-bleed-threads.ts`: pick hub
+- [x] **C9 — One-way bleed.** NEW pure `domain/services/select-bleed-threads.ts`: pick hub
   threads tagged `bleed` (keyed on relevance tags) for injection into the simulation's
   narrator state + the empty drama-beat `threads:[]` slot
   (`simulate-world-forward.ts:211`, `tick-living-world.ts:242`). Never write back to the hub.
 
-- [ ] **C10 — Onboarding wiring (flag-gated).** `createAdventureAction` (B6): when `SIM_HUB`
+- [x] **C10 — Onboarding wiring (flag-gated).** `createAdventureAction` (B6): when `SIM_HUB`
   on → `CreateBoundedWorld(pickHubArchetype())` for the hub (+ bible C8) → create session →
   `EnterSubworld(genrePreset)` → player starts in the simulation. Friendly hub crew + player
   = newest member (revealed only post-awakening).
@@ -317,15 +317,15 @@ ALTER TABLE simulation_session ADD COLUMN lucidity INTEGER NOT NULL DEFAULT 0; -
 
 ### Steps
 
-- [ ] **D1 — Lucidity track.** Migration v32 + Mongo. Surface `lucidity` to the narrator state
+- [x] **D1 — Lucidity track.** Migration v32 + Mongo. Surface `lucidity` to the narrator state
   block; a deterministic service bumps it on discovery/rule-violation beats.
-- [ ] **D2 — Reality-fractures prompt.** `prompts/narrator-system.md`: optional "Escalating
+- [x] **D2 — Reality-fractures prompt.** `prompts/narrator-system.md`: optional "Escalating
   Player Power & Reality Fractures" section, gated on a simulation-framing premise (so plain
   genres are unaffected): early consistency → mid cracks → late affordances.
-- [ ] **D3 — Escalation pacing.** Pace cracks→affordances by the bible's escalation ladder
+- [x] **D3 — Escalation pacing.** Pace cracks→affordances by the bible's escalation ladder
   and the lucidity value; affordances (slow time / bend physics / rewrite a script) are
   earned by discovery, not arbitrary leveling.
-- [ ] **D4 — Bleed recurrence + endgame fork.** Ensure a bleed motif recurs across simulations;
+- [x] **D4 — Bleed recurrence + endgame fork.** Ensure a bleed motif recurs across simulations;
   make the endgame fork (master / free / expose / escape) reachable and stateful.
 
 ---
