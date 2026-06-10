@@ -244,6 +244,9 @@ export class MongoDossierWriter implements DossierWriter {
           kind: input.kind,
           status: input.status,
           detail: input.detail,
+          heldByCharacterId: input.held_by_character_id,
+          locationPlaceId: input.location_place_id,
+          salient: input.salient,
           sourceTurnId: input.source_turn_id,
           createdAt: now,
           updatedAt: now,
@@ -263,6 +266,9 @@ export class MongoDossierWriter implements DossierWriter {
     if (input.kind != null) set.kind = input.kind
     if (input.status != null) set.status = input.status
     if (input.detail != null) set.detail = input.detail
+    if (input.held_by_character_id != null) set.heldByCharacterId = input.held_by_character_id
+    if (input.location_place_id != null) set.locationPlaceId = input.location_place_id
+    if (input.salient != null) set.salient = input.salient
     await this.ctx.models.StoryResource.updateOne(
       { id: input.id },
       { $set: set },

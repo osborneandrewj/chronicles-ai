@@ -470,6 +470,9 @@ d('mongo turn pipeline (e2e)', () => {
       kind: 'tool',
       status: 'held',
       detail: 'opens the office',
+      held_by_character_id: charId,
+      location_place_id: null,
+      salient: true,
       source_turn_id: 1,
     })
     expect((await dossierWriter.resourceByName(worldId, 'brass key'))?.id).toBe(resId)
@@ -479,6 +482,9 @@ d('mongo turn pipeline (e2e)', () => {
       kind: null,
       status: 'lost',
       detail: null,
+      held_by_character_id: null,
+      location_place_id: null,
+      salient: null,
     })
 
     // The whole dossier reads back through the read port with the writes applied.

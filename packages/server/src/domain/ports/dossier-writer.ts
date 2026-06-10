@@ -113,17 +113,25 @@ export type InsertStoryResourceInput = {
   kind: string | null
   status: string | null
   detail: string | null
+  // Phase A (A4) — the tracked-object ledger: current physical possessor,
+  // resting location when not held, and load-bearing flag.
+  held_by_character_id: number | null
+  location_place_id: number | null
+  salient: boolean
   source_turn_id: number | null
 }
 
-// UPDATE args: (owner_character_id, kind, status, detail, id). All four are
-// COALESCE'd.
+// UPDATE args are COALESCE'd: a null/undefined field leaves the column
+// unchanged; a value overwrites it.
 export type UpdateStoryResourceInput = {
   id: number
   owner_character_id: number | null
   kind: string | null
   status: string | null
   detail: string | null
+  held_by_character_id: number | null
+  location_place_id: number | null
+  salient: boolean | null
 }
 
 export interface DossierWriter {

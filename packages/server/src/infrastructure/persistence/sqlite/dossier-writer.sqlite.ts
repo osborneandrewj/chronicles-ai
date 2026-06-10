@@ -117,20 +117,45 @@ const storyResourceByNameStmt = db.prepare<[number, string]>(
   `SELECT id FROM story_resources WHERE world_id = ? AND lower(name) = lower(?)`,
 )
 const insertStoryResourceStmt = db.prepare<
-  [number, number | null, string, string | null, string | null, string | null, number | null]
+  [
+    number,
+    number | null,
+    string,
+    string | null,
+    string | null,
+    string | null,
+    number | null,
+    number | null,
+    number,
+    number | null,
+  ]
 >(
-  `INSERT INTO story_resources (world_id, owner_character_id, name, kind, status, detail, source_turn_id)
-   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  `INSERT INTO story_resources
+     (world_id, owner_character_id, name, kind, status, detail,
+      held_by_character_id, location_place_id, salient, source_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 )
 const updateStoryResourceStmt = db.prepare<
-  [number | null, string | null, string | null, string | null, number]
+  [
+    number | null,
+    string | null,
+    string | null,
+    string | null,
+    number | null,
+    number | null,
+    number | null,
+    number,
+  ]
 >(
   `UPDATE story_resources SET
-     owner_character_id = COALESCE(?, owner_character_id),
-     kind               = COALESCE(?, kind),
-     status             = COALESCE(?, status),
-     detail             = COALESCE(?, detail),
-     updated_at         = datetime('now')
+     owner_character_id   = COALESCE(?, owner_character_id),
+     kind                 = COALESCE(?, kind),
+     status               = COALESCE(?, status),
+     detail               = COALESCE(?, detail),
+     held_by_character_id = COALESCE(?, held_by_character_id),
+     location_place_id    = COALESCE(?, location_place_id),
+     salient              = COALESCE(?, salient),
+     updated_at           = datetime('now')
    WHERE id = ?`,
 )
 
@@ -245,6 +270,9 @@ export class SqliteDossierWriter implements DossierWriter {
       input.kind,
       input.status,
       input.detail,
+      input.held_by_character_id,
+      input.location_place_id,
+      input.salient ? 1 : 0,
       input.source_turn_id,
     )
     return Promise.resolve({ id: Number(result.lastInsertRowid) })
@@ -256,6 +284,9 @@ export class SqliteDossierWriter implements DossierWriter {
       input.kind,
       input.status,
       input.detail,
+      input.held_by_character_id,
+      input.location_place_id,
+      input.salient === null || input.salient === undefined ? null : input.salient ? 1 : 0,
       input.id,
     )
     return Promise.resolve()

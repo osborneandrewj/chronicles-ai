@@ -9,6 +9,7 @@
 // patch schemas remain with the LLM adapter; only the deciding logic moves.
 import type { ArchivistPatch } from '@/lib/archivist'
 import type { NarratorWorldState } from '@/lib/world-state'
+import { extractObjectAcquisition } from '@/domain/services/object-acquisition'
 
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 
@@ -17,25 +18,37 @@ export function extractDeterministicPatch(
   playerText: string,
   narratorText: string,
 ): ArchivistPatch | null {
+  const patch: ArchivistPatch = {}
+
   const destination = extractDestination(playerText)
-  if (!destination) return null
-
-  const destinationKey = normalize(destination)
-  if (!destinationKey || destinationKey === normalize(prior.currentPlace?.name ?? '')) return null
-  if (!narratorAcceptsDestination(destination, narratorText)) return null
-
-  const player = prior.presentCharacters.find((c) => c.is_player === 1)
-  if (!player) return null
-
-  return {
-    places: [{ name: destination }],
-    characters: [{ name: player.name, is_player: true, current_place_name: destination }],
-    scene: {
-      action: 'open',
-      title: `At ${destination}`,
-      place_name: destination,
-    },
+  if (destination) {
+    const destinationKey = normalize(destination)
+    const player = prior.presentCharacters.find((c) => c.is_player === 1)
+    if (
+      destinationKey &&
+      destinationKey !== normalize(prior.currentPlace?.name ?? '') &&
+      narratorAcceptsDestination(destination, narratorText) &&
+      player
+    ) {
+      patch.places = [{ name: destination }]
+      patch.characters = [{ name: player.name, is_player: true, current_place_name: destination }]
+      patch.scene = {
+        action: 'open',
+        title: `At ${destination}`,
+        place_name: destination,
+      }
+    }
   }
+
+  // A4: a player clearly taking/receiving an object is promoted to the tracked-
+  // object ledger held_by the protagonist, deterministically — so item memory
+  // does not depend on the archivist LLM opting in.
+  const object = extractObjectAcquisition(playerText, narratorText)
+  if (object) {
+    patch.story_resources = [{ name: object, held_by_name: 'protagonist', salient: true }]
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null
 }
 
 export function sanitizeArchivistPatch(

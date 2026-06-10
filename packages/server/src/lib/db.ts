@@ -317,7 +317,8 @@ const storyObjectivesForWorldStmt = db.prepare<[number]>(
 )
 const storyResourcesForWorldStmt = db.prepare<[number]>(
   `SELECT r.id, r.world_id, r.owner_character_id, c.name AS owner_name, r.name, r.kind,
-          r.status, r.detail, r.source_turn_id, r.created_at, r.updated_at
+          r.status, r.detail, r.held_by_character_id, r.location_place_id, r.salient,
+          r.source_turn_id, r.created_at, r.updated_at
    FROM story_resources r
    LEFT JOIN characters c ON c.id = r.owner_character_id
    WHERE r.world_id = ?

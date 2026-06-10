@@ -889,6 +889,23 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'ship_clock_minutes', 'INTEGER')
     },
   },
+  {
+    // Phase A (A4) — first-class tracked-object ledger. story_resources becomes
+    // the single genre-neutral object ledger: `held_by_character_id` is who
+    // currently carries it (NULL = world-level / not on a person),
+    // `location_place_id` is where it sits when not held (NULL = on a person),
+    // and `salient` flags objects the narrator should treat as load-bearing
+    // (a tracked weapon, a stolen photograph) vs. ambient set-dressing. This
+    // kills the stolen-photo contradiction: ownership lives in structured state,
+    // not only in prose memorable_facts.
+    version: 30,
+    name: 'tracked_object_ledger',
+    up: (db) => {
+      addColumnIfMissing(db, 'story_resources', 'held_by_character_id', 'INTEGER')
+      addColumnIfMissing(db, 'story_resources', 'location_place_id', 'INTEGER')
+      addColumnIfMissing(db, 'story_resources', 'salient', 'INTEGER NOT NULL DEFAULT 0')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

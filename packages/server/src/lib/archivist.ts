@@ -178,6 +178,20 @@ const StoryObjectivePatchSchema = z.object({
 const StoryResourcePatchSchema = z.object({
   name: z.string().describe('Tool, companion, authority, asset, wound, corruption, or other play-relevant resource.'),
   owner_name: z.string().optional().describe('Known character who owns or carries it, if any.'),
+  held_by_name: z
+    .string()
+    .optional()
+    .describe(
+      'Who currently physically holds/carries this object right now (use "protagonist" for the player). Set this whenever possession changes hands — it is the authoritative possessor and overrides any prior holder.',
+    ),
+  location_name: z
+    .string()
+    .optional()
+    .describe('Known place where the object currently rests when no one is holding it.'),
+  salient: z
+    .boolean()
+    .optional()
+    .describe('True for a load-bearing object the narrator must honour (a tracked weapon, a stolen photograph); false/omit for ambient set-dressing.'),
   kind: z.string().optional().describe('Free-form kind, e.g. tool, companion, weapon, authority, injury.'),
   status: z.string().optional().describe('Current status, e.g. active, damaged, missing, spent.'),
   detail: z.string().optional().describe('Short play-relevant detail.'),

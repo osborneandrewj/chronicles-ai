@@ -632,6 +632,10 @@ export type StoryResourceDoc = {
   kind: string | null
   status: string | null
   detail: string | null
+  // Phase A (A4) — the tracked-object ledger.
+  heldByCharacterId: number | null
+  locationPlaceId: number | null
+  salient: boolean
   sourceTurnId: number | null
   createdAt: Date
   updatedAt: Date
@@ -647,6 +651,9 @@ const StoryResourceSchema = new Schema<StoryResourceDoc>(
     kind: { type: String, default: null },
     status: { type: String, default: null },
     detail: { type: String, default: null },
+    heldByCharacterId: { type: Number, default: null },
+    locationPlaceId: { type: Number, default: null },
+    salient: { type: Boolean, default: false },
     sourceTurnId: { type: Number, default: null },
     createdAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true },

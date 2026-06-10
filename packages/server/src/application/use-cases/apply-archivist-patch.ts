@@ -45,6 +45,11 @@ type StoryCluePatch = NonNullable<ArchivistPatch['story_clues']>[number]
 type StoryObjectivePatch = NonNullable<ArchivistPatch['story_objectives']>[number]
 type StoryResourcePatch = NonNullable<ArchivistPatch['story_resources']>[number]
 
+// Labels that denote the single is_player=1 row rather than a named NPC. Used
+// when resolving a tracked object's current holder (A4) — the archivist may say
+// "protagonist" rather than the player's chosen name.
+const PROTAGONIST_ALIASES = new Set(['protagonist', 'player', 'you', 'the player', 'me'])
+
 export type ApplyArchivistPatchInput = {
   worldId: number
   turnId: number
@@ -370,9 +375,23 @@ export async function applyArchivistPatch(
     })
   }
 
+  // "protagonist" / "player" / "you" all denote the single is_player=1 row,
+  // which resolveCharacter (name-based fuzzy match) cannot find by these labels.
+  async function resolveHolderId(name: string | undefined): Promise<number | null> {
+    if (!name) return null
+    if (PROTAGONIST_ALIASES.has(name.trim().toLowerCase())) {
+      return (await listCharacters()).find((c) => c.is_player === 1)?.id ?? null
+    }
+    return (await resolveCharacter(name))?.id ?? null
+  }
+
   async function upsertStoryResource(patch: StoryResourcePatch): Promise<void> {
     const ownerId = patch.owner_name
       ? (await resolveCharacter(patch.owner_name))?.id ?? null
+      : null
+    const heldById = await resolveHolderId(patch.held_by_name)
+    const locationPlaceId = patch.location_name
+      ? (await resolvePlace(patch.location_name))?.id ?? null
       : null
     const existing = await dossierWriter.resourceByName(worldId, patch.name)
     if (existing) {
@@ -382,6 +401,9 @@ export async function applyArchivistPatch(
         kind: patch.kind ?? null,
         status: patch.status ?? null,
         detail: patch.detail ?? null,
+        held_by_character_id: heldById,
+        location_place_id: locationPlaceId,
+        salient: patch.salient ?? null,
       })
       return
     }
@@ -392,6 +414,9 @@ export async function applyArchivistPatch(
       kind: patch.kind ?? null,
       status: patch.status ?? null,
       detail: patch.detail ?? null,
+      held_by_character_id: heldById,
+      location_place_id: locationPlaceId,
+      salient: patch.salient ?? false,
       source_turn_id: narratorTurnId,
     })
   }

@@ -79,6 +79,18 @@ export function formatStateBlock(
       if (c.is_player === 1) {
         if (c.status !== 'active') lines.push(`  - status: ${c.status}`)
         lines.push('  - continuity: this row is the protagonist; preserve location, carried items, injuries, notable discoveries, obligations, and relationship facts unless narration clearly changes them.')
+        // A4: pinned CARRIED / TRACKED OBJECTS — the authoritative possession
+        // ledger for the protagonist. Rendered as flat `name — status` lines (not
+        // paraphrased prose) so the narrator honours what the player holds and a
+        // stale "NPC still has X" fact cannot override it.
+        const carried = state.dossier.resources.filter((r) => r.held_by_character_id === c.id)
+        if (carried.length > 0) {
+          lines.push('  - CARRIED / TRACKED OBJECTS (authoritative — the protagonist holds these now):')
+          for (const r of carried.slice(0, 10)) {
+            const status = [r.kind, r.status].filter(Boolean).join(', ')
+            lines.push(`    - ${r.name}${status ? ` — ${status}` : ''}`)
+          }
+        }
       }
       const facts = stripFactProvenance(c.memorable_facts)
       if (facts) {

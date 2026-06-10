@@ -57,6 +57,14 @@ export type StoryResource = {
   kind: string | null
   status: string | null
   detail: string | null
+  // Phase A (A4) — the tracked-object ledger. `held_by_character_id` is who
+  // currently carries the object (NULL = world-level / not on a person);
+  // `location_place_id` is where it rests when not held (NULL = on a person);
+  // `salient` marks load-bearing objects the narrator must honour (a tracked
+  // weapon, a stolen photograph) vs. ambient set-dressing.
+  held_by_character_id: number | null
+  location_place_id: number | null
+  salient: number
   source_turn_id: number | null
   created_at: string
   updated_at: string
