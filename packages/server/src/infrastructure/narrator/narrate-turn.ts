@@ -13,8 +13,10 @@ import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
 import type { TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
+import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
+import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import { packNarratorHistory } from '@/domain/services/history-packer'
 import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -81,6 +83,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const {
     characters,
     clock,
+    decks,
     dossiers,
     drama,
     npcIntents,
@@ -90,6 +93,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     relationships,
     reveries,
     scenes,
+    sessions,
     timeline,
     timelineReader,
     timePassage,
@@ -406,6 +410,28 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             error: String(err),
           })
           console.error('[intent reconciler failed]', err)
+        }
+      }
+
+      // Subworld exit (C5/C6): in a simulation, a death or awakening surfaces
+      // the player back into the hub's simulation room. Runs before the archivist
+      // (which has early returns) so it always fires; fail-open so a hiccup never
+      // blocks the turn.
+      if (world.world_layer === 'subworld') {
+        try {
+          const exit = detectSubworldExit(playerText, trimmed)
+          if (exit) {
+            const session = await sessions.byWorld(worldId)
+            if (session && session.status === 'in_subworld') {
+              await returnToHub(
+                { session },
+                { worlds, places, scenes, characters, sessions, decks },
+              )
+              await turns.mergeMetadata(narratorTurn.id, 'subworld_exit', { kind: exit.kind })
+            }
+          }
+        } catch (err) {
+          console.error('[subworld-exit]', err)
         }
       }
 
