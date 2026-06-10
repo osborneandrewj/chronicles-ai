@@ -14,6 +14,7 @@ import { getContainer } from '@/composition/container'
 import type { TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
+import { packNarratorHistory } from '@/domain/services/history-packer'
 import { minutesToShipTime, shipTimeToMinutes } from '@/domain/services/ship-clock'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
@@ -51,8 +52,15 @@ import {
 // source stream drains, which happens after onFinish has persisted the turn);
 // the background-task registration of the archivist promise (drain on SIGTERM).
 
-const NARRATOR_HISTORY_TURNS = 13
-const FULL_HISTORY_TURNS = 6
+// How many recent turns to pull as candidates for the narrator's history. The
+// budget packer below decides how many of these stay full vs. get compacted.
+const NARRATOR_HISTORY_TURNS = 16
+// Token budget for FULL-content history messages (≈4–5K of the narrator's 8K
+// input). Narration is canonical, so full narrator turns are packed newest-first
+// up to this budget before any get compacted (A5). ~4 chars ≈ 1 token.
+const HISTORY_FULL_TOKEN_BUDGET = 4200
+// Older turns that don't fit the full budget are compacted to this many chars.
+const COMPACTED_TURN_CHARS = 600
 // How many prior off-screen sim beats to surface into the narrator's context on
 // a bounded world. Small + bounded — just enough for the narrator to reference
 // what the rest of the crew have been doing elsewhere on the ship.
@@ -491,19 +499,18 @@ function formatOffScreenBlock(events: TimelineEvent[]): string {
 function compactHistory(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): ModelMessage[] {
-  const fullStart = Math.max(0, history.length - FULL_HISTORY_TURNS)
-  return history.map((turn, idx) => {
-    if (idx >= fullStart) {
-      return { role: turn.role, content: turn.content }
-    }
-    return {
-      role: turn.role,
-      content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${limitText(
-        turn.content,
-        320,
-      )}]`,
-    }
+  const packed = packNarratorHistory(history, {
+    fullTokenBudget: HISTORY_FULL_TOKEN_BUDGET,
+    compactedChars: COMPACTED_TURN_CHARS,
   })
+  return packed.map((turn) =>
+    turn.compacted
+      ? {
+          role: turn.role,
+          content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${turn.content}]`,
+        }
+      : { role: turn.role, content: turn.content },
+  )
 }
 
 function shouldTickNpcAgent(
