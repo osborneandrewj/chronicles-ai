@@ -120,7 +120,7 @@ export class MongoReverieRepository implements ReverieRepository {
           },
         },
       ],
-      { session: this.session },
+      { session: this.session, updatePipeline: true },
     )
   }
 
