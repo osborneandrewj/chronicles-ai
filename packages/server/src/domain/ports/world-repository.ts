@@ -1,3 +1,4 @@
+import type { WorldLayer } from '@/domain/entities'
 import type { InitialState, World, WorldSummary } from '@/lib/worlds'
 
 // Input for createOpen (P3 cutover). An open world is seeded eagerly: the
@@ -71,4 +72,12 @@ export interface WorldRepository {
   setCursor(worldId: number, sceneId: number): Promise<void>
   /** Set (or clear) the world's geocoding setting-region anchor. */
   setSettingRegion(worldId: number, region: string | null): Promise<void>
+  /**
+   * Mark a world's simulation-hub layer + parent (Phase C). 'hub' for the
+   * concealed home base, 'subworld' for a simulation linked to its hub via
+   * `parentWorldId`. Leaves all other fields untouched.
+   */
+  setLayer(worldId: number, layer: WorldLayer, parentWorldId: number | null): Promise<void>
+  /** Store the hub-only Meta-Story Bible JSON (Phase C, C8). */
+  setMetaStory(worldId: number, metaStoryJson: string): Promise<void>
 }

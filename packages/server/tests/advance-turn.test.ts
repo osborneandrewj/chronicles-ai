@@ -99,6 +99,8 @@ function fakeWorld(exists: boolean): WorldRepository {
     setCursor: async () => {},
     setCurrentScene: async () => {},
     setSettingRegion: async () => {},
+    setLayer: async () => {},
+    setMetaStory: async () => {},
   }
 }
 

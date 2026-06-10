@@ -34,4 +34,4 @@ export type {
 export type { CachedTtsAudio } from './tts-cache'
 export type { AssistantTurnMetadata, Turn, TurnRole, TurnTimestamp } from './turn'
 export type { UsageTotals } from './usage'
-export type { InitialState, SpatialMode, World, WorldSummary } from './world'
+export type { InitialState, SpatialMode, World, WorldLayer, WorldSummary } from './world'

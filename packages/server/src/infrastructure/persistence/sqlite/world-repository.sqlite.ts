@@ -29,6 +29,13 @@ import type {
 const setCurrentSceneStmt = db.prepare<[number, number]>(
   'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
 )
+// Phase C: simulation-hub layering writes.
+const setLayerStmt = db.prepare<[string, number | null, number]>(
+  'UPDATE worlds SET world_layer = ?, parent_world_id = ? WHERE id = ?',
+)
+const setMetaStoryStmt = db.prepare<[string, number]>(
+  'UPDATE worlds SET meta_story_json = ? WHERE id = ?',
+)
 
 // SQLite adapter for WorldRepository (spec §5.1-P1). Delegates to the flat
 // read/archive functions in `worlds.ts` and the cursor reader in `db.ts`. World
@@ -93,6 +100,20 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setSettingRegion(worldId: number, region: string | null): Promise<void> {
     setSettingRegion(worldId, region)
+    return Promise.resolve()
+  }
+
+  setLayer(
+    worldId: number,
+    layer: 'hub' | 'subworld' | 'standalone',
+    parentWorldId: number | null,
+  ): Promise<void> {
+    setLayerStmt.run(layer, parentWorldId, worldId)
+    return Promise.resolve()
+  }
+
+  setMetaStory(worldId: number, metaStoryJson: string): Promise<void> {
+    setMetaStoryStmt.run(metaStoryJson, worldId)
     return Promise.resolve()
   }
 }

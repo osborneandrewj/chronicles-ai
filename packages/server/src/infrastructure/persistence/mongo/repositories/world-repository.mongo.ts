@@ -273,4 +273,24 @@ export class MongoWorldRepository implements WorldRepository {
       { session: this.ctx.currentSession ?? undefined },
     )
   }
+
+  async setLayer(
+    worldId: number,
+    layer: 'hub' | 'subworld' | 'standalone',
+    parentWorldId: number | null,
+  ): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { worldLayer: layer, parentWorldId } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
+  async setMetaStory(worldId: number, metaStoryJson: string): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { metaStory: metaStoryJson } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

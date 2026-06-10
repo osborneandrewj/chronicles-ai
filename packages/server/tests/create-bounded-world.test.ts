@@ -131,6 +131,8 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
       store.cursor.current_scene_id = sceneId
     },
     async setSettingRegion() {},
+    async setLayer() {},
+    async setMetaStory() {},
   }
 
   const places: CreateBoundedWorldDeps['places'] = {

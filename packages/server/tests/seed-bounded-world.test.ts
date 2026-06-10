@@ -114,6 +114,8 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async setCursor() {},
     async setCurrentScene() {},
     async setSettingRegion() {},
+    async setLayer() {},
+    async setMetaStory() {},
   }
   const places: PlaceRepository = {
     async forWorld() {
