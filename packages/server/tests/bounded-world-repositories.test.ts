@@ -71,6 +71,8 @@ describe('SqlitePlaceRepository.add', () => {
     expect(byId?.name).toBe('Bridge')
     expect(byId?.deck).toBe('A')
     expect(byId?.layout_hint).toBe(JSON.stringify({ x: 0, y: 0 }))
+    // A6: bounded rooms are sealed fictional interiors — never geocoded.
+    expect(byId?.geo_status).toBe('unavailable')
 
     const forWorld = await places.forWorld(worldId)
     expect(forWorld).toHaveLength(1)

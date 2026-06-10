@@ -110,9 +110,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   )
 
   // Lazy real-world geocoding — best-effort, never blocks the narrator.
-  await resolveUnresolvedPlaces({ places, worlds }, worldId).catch((err) => {
-    console.error('[place-resolver pre-narrator]', err)
-  })
+  // Bounded worlds are sealed fictional interiors (a ship, a facility, a
+  // monastery); geocoding their rooms to real-world coordinates ("Bridge,
+  // Canterbury, Kent") leaks real geography into a fictional space. Skip the
+  // resolver entirely for bounded worlds so no Nominatim call ever fires.
+  if (world.spatial_mode !== 'bounded') {
+    await resolveUnresolvedPlaces({ places, worlds }, worldId).catch((err) => {
+      console.error('[place-resolver pre-narrator]', err)
+    })
+  }
 
   // NPC agent failure must NEVER block the narrator — degrade to plan-less.
   const postPromotionState = await getNarratorWorldStateVia(stateDeps, worldId)

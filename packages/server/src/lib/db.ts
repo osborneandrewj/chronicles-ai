@@ -436,11 +436,14 @@ export function getPlace(id: number): Place | null {
 // Bounded-world inserts (starship P1). The seeder writes its own rooms/crew, so
 // these are plain parameterized inserts returning the new row id. Unlike the
 // open-world place insert in worlds.ts, these carry deck + layout_hint (v26).
+// Bounded rooms are sealed fictional interiors — seed them geo_status
+// 'unavailable' so the lazy real-world place-resolver never picks them up and
+// their interiors can never be geocoded to real coordinates (Phase A, A6).
 const insertBoundedPlaceStmt = db.prepare<
   [number, string, string | null, string | null, string | null, string | null]
 >(
-  `INSERT INTO places (world_id, name, description, kind, deck, layout_hint)
-   VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+  `INSERT INTO places (world_id, name, description, kind, deck, layout_hint, geo_status)
+   VALUES (?, ?, ?, ?, ?, ?, 'unavailable') RETURNING id`,
 )
 
 export function insertBoundedPlace(input: {

@@ -54,7 +54,9 @@ export class MongoPlaceRepository implements PlaceRepository {
           deck: place.deck,
           layoutHint: place.layout_hint,
           playerNotes: null,
-          geo: {},
+          // Bounded rooms are sealed fictional interiors — never geocode them
+          // (Phase A, A6). Mirrors the SQLite bounded insert's 'unavailable'.
+          geo: { status: 'unavailable' },
           profile: null,
           createdAt: now,
           updatedAt: now,
