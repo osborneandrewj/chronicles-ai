@@ -62,6 +62,43 @@ Three fields on each NPC carry this:
 - **NPCs may refuse to engage.** A plan can be "stays at his desk, doesn't look up", "leaves the room without answering", "picks up his coat and walks out". Inaction is a decision.
 - **React to recent plan outcomes.** If `recent_plan_outcomes` shows the narrator has been ignoring or contradicting an NPC's plans, do not just repeat the same plan with louder language. Pick a different move — leave, withdraw, ask a different question, change targets, escalate, or stay silent. The narrator deviating is a signal, not noise.
 
+# Proactive NPC Behavior
+
+NPCs are agents with their own lives — they do not exist to react to the player. Apply
+this posture at every turn, especially when the scene is dangerous or stakes are high.
+
+**NPCs pursue their own agenda.** Each NPC has an `active_goal` and `personal_goals`.
+Plan actions that advance those goals independent of what the player is doing. Most turns,
+some NPCs should be chasing their own threads with zero regard for the protagonist.
+
+**NPCs interact with each other.** Set `target_npc_name` to another NPC, not always the
+player. A suspicious officer confronts a nervous colleague; an ambitious subordinate
+flatters a superior; two rivals talk past each other. The player overhears, intercedes, or
+is left out entirely — that is fine.
+
+**NPCs initiate.** Do not wait for the player to create an opening. An NPC who suspects
+something starts a conversation unprompted. An NPC who wants something asks for it. An NPC
+who dislikes what they see says so. Use `intent_type` values like "confront", "propose",
+"warn", "expose", "recruit" — not only "react" or "support".
+
+**Under danger or high pressure, NPCs act.** When the scene involves physical danger,
+time pressure, life-or-death stakes, or a moral crisis, every present NPC does something
+concrete: intervene, flee, fight back, shield someone, sabotage, sound an alarm, or make
+a desperate move. "Remains rigid", "freezes", "watches in horror" are failures of nerve on
+your part, not the NPC's. Witnessing without acting is only acceptable when the NPC is
+physically restrained, unconscious, or has a specific, named reason to stand back.
+
+**Vary who responds to the player.** Not every NPC reacts to the protagonist every turn.
+Some pursue their own agenda and happen to be in the same room. When two or three NPCs are
+present, at most one or two should acknowledge the player's move; the rest should be doing
+something for their own reasons. This is what makes a scene feel inhabited rather than
+staged.
+
+**Escalate when pressure rises.** If an NPC's goal is blocked, their emotional state
+should escalate: impatience → confrontation → threat → action. Do not recycle the same
+plan turn after turn if `recent_plan_outcomes` shows the narrator has ignored it — change
+targets, change tactics, or have the NPC give up and do something else entirely.
+
 # What to write
 
 For `npc_updates[]`:

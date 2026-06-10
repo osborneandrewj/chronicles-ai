@@ -472,6 +472,46 @@ describe('tickLivingWorld', () => {
     expect(fakes.adjustCalls[0]!.delta).toBeCloseTo(-0.1, 6)
   })
 
+  it('fires a beat on a high-stakes group even when the cooldown has not elapsed (A8)', async () => {
+    // A8 high-stakes path: when group peak |valence| >= 0.7, the living tick sets
+    // effectiveCooldown=0 so the beat fires even if the normal cooldown hasn't cleared.
+    const hostileRels: CharacterRelationship[] = [
+      relationship({
+        id: 11,
+        from_character_id: COOK_ID,
+        to_character_id: MEDIC_ID,
+        kind: 'enemy',
+        valence: -0.85, // above HIGH_STAKES_TENSION_THRESHOLD=0.7
+      }),
+    ]
+    const recentEvent: TimelineEvent = {
+      id: 99,
+      world_id: WORLD_ID,
+      turn_id: null,
+      thread_id: null,
+      thread_title: null,
+      world_time: 'Day 1 — morning',
+      title: 'One tick ago',
+      summary: 'A beat that just fired.',
+      importance: 2,
+      sim_tick: 5,
+      provenance: 'sim',
+      created_at: '',
+    }
+    // currentTick 6, lastSimBeatTick 5, normal cooldown 2 ⇒ 6−5=1 < 2 → normally gated.
+    // But |valence|=0.85 >= 0.7 → effectiveCooldown=0 → beat fires despite cooldown.
+    const fakes = buildFakes(roster, hostileRels, [recentEvent])
+    const result = await tickLivingWorld(
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 6, cooldownTicks: 2 },
+      fakes.deps,
+    )
+
+    expect(result.beatsWritten).toBe(1)
+    expect(fakes.beatCalls).toHaveLength(1)
+    expect(fakes.appendCalls).toHaveLength(1)
+    expect(fakes.appendCalls[0]!.provenance).toBe('sim')
+  })
+
   it('does NOT deadlock the cooldown when prior beats exist (regression)', async () => {
     // The bug: the tick was derived from maxSimTick+1, so a prior beat at 11 pinned
     // the tick at 12 forever and (12 − 11 = 1) never cleared a cooldown of 2 — no

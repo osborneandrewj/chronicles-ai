@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CharacterRelationship } from '@/domain/entities'
-import { shouldEmitBeat } from '@/domain/services/beat-gating'
+import { groupMaxTension, isHighStakesBeat, shouldEmitBeat } from '@/domain/services/beat-gating'
 
 // Pure gate authorizing an LLM beat for a co-located group of NPCs. A beat fires
 // only when (a) the cooldown has elapsed since the last beat AND (b) some
@@ -153,6 +153,80 @@ describe('shouldEmitBeat', () => {
         lastBeatTick: null,
         cooldownTicks: 3,
         tensionThreshold: 0.5,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('groupMaxTension', () => {
+  it('returns the maximum |valence| among group-internal edges', () => {
+    expect(
+      groupMaxTension({
+        characterIds: [1, 2, 3],
+        relationships: [rel(1, 2, -0.8), rel(2, 3, 0.4), rel(1, 3, 0.6)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBeCloseTo(0.8, 6)
+  })
+
+  it('returns 0 when no relationships exist within the group', () => {
+    expect(
+      groupMaxTension({
+        characterIds: [1, 2],
+        relationships: [rel(3, 4, 0.9)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBe(0)
+  })
+
+  it('ignores relationships that touch a non-member', () => {
+    expect(
+      groupMaxTension({
+        characterIds: [1, 2],
+        relationships: [rel(1, 9, 0.95), rel(1, 2, 0.3)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBeCloseTo(0.3, 6)
+  })
+})
+
+describe('isHighStakesBeat', () => {
+  it('returns true when peak tension clears the high-stakes threshold', () => {
+    expect(
+      isHighStakesBeat({
+        characterIds: [1, 2],
+        relationships: [rel(1, 2, -0.9)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBe(true)
+  })
+
+  it('returns true at exactly the threshold (>=)', () => {
+    expect(
+      isHighStakesBeat({
+        characterIds: [1, 2],
+        relationships: [rel(1, 2, 0.7)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBe(true)
+  })
+
+  it('returns false when peak tension is below the threshold', () => {
+    expect(
+      isHighStakesBeat({
+        characterIds: [1, 2],
+        relationships: [rel(1, 2, 0.5)],
+        highStakesThreshold: 0.7,
+      }),
+    ).toBe(false)
+  })
+
+  it('returns false when no group-internal relationships exist', () => {
+    expect(
+      isHighStakesBeat({
+        characterIds: [1, 2],
+        relationships: [rel(3, 4, 0.99)],
+        highStakesThreshold: 0.7,
       }),
     ).toBe(false)
   })

@@ -11,7 +11,7 @@ import type {
   TimelineWriter,
   WorldRepository,
 } from '@/domain/ports'
-import { shouldEmitBeat } from '@/domain/services/beat-gating'
+import { isHighStakesBeat, shouldEmitBeat } from '@/domain/services/beat-gating'
 import type { CharacterPosition } from '@/domain/services/colocation'
 import { coLocatedGroups } from '@/domain/services/colocation'
 import { buildDeckGraph, neighbors } from '@/domain/services/deck-graph'
@@ -51,6 +51,11 @@ export type TickLivingWorldInput = {
 
 const DEFAULT_COOLDOWN_TICKS = 2
 const DEFAULT_TENSION_THRESHOLD = 0.25
+// Valence magnitude at which a group is treated as "high-stakes" (A8). Above
+// this threshold the living tick drops the per-group beat cooldown to 0 so an
+// LLM beat fires immediately, pushing off-scene NPCs into proactive action
+// rather than waiting out a normal inter-beat pause.
+const HIGH_STAKES_TENSION_THRESHOLD = 0.7
 // How many of the most recent ship-wide beats to hand the generator as memory so
 // it advances the situation instead of regenerating the same conflict.
 const RECENT_BEATS_WINDOW = 5
@@ -210,12 +215,23 @@ export async function tickLivingWorld(
     })
     const relationshipsInGroup = groupRelIds.map((id) => working.get(id)!)
 
+    // A8 (proactive NPCs): when a group's peak tension is high-stakes, drop the
+    // per-group cooldown to 0 so the beat fires immediately, even if the normal
+    // inter-beat pause hasn't elapsed. This pushes off-scene NPCs into action
+    // (via the beat pathway) during hot situations rather than standing idle.
+    const highStakes = isHighStakesBeat({
+      characterIds: group.characterIds,
+      relationships: relationshipsInGroup,
+      highStakesThreshold: HIGH_STAKES_TENSION_THRESHOLD,
+    })
+    const effectiveCooldown = highStakes ? 0 : beatCooldown
+
     const emit = shouldEmitBeat({
       characterIds: group.characterIds,
       relationships: relationshipsInGroup,
       currentTick: currentTick,
       lastBeatTick: lastBeatTickByPlace.get(placeId) ?? lastSimBeatTick,
-      cooldownTicks: beatCooldown,
+      cooldownTicks: effectiveCooldown,
       tensionThreshold: beatThreshold,
     })
 
