@@ -9,6 +9,7 @@ import {
   listArchivedWorlds,
   listWorlds,
   setSettingRegion,
+  setShipClockMinutes,
   setWorldSceneCursor,
   setWorldTime,
   unarchiveWorld,
@@ -72,6 +73,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setWorldTime(worldId: number, worldTime: string): Promise<void> {
     setWorldTime(worldId, worldTime)
+    return Promise.resolve()
+  }
+
+  setShipClockMinutes(worldId: number, minutes: number): Promise<void> {
+    setShipClockMinutes(worldId, minutes)
     return Promise.resolve()
   }
 

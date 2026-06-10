@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { db } from '@/lib/db'
+import { createWorld as createOpenWorld } from '@/lib/worlds'
 import { SqliteCharacterRepository } from '@/infrastructure/persistence/sqlite/character-repository.sqlite'
 import { SqlitePlaceConnectionRepository } from '@/infrastructure/persistence/sqlite/place-connection-repository.sqlite'
 import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place-repository.sqlite'
@@ -155,6 +156,33 @@ describe('SqliteWorldRepository.setWorldTime', () => {
     const cursor = await worlds.cursor(worldId)
     expect(cursor.world_time).toBe('Day 6 — night')
     expect(cursor.current_scene_id).toBeNull()
+  })
+})
+
+describe('SqliteWorldRepository.setShipClockMinutes', () => {
+  it('round-trips ship_clock_minutes via getWorld', async () => {
+    const worldId = await createWorld(`shipclock-${Math.random()}`)
+    let world = await worlds.getWorld(worldId)
+    expect(world?.ship_clock_minutes).toBeNull()
+
+    await worlds.setShipClockMinutes(worldId, 3990)
+    world = await worlds.getWorld(worldId)
+    expect(world?.ship_clock_minutes).toBe(3990)
+  })
+
+  it('leaves an open world ship_clock_minutes null (byte-green)', async () => {
+    const open = createOpenWorld({
+      name: `open-${Math.random()}`,
+      premise: 'A quiet village.',
+      initialState: {
+        time: 'Late afternoon',
+        location: 'The harbour',
+        identity: 'A returning letter-writer.',
+      },
+    })
+    const world = await worlds.getWorld(open.id)
+    expect(world?.spatial_mode).toBe('open')
+    expect(world?.ship_clock_minutes).toBeNull()
   })
 })
 

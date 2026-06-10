@@ -47,6 +47,7 @@ export class MongoWorldRepository implements WorldRepository {
           settingRegion: null,
           spatialMode: 'bounded',
           templateId: input.templateId,
+          shipClockMinutes: null,
           worldTime: null,
           currentSceneId: null,
           archivedAt: null,
@@ -85,6 +86,7 @@ export class MongoWorldRepository implements WorldRepository {
           settingRegion: null,
           spatialMode: 'open',
           templateId: null,
+          shipClockMinutes: null,
           worldTime: null,
           currentSceneId: null,
           archivedAt: null,
@@ -228,6 +230,17 @@ export class MongoWorldRepository implements WorldRepository {
     await this.ctx.models.World.updateOne(
       { id: worldId },
       { $set: { worldTime } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
+  // Bounded-world prose-driven ship-clock write (starship P6): set the minutes-
+  // since-Day-1 counter. The narrate-turn pipeline advances it post-stream from
+  // estimated elapsed in-world time.
+  async setShipClockMinutes(worldId: number, minutes: number): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { shipClockMinutes: minutes } },
       { session: this.ctx.currentSession ?? undefined },
     )
   }

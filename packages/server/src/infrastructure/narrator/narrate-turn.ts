@@ -14,6 +14,7 @@ import { getContainer } from '@/composition/container'
 import type { TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
+import { minutesToShipTime, shipTimeToMinutes } from '@/domain/services/ship-clock'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -79,6 +80,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     scenes,
     timeline,
     timelineReader,
+    timePassage,
     turns,
     unitOfWork,
     worlds,
@@ -262,6 +264,28 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       // enrichers — never blocks the turn; registered so it drains on SIGTERM.
       // Open worlds keep the turn pipeline's off-scene skip optimisation untouched.
       if (isBounded) {
+        // PROSE-DRIVEN ship-clock (bounded worlds only, starship P6). Read the
+        // just-written narration, estimate how much in-world time it covered, and
+        // advance the ship-clock counter by that — so narrative time flows from
+        // the STORY, not a fixed per-turn tick. Runs BEFORE the living tick so the
+        // tick places crew against the freshly advanced band. Fail-open: a clock
+        // failure must never block the turn (and the living tick still runs on the
+        // prior band). Backfill the counter from world_time on first use (null).
+        try {
+          const current =
+            world.ship_clock_minutes ?? shipTimeToMinutes(narratorState.worldTime)
+          const { elapsedMinutes } = await timePassage.estimate({
+            narration: trimmed,
+            priorWorldTime: narratorState.worldTime,
+          })
+          const next = current + elapsedMinutes
+          const { worldTime } = minutesToShipTime(next)
+          await worlds.setShipClockMinutes(worldId, next)
+          await worlds.setWorldTime(worldId, worldTime)
+        } catch (err) {
+          console.error('[ship-clock advance failed]', err)
+        }
+
         const livingTick = tickLivingWorld(
           {
             worldId,

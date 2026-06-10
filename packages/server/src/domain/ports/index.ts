@@ -43,6 +43,11 @@ export type {
   RelationshipInput,
   RelationshipRepository,
 } from './relationship-repository'
+export type {
+  TimePassageEstimate,
+  TimePassageEstimator,
+  TimePassageEstimatorInput,
+} from './time-passage-estimator'
 export type { TimelineReader } from './timeline-reader'
 export type { TimelineEventInput, TimelineWriter } from './timeline-writer'
 export type { ReverieRepository } from './reverie-repository'

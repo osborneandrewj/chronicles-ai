@@ -54,6 +54,25 @@ d('mongo WorldRepository', () => {
       expect(world?.id).toBe(id)
       expect(typeof world?.id).toBe('number')
       expect(world?.spatial_mode).toBe('bounded')
+      expect(world?.ship_clock_minutes).toBeNull()
+    })
+  })
+
+  describe('setShipClockMinutes', () => {
+    it('round-trips the ship-clock counter via getWorld', async () => {
+      const worlds = new MongoWorldRepository(h.ctx)
+      const { id } = await worlds.createBounded({
+        name: 'Clockwork',
+        premise: 'mid-watch',
+        initialStateJson: JSON.stringify({ premise: 'p' }),
+        templateId: 'scout',
+      })
+      let world = await worlds.getWorld(id)
+      expect(world?.ship_clock_minutes).toBeNull()
+
+      await worlds.setShipClockMinutes(id, 3990)
+      world = await worlds.getWorld(id)
+      expect(world?.ship_clock_minutes).toBe(3990)
     })
   })
 

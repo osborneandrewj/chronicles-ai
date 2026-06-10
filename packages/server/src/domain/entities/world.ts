@@ -11,6 +11,9 @@ export type World = {
   setting_region: string | null
   spatial_mode: SpatialMode
   template_id: string | null
+  // Prose-driven ship-clock (starship P6): minutes since a Day-1 00:00 baseline.
+  // Set for bounded worlds; null for open worlds (which keep current_time).
+  ship_clock_minutes: number | null
   created_at: string
 }
 

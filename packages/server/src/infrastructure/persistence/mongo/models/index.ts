@@ -52,6 +52,9 @@ export type WorldDoc = {
   // template_id TEXT (nullable).
   spatialMode: 'open' | 'bounded'
   templateId: string | null
+  // Prose-driven ship-clock (v29 / starship P6): minutes since the Day-1 00:00
+  // baseline. Set for bounded worlds; null for open. SQLite: ship_clock_minutes.
+  shipClockMinutes: number | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -67,6 +70,7 @@ const WorldSchema = new Schema<WorldDoc>(
     settingRegion: { type: String, default: null },
     spatialMode: { type: String, enum: ['open', 'bounded'], default: 'open' },
     templateId: { type: String, default: null },
+    shipClockMinutes: { type: Number, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },

@@ -10,7 +10,7 @@ export type { InitialState, World, WorldSummary }
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
    VALUES (?, ?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at`,
+   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, created_at`,
 )
 
 // Bare bounded-world insert (starship P1). Unlike createWorld, this seeds NO
@@ -23,7 +23,7 @@ const insertBoundedWorldStmt = db.prepare<[string, string, string, string]>(
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, created_at
+  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, created_at
    FROM worlds WHERE id = ?`,
 )
 
@@ -72,6 +72,9 @@ const setWorldTimeStmt = db.prepare<[string, number]>(
 const setWorldSceneCursorStmt = db.prepare<[number, number]>(
   'UPDATE worlds SET current_scene_id = ? WHERE id = ?',
 )
+const setShipClockMinutesStmt = db.prepare<[number, number]>(
+  'UPDATE worlds SET ship_clock_minutes = ? WHERE id = ?',
+)
 
 // Bounded-world sim write (starship P2): advance only world_time, leaving the
 // scene cursor untouched (the player-less pre-sim has no active scene yet).
@@ -83,6 +86,13 @@ export function setWorldTime(worldId: number, worldTime: string): void {
 // scene, leaving world_time (already set by the pre-sim) untouched.
 export function setWorldSceneCursor(worldId: number, sceneId: number): void {
   setWorldSceneCursorStmt.run(sceneId, worldId)
+}
+
+// Bounded-world prose-driven ship-clock write (starship P6): set the minutes-
+// since-Day-1 counter. narrate-turn advances it post-stream from estimated
+// elapsed in-world time; CreateStarshipWorld inits it from the boarding clock.
+export function setShipClockMinutes(worldId: number, minutes: number): void {
+  setShipClockMinutesStmt.run(minutes, worldId)
 }
 
 export type CreateWorldInput = {

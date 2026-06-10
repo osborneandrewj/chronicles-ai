@@ -66,6 +66,7 @@ export function mapWorld(d: WorldDoc): World {
     setting_region: d.settingRegion,
     spatial_mode: d.spatialMode ?? 'open',
     template_id: d.templateId ?? null,
+    ship_clock_minutes: d.shipClockMinutes ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }

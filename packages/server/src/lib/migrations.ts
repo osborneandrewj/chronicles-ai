@@ -875,6 +875,20 @@ export const migrations: Migration[] = [
       )
     },
   },
+  {
+    // v0.x (starship P6) — the ship-clock. `worlds.ship_clock_minutes` is the
+    // PROSE-DRIVEN narrative clock for bounded worlds: minutes since a Day-1
+    // 00:00 baseline. The narrate-turn pipeline estimates elapsed in-world time
+    // from the just-written prose and advances this, then renders a narrative
+    // time-of-day (e.g. "Day 3 — early morning") into world_time. Nullable: set
+    // for bounded worlds, NULL for open worlds (which keep the archivist's
+    // free-text current_time). Guarded against re-run.
+    version: 29,
+    name: 'ship_clock_minutes',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'ship_clock_minutes', 'INTEGER')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

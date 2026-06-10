@@ -95,6 +95,7 @@ function fakeWorld(exists: boolean): WorldRepository {
     unarchiveWorld: async () => {},
     cursor: async () => ({ world_time: null, current_scene_id: null }),
     setWorldTime: async () => {},
+    setShipClockMinutes: async () => {},
     setCursor: async () => {},
     setCurrentScene: async () => {},
     setSettingRegion: async () => {},

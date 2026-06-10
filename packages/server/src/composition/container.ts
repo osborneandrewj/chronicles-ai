@@ -19,6 +19,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   SpeechSynthesizer,
+  TimePassageEstimator,
   TimelineReader,
   TimelineWriter,
   TtsCacheRepository,
@@ -54,6 +55,7 @@ import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesize
 import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
 import { GrokCrewGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
 import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
+import { HaikuTimePassageEstimator } from '@/infrastructure/world-gen/haiku-time-passage-estimator'
 
 // Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
 // constructs concrete infrastructure adapters. Everything else depends on the
@@ -94,6 +96,7 @@ export type Container = {
   decks: DeckPlanProvider
   crewGenerator: CrewGenerator
   drama: DramaPort
+  timePassage: TimePassageEstimator
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -149,6 +152,7 @@ function buildSqlite(): Container {
     decks: new AuthoredDeckPlanProvider(),
     crewGenerator: new GrokCrewGenerator(),
     drama: new HaikuDramaPort(),
+    timePassage: new HaikuTimePassageEstimator(),
   }
 }
 
@@ -197,6 +201,7 @@ export async function initContainer(): Promise<Container> {
     decks: new AuthoredDeckPlanProvider(),
     crewGenerator: new GrokCrewGenerator(),
     drama: new HaikuDramaPort(),
+    timePassage: new HaikuTimePassageEstimator(),
     ...repos,
   })
 }

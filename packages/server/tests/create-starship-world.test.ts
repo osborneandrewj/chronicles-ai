@@ -57,6 +57,7 @@ type Store = {
   cursor: { current_scene_id: number | null }
   worldTime: string | null
   simTicks: number | null
+  shipClockMinutes: number | null
 }
 
 function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
@@ -69,6 +70,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     cursor: { current_scene_id: null },
     worldTime: null,
     simTicks: null,
+    shipClockMinutes: null,
   }
   let nextPlaceId = 100
   let nextCharacterId = 200
@@ -109,6 +111,9 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     },
     async setWorldTime(_id, worldTime) {
       store.worldTime = worldTime
+    },
+    async setShipClockMinutes(_id, minutes) {
+      store.shipClockMinutes = minutes
     },
     async setCursor(_id, sceneId) {
       store.cursor.current_scene_id = sceneId
@@ -414,6 +419,15 @@ describe('createStarshipWorld', () => {
     // tickToWorldTime(12-1)=tickToWorldTime(11): 11 ticks past day 1 morning.
     // Bands cycle every 4 ticks ⇒ tick 11 is band index 3 = night, day 3.
     expect(store.worldTime).toBe('Day 3 — night')
+  })
+
+  it('seeds the ship-clock from the boarding world_time (starship P6)', async () => {
+    const { deps, store } = makeDeps()
+    await createStarshipWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
+    // Default 12 ticks ⇒ boarding world_time 'Day 3 — night'. shipTimeToMinutes
+    // anchors a clock-less band phrase to a representative hour (night=23:00):
+    // (3-1)*1440 + 23*60 = 4260. A non-null counter proves the clock is seeded.
+    expect(store.shipClockMinutes).toBe(4260)
   })
 
   it('adds exactly one player on the Bridge (placeIds[0]) as a newcomer', async () => {

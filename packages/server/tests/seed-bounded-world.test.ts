@@ -107,6 +107,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
       return { world_time: null, current_scene_id: null }
     },
     async setWorldTime() {},
+    async setShipClockMinutes() {},
     async setCursor() {},
     async setCurrentScene() {},
     async setSettingRegion() {},

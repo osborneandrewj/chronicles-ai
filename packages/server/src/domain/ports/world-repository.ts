@@ -52,6 +52,12 @@ export interface WorldRepository {
   /** Advance only world_time (the P2 pre-sim clock), leaving the scene cursor. */
   setWorldTime(worldId: number, worldTime: string): Promise<void>
   /**
+   * Set the prose-driven ship-clock counter (minutes since the Day-1 00:00
+   * baseline) for a bounded world (starship P6). `getWorld` returns it as
+   * `ship_clock_minutes`; the narrate-turn pipeline advances it post-stream.
+   */
+  setShipClockMinutes(worldId: number, minutes: number): Promise<void>
+  /**
    * Point the world cursor at a scene — the archivist's `setCurrentSceneStmt`
    * mirror (P4a write surface). Sets ONLY current_scene_id; world_time is left
    * untouched. (Distinct port entry from `setCursor` while the archivist's own

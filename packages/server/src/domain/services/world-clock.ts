@@ -30,7 +30,7 @@ export function worldTimeBand(worldTime: string | null): WorldTimeBand {
   return 'midday'
 }
 
-function bandForHour(hour: number): WorldTimeBand {
+export function bandForHour(hour: number): WorldTimeBand {
   if (hour >= 5 && hour < 11) return 'morning'
   if (hour >= 11 && hour < 17) return 'midday'
   if (hour >= 17 && hour < 21) return 'evening'
