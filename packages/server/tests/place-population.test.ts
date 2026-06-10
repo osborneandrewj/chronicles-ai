@@ -296,6 +296,12 @@ function seedScene(worldId: number, placeName: string, kind: string): { placeId:
   db.prepare('UPDATE worlds SET current_scene_id = ?, world_time = ? WHERE id = ?').run(
     sceneId, 'Day 1, 20:00', worldId,
   )
+  // The player occupies the active scene's place — the real-play invariant the
+  // narrator assembler relies on now that presence follows the player's location
+  // (current_place_id), not the scene's place.
+  db.prepare(
+    'UPDATE characters SET current_place_id = ? WHERE world_id = ? AND is_player = 1',
+  ).run(placeId, worldId)
   return { placeId }
 }
 

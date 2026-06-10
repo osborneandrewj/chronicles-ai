@@ -79,11 +79,18 @@ export type FullWorldState = {
 export function getNarratorWorldState(worldId: number): NarratorWorldState {
   const cursor = getWorldCursor(worldId)
   const activeScene = getActiveSceneForWorld(worldId)
-  const currentPlace = activeScene?.place_id ? getPlace(activeScene.place_id) : null
 
   const knownCharacters = getCharactersForWorld(worldId)
   const knownPlaces = getPlacesForWorld(worldId)
   const player = knownCharacters.filter((c) => c.is_player === 1)
+  // Presence follows the PLAYER's physical location (current_place_id), not the
+  // active scene's place. The two can drift — e.g. when the player walks back to
+  // an earlier room in a bounded world and the scene transition lags — and when
+  // they do, the narrator must still see whoever is in the room the player is
+  // actually in, so a dormant NPC re-activates on return. Falls back to the
+  // active scene's place, then null, when the player has no recorded place.
+  const currentPlaceId = player[0]?.current_place_id ?? activeScene?.place_id ?? null
+  const currentPlace = currentPlaceId ? getPlace(currentPlaceId) : null
   const npcsInPlace = currentPlace
     ? getCharactersInPlace(worldId, currentPlace.id).filter((c) => c.is_player === 0)
     : []
@@ -129,11 +136,13 @@ export async function getNarratorWorldStateVia(
 ): Promise<NarratorWorldState> {
   const cursor = await deps.worlds.cursor(worldId)
   const activeScene = await deps.scenes.activeForWorld(worldId)
-  const currentPlace = activeScene?.place_id ? await deps.places.byId(activeScene.place_id) : null
 
   const knownCharacters = await deps.characters.forWorld(worldId)
   const knownPlaces = await deps.places.forWorld(worldId)
   const player = knownCharacters.filter((c) => c.is_player === 1)
+  // Presence follows the PLAYER's physical location (see getNarratorWorldState).
+  const currentPlaceId = player[0]?.current_place_id ?? activeScene?.place_id ?? null
+  const currentPlace = currentPlaceId ? await deps.places.byId(currentPlaceId) : null
   const npcsInPlace = currentPlace
     ? (await deps.characters.inPlace(worldId, currentPlace.id)).filter((c) => c.is_player === 0)
     : []
