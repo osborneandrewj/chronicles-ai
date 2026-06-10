@@ -355,6 +355,25 @@ scout ship, already in motion before you board") with its own Launch button + pe
 state ("Launching your ship…"), separate from the genre "Generate world" flow. Shares the
 player-name field. Own server action (createStarshipWorldAction), own error surface.
 
+## P5 (during play): the ship stays alive — a per-turn "living tick" (binding)
+The forward sim ran only PRE-boarding; during play the turn pipeline skips off-scene
+looped NPCs (`shouldSkipRoutineTick`) — an open-world cost optimization that is wrong for
+a sealed 6-room ship. Decision (user, 2026-06-09): in a bounded world, ALL crew are active
+every turn. Build a per-player-turn "living tick" reusing the pre-play sim machinery:
+- New use case `application/use-cases/tick-living-world.ts` (pure orchestration over ports +
+  the existing pure services + DramaPort + TimelineWriter). Input: { worldId, playerPlaceId }.
+  - band = `worldTimeBand(world.world_time)` (the LIVE clock, not a separate sim clock).
+  - For every OFF-scene NPC (current_place_id !== playerPlaceId): `nextPlaceId(dailyLoop[band],
+    band, current, neighborsOf)` → `characters.setPlace`. Crew in the player's room are left
+    to the narrator/archivist (no double-move). NO skip — all off-scene crew move.
+  - `coLocatedGroups` over off-scene NPCs → `shouldEmitBeat` (per-room lastBeatTick + cooldown)
+    → `drama.generateBeat` → `timeline.append({ provenance:'sim', sim_tick:<next> })` +
+    `relationship-drift`. Sim_tick continues past the pre-play max.
+- Integrate in `narrate-turn.ts` post-stream, bounded worlds only, FAIL-OPEN (like the other
+  post-stream tasks). Surface the last ~2 off-screen sim beats into the narrator context so the
+  player hears about them (needs a small timeline-read port method).
+- Cost: ~4 NPCs, deterministic movement free, beats gated/rare. Works on both stores (ports).
+
 ## RESOLVED: clock follows positions
 The earlier clock/position mismatch (sim persisted the arrival band while positions were
 the last-lived band) is fixed: `SimulateWorldForward` now sets `world_time =
