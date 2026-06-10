@@ -1,7 +1,9 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
+import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
 import { getContainer } from '@/composition/container'
+import { resolveActiveWorldId } from '@/domain/services/resolve-active-world'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
 
 export const dynamic = 'force-dynamic'
@@ -19,9 +21,33 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   const worldId = Number(rawId)
   if (!Number.isInteger(worldId) || worldId <= 0) notFound()
 
-  const { worlds, turns: turnRepo } = getContainer()
+  const container = getContainer()
+  const { characters, decks, places, scenes, sessions, worlds, turns: turnRepo } = container
   const world = await worlds.getWorld(worldId)
   if (!world) notFound()
+
+  // Simulation-hub navigation (C4/C5/C6 wiring). The session is the authority on
+  // where the player actually is. If they died in the live simulation, awaken
+  // them into the hub here — anchored on the authoritative `status: 'dead'`, not
+  // fragile prose matching — then route to wherever they now are. Guarded by
+  // has_awoken so it runs exactly once.
+  const session = await sessions.byWorld(worldId)
+  if (session) {
+    if (
+      session.status === 'in_subworld' &&
+      session.subworld_world_id === worldId &&
+      session.has_awoken === 0
+    ) {
+      const cast = await characters.forWorld(worldId)
+      const player = cast.find((c) => c.is_player === 1)
+      if (player?.status === 'dead') {
+        await returnToHub({ session }, { worlds, places, scenes, characters, sessions, decks })
+        redirect(`/worlds/${session.hub_world_id}/play`)
+      }
+    }
+    const activeWorldId = resolveActiveWorldId(worldId, session)
+    if (activeWorldId !== worldId) redirect(`/worlds/${activeWorldId}/play`)
+  }
 
   const turns = await turnRepo.latestTurns(worldId, INITIAL_TURN_LIMIT)
   const initialMessages: ChroniclesMessage[] = turns.map((t) => ({

@@ -2,6 +2,7 @@
 
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -100,6 +101,7 @@ export function Chat({
     });
   }, []);
 
+  const router = useRouter();
   const prevStatus = useRef(status);
   useEffect(() => {
     if (prevStatus.current === "streaming" && status === "ready") {
@@ -107,15 +109,21 @@ export function Chat({
       // Archivist patch commits ~1-3s after stream finish — refresh twice so
       // the inspector picks up the new rows without polling.
       setInspectorRefreshKey((k) => k + 1);
+      // Re-render the server component so the simulation-hub navigation runs:
+      // if this turn awoke the player (death/awakening in a subworld), the play
+      // page redirects them to the hub. Immediate catches a same-turn session
+      // flip; the delayed pass catches the archivist's status='dead' commit.
+      router.refresh();
       const t = setTimeout(() => {
         void refetchUsage();
         setInspectorRefreshKey((k) => k + 1);
-      }, 2000);
+        router.refresh();
+      }, 2500);
       prevStatus.current = status;
       return () => clearTimeout(t);
     }
     prevStatus.current = status;
-  }, [status, refetchUsage]);
+  }, [status, refetchUsage, router]);
 
   // Auto-scroll: stick to bottom while streaming, but only if the user hasn't
   // intentionally scrolled up. Re-engages once they scroll back near the bottom.

@@ -11,11 +11,20 @@
 
 export type SubworldExit = { kind: 'death' | 'awakening' }
 
-// Death: the protagonist's life unambiguously ends this turn.
+// Death: the protagonist's life unambiguously ends this turn. The narrator
+// writes death as literary prose ("stills the beat of your pulse", "you lie
+// motionless"), almost never the blunt "you die" — so these patterns target
+// FINALITY, not the word. (The reliable signal is the archivist marking the
+// player status='dead', enforced at the play-page boundary; these catch it
+// same-turn for the immediate awakening narration.)
 const DEATH_PATTERNS: RegExp[] = [
-  /\byou (?:die|are dead|bleed out|are killed)\b/i,
-  /\byou draw your last breath\b/i,
-  /\byour (?:life|vision) (?:ends|slips away|fades to (?:black|nothing))\b/i,
+  /\byou (?:die|are dead|bleed out|are killed|are slain)\b/i,
+  /\byou (?:breathe|draw) your last(?: breath)?\b/i,
+  /\byour (?:life|vision) (?:ends|slips away|fades to (?:black|nothing)|leaves you)\b/i,
+  /\byour (?:heart|pulse) (?:stops|stills|gives out|ceases)\b/i,
+  /\bstill(?:s|ing)? (?:the|your)[^.]{0,40}\b(?:pulse|heartbeat|heart)\b/i,
+  /\byou (?:lie|fall|slump|crumple) (?:there )?(?:motionless|still|lifeless|dead|and do not (?:rise|move))\b/i,
+  /\bstilled every (?:sense|command|thought)\b/i,
   /\beverything goes (?:black|dark) (?:as|and) you (?:die|fade|fall|slip away)\b/i,
   /\bthe (?:world|light) goes (?:black|dark) (?:forever|for good|and does not return)\b/i,
 ]
