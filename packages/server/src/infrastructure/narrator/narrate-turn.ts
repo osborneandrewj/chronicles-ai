@@ -9,7 +9,9 @@ import {
 } from 'ai'
 
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
+import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
+import type { TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -50,6 +52,10 @@ import {
 
 const NARRATOR_HISTORY_TURNS = 13
 const FULL_HISTORY_TURNS = 6
+// How many prior off-screen sim beats to surface into the narrator's context on
+// a bounded world. Small + bounded — just enough for the narrator to reference
+// what the rest of the crew have been doing elsewhere on the ship.
+const OFF_SCREEN_BEATS = 2
 
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
@@ -61,12 +67,18 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // they read/write the collections.
   const {
     characters,
+    clock,
     dossiers,
+    drama,
     npcIntents,
     occupancy,
+    placeConnections,
     places,
+    relationships,
     reveries,
     scenes,
+    timeline,
+    timelineReader,
     turns,
     unitOfWork,
     worlds,
@@ -171,6 +183,22 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   })
   const premiseBlock = formatPremiseBlock(world.premise)
 
+  // OFF-SCREEN life (bounded worlds only). The during-play living tick runs
+  // POST-stream, so the beats the narrator sees here are from PRIOR ticks — a
+  // natural one-turn lag. Surface the last ~2 sim beats so the narrator can let
+  // the player overhear what the rest of the crew have been up to elsewhere.
+  // Best-effort: a read failure must never block the turn.
+  const isBounded = world.spatial_mode === 'bounded'
+  const offScreenBlock = isBounded
+    ? await timelineReader
+        .recentSimEvents(worldId, OFF_SCREEN_BEATS)
+        .then(formatOffScreenBlock)
+        .catch((err) => {
+          console.error('[off-screen sim beats]', err)
+          return ''
+        })
+    : ''
+
   const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_TURNS)
   const priorHistory = allRecent.slice(0, -1)
   const historyMessages = compactHistory(priorHistory)
@@ -196,7 +224,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${premiseBlock}\n\n${stateBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${premiseBlock}\n\n${stateBlock}${offScreenBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
   }
   const modelMessages: ModelMessage[] = [
     { role: 'system', content: NARRATOR_BASE },
@@ -226,6 +254,32 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       // ── POST-STREAM transaction boundary: narrator turn + factual work ────
       const narratorTurn = await turns.insert(worldId, 'assistant', trimmed, activeSceneId)
       narratorTurnId = narratorTurn.id
+
+      // DURING-PLAY living tick (bounded worlds only). On a sealed ship ALL crew
+      // stay active every turn, so we advance the OFF-scene crew one tick of the
+      // pre-play sim machinery (move toward band targets, gate/spend a drama beat,
+      // drift relationships). Best-effort + fail-open like the other post-stream
+      // enrichers — never blocks the turn; registered so it drains on SIGTERM.
+      // Open worlds keep the turn pipeline's off-scene skip optimisation untouched.
+      if (isBounded) {
+        const livingTick = tickLivingWorld(
+          { worldId, playerPlaceId: narratorState.currentPlace?.id ?? null },
+          {
+            characters,
+            clock,
+            drama,
+            placeConnections,
+            places,
+            relationships,
+            timeline,
+            timelineReader,
+            worlds,
+          },
+        ).catch((err) => {
+          console.error('[living tick failed]', err)
+        })
+        backgroundTasks.register(livingTick)
+      }
 
       const narratorMeta = {
         model: NARRATOR_MODEL,
@@ -381,6 +435,17 @@ function runDupDetector(characters: CharacterRepository, worldId: number): void 
     .catch((err) => {
       console.error('[dup-detector]', err)
     })
+}
+
+// Render the last few off-screen sim beats (newest first) as a compact narrator
+// context block, oldest-first so the narrator reads them in chronological order.
+// Returns '' when there are none, so the caller can concatenate unconditionally.
+function formatOffScreenBlock(events: TimelineEvent[]): string {
+  if (events.length === 0) return ''
+  const lines = [...events]
+    .reverse()
+    .map((e) => `- ${e.title}: ${limitText(e.summary, 200)}`)
+  return `\n\nOFF-SCREEN (elsewhere on the ship):\n${lines.join('\n')}`
 }
 
 function compactHistory(

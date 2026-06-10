@@ -13,6 +13,7 @@ import type {
   RelationshipRepository,
   ReverieRepository,
   SceneRepository,
+  TimelineReader,
   TimelineWriter,
   TtsCacheRepository,
   TurnRepository,
@@ -36,6 +37,7 @@ import { MongoPlaceRepository } from './repositories/place-repository.mongo'
 import { MongoRelationshipRepository } from './repositories/relationship-repository.mongo'
 import { MongoReverieRepository } from './repositories/reverie-repository.mongo'
 import { MongoSceneRepository } from './repositories/scene-repository.mongo'
+import { MongoTimelineReader } from './repositories/timeline-reader.mongo'
 import { MongoTimelineWriter } from './repositories/timeline-writer.mongo'
 import { MongoTtsCacheRepository } from './repositories/tts-cache-repository.mongo'
 import { MongoTurnRepository } from './repositories/turn-repository.mongo'
@@ -58,6 +60,7 @@ export type MongoRepositorySet = {
   dossiers: DossierRepository
   dossierWriter: DossierWriter
   timeline: TimelineWriter
+  timelineReader: TimelineReader
   reveries: ReverieRepository
   npcIntents: NpcIntentRepository
   occupancy: OccupancyRepository
@@ -92,6 +95,7 @@ export async function buildMongoRepositories(
     dossiers: new MongoDossierRepository(ctx),
     dossierWriter: new MongoDossierWriter(ctx),
     timeline: new MongoTimelineWriter(ctx),
+    timelineReader: new MongoTimelineReader(ctx),
     reveries: new MongoReverieRepository(ctx),
     npcIntents: new MongoNpcIntentRepository(ctx),
     occupancy: new MongoOccupancyRepository(ctx),

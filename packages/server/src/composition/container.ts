@@ -19,6 +19,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   SpeechSynthesizer,
+  TimelineReader,
   TimelineWriter,
   TtsCacheRepository,
   TurnRepository,
@@ -41,6 +42,7 @@ import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place
 import { SqliteRelationshipRepository } from '@/infrastructure/persistence/sqlite/relationship-repository.sqlite'
 import { SqliteReverieRepository } from '@/infrastructure/persistence/sqlite/reverie-repository.sqlite'
 import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene-repository.sqlite'
+import { SqliteTimelineReader } from '@/infrastructure/persistence/sqlite/timeline-reader.sqlite'
 import { SqliteTimelineWriter } from '@/infrastructure/persistence/sqlite/timeline-writer.sqlite'
 import { SqliteTtsCacheRepository } from '@/infrastructure/persistence/sqlite/tts-cache-repository.sqlite'
 import { SqliteTurnRepository } from '@/infrastructure/persistence/sqlite/turn-repository.sqlite'
@@ -79,6 +81,7 @@ export type Container = {
   dossiers: DossierRepository
   dossierWriter: DossierWriter
   timeline: TimelineWriter
+  timelineReader: TimelineReader
   reveries: ReverieRepository
   npcIntents: NpcIntentRepository
   occupancy: OccupancyRepository
@@ -133,6 +136,7 @@ function buildSqlite(): Container {
     dossiers: new SqliteDossierRepository(),
     dossierWriter: new SqliteDossierWriter(),
     timeline: new SqliteTimelineWriter(),
+    timelineReader: new SqliteTimelineReader(),
     reveries: new SqliteReverieRepository(),
     npcIntents: new SqliteNpcIntentRepository(),
     occupancy: new SqliteOccupancyRepository(),

@@ -601,6 +601,39 @@ export function insertTimelineEvent(input: {
   )
 }
 
+// --- timeline_events (v28): sim-provenance reads (starship P5 living tick) ---
+
+// The most recent provenance='sim' events for a world, newest first. Mirrors the
+// dossier timeline SELECT (same columns + thread_title LEFT JOIN) but filtered to
+// sim events and parameterised on the window — the living tick surfaces the last
+// couple of off-screen beats into narrator context, and seeds its beat memory /
+// per-room cooldown from prior sim history.
+const recentSimEventsStmt = db.prepare<[number, number]>(
+  `SELECT e.id, e.world_id, e.turn_id, e.thread_id, t.title AS thread_title, e.world_time,
+          e.title, e.summary, e.importance, e.sim_tick, e.provenance, e.created_at
+   FROM timeline_events e
+   LEFT JOIN story_threads t ON t.id = e.thread_id
+   WHERE e.world_id = ? AND e.provenance = 'sim'
+   ORDER BY e.id DESC
+   LIMIT ?`,
+)
+
+export function recentSimEvents(worldId: number, limit: number): TimelineEvent[] {
+  return recentSimEventsStmt.all(worldId, limit) as TimelineEvent[]
+}
+
+// The highest sim_tick recorded for a world's sim events, or null when none —
+// the living tick continues numbering past the pre-play sim's last tick.
+const maxSimTickStmt = db.prepare<[number]>(
+  `SELECT MAX(sim_tick) AS max_tick FROM timeline_events
+   WHERE world_id = ? AND provenance = 'sim'`,
+)
+
+export function maxSimTick(worldId: number): number | null {
+  const row = maxSimTickStmt.get(worldId) as { max_tick: number | null } | undefined
+  return row?.max_tick ?? null
+}
+
 // --- character_relationships (v27): the relationship graph (starship P1) ---
 
 const relationshipsForWorldStmt = db.prepare<[number]>(
