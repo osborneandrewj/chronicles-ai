@@ -63,7 +63,7 @@ ALTER TABLE story_resources ADD COLUMN salient             INTEGER NOT NULL DEFA
 
 ### Steps
 
-- [ ] **A1 — Reverie flare cooldown + decay.**
+- [x] **A1 — Reverie flare cooldown + decay.**
   `domain/services/reverie-flare.ts`: `computeReverieFlares` accepts `currentTurnId` and each
   candidate's `last_flared_turn_id`; exclude (or heavily penalize) any reverie flared within
   the last `K` turns (K≈4); apply intensity decay on flare. `narrate-turn.ts:163-180`: pass
@@ -71,20 +71,20 @@ ALTER TABLE story_resources ADD COLUMN salient             INTEGER NOT NULL DEFA
   *Test:* a reverie that matched 3 turns ago is suppressed; rotation occurs. *Accept:* the
   same snapshot text cannot flare two turns running.
 
-- [ ] **A2 — `memorable_facts` dedup + cap.**
+- [x] **A2 — `memorable_facts` dedup + cap.**
   `domain/services/memorable-fact-provenance.ts`: before appending, strip `[t:N]` and compare
   normalized (case/space-insensitive, token-overlap) against existing lines; skip near-dupes.
   Cap stored lines (keep most-recent N + cornerstone). *Test:* verbatim repeat does not grow
   the block; cap enforced. *Accept:* no duplicate fact lines in a fresh world.
 
-- [ ] **A3 — Narrator anti-repetition prompt + de-template.**
+- [x] **A3 — Narrator anti-repetition prompt + de-template.**
   `prompts/narrator-system.md`: add "Description Variance & Established Detail" (establish a
   tic/object once, then let it recede); drop the implicit obligation to give every present
   NPC a posture line and to end on an ambient closer; vary turn shape by stakes.
   `server/render/state-block.ts`: stop surfacing a stale "salient object" as a forced closer.
   *Accept:* manual read of 10 turns shows varied turn endings, no per-turn roster sweep.
 
-- [ ] **A4 — First-class tracked-object ledger.** (schema above)
+- [x] **A4 — First-class tracked-object ledger.** (schema above)
   `domain/entities/story.ts`: `StoryResource` gains `held_by_character_id`, `location_place_id`,
   `salient`. `domain/services/patch-sanitizer.ts` + a new pure
   `domain/services/object-acquisition.ts`: deterministic extractor (verb `take|pick up|grab|
@@ -98,21 +98,21 @@ ALTER TABLE story_resources ADD COLUMN salient             INTEGER NOT NULL DEFA
   *Test:* take-item flips ownership; the block renders held items. *Accept:* the stolen-photo
   contradiction cannot recur (item taken from NPC never re-appears on the NPC).
 
-- [ ] **A5 — More narration in context.**
+- [x] **A5 — More narration in context.**
   `narrate-turn.ts:54-55,204-206,483-499`: replace the fixed `FULL_HISTORY_TURNS=6` /
   320-char split with a token-budget packer — fill full **assistant** turns newest-first up
   to a measured input budget (~4–5K of the 8K), then compact overflow; prioritize narrator
   turns over player turns when trimming. First-cut acceptable: raise to 10 full / 700-char
   compaction and measure. *Accept:* ≥8 full narrator turns reach the model on a normal turn.
 
-- [ ] **A6 — Geocoding gate for fictional interiors.**
+- [x] **A6 — Geocoding gate for fictional interiors.**
   `narrate-turn.ts:112-115`: wrap `resolveUnresolvedPlaces` in
   `if (world.spatial_mode !== 'bounded')`. `application/use-cases/seed-bounded-world.ts`:
   seed places `geo_status='unavailable'`. `state-block.ts:182-189`: skip the
   "KNOWN PLACES (real-world geography)" block for bounded worlds. *Accept:* a new bounded
   world has zero geocoded rooms; no Nominatim call fires.
 
-- [ ] **A7 — Surface living-tick arcs on-screen.**
+- [x] **A7 — Surface living-tick arcs on-screen.**
   NEW `domain/services/cluster-sim-arcs.ts` (pure): group `provenance='sim'` timeline events
   by participant/thread, detect a threshold-crossing arc. `domain/ports/timeline-reader.ts` +
   adapters: an arc-aware read (not `LIMIT 2`). `narrate-turn.ts:182,193-202`: promote a
@@ -120,13 +120,13 @@ ALTER TABLE story_resources ADD COLUMN salient             INTEGER NOT NULL DEFA
   importance) instead of the 2-beat advisory; widen the window. *Test:* a 5-beat sim arc is
   clustered and promoted. *Accept:* an off-screen subplot is referenced in narration.
 
-- [ ] **A8 — Proactive NPCs.**
+- [x] **A8 — Proactive NPCs.**
   `prompts/npc-agent-system.md`: add "Proactive NPC Behavior" (act on `active_goal`s
   independent of player input; talk to each other; initiate). Allow `tick-living-world` to
   inject an NPC intent on high-stakes turns. *Accept:* in a tense scene an NPC takes an
   unprompted action within a few turns.
 
-- [ ] **A9 — Single-player invariant + dedup of player rows.**
+- [x] **A9 — Single-player invariant + dedup of player rows.**
   `application/use-cases/apply-archivist-patch.ts` (`resolveCharacter`): route protagonist
   self-naming through `reveals_name_of`/alias-merge against the existing `is_player=1` row
   rather than inserting. `domain/services/character-dedup.ts:29`: flag multiple `is_player`
@@ -134,7 +134,7 @@ ALTER TABLE story_resources ADD COLUMN salient             INTEGER NOT NULL DEFA
   *Test:* self-naming renames in place; second player row flagged. *Accept:* no stray
   non-player "Player" entity after self-naming.
 
-- [ ] **A10 — NPC name diversity.**
+- [x] **A10 — NPC name diversity.**
   NEW `domain/services/name-pool.ts` (pure) + a data table of names with culture/era tags;
   `sample(tags, n, { exclude, seed })` returns a shuffled candidate set (seed injected).
   `infrastructure/world-gen/grok-crew-generator.ts` + the open-world `world-generator`: inject
