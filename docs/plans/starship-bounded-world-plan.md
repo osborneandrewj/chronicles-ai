@@ -374,6 +374,37 @@ every turn. Build a per-player-turn "living tick" reusing the pre-play sim machi
   player hears about them (needs a small timeline-read port method).
 - Cost: ~4 NPCs, deterministic movement free, beats gated/rare. Works on both stores (ports).
 
+## DIAGNOSIS (not yet built): why the ship still doesn't feel alive
+Observed after the living tick worked (beats fire, crew can move): the ship feels static —
+NPCs only react when engaged, and the world clock is frozen (e.g. "Day 3 — night, ~0323"
+across 145+ turns). Root cause + the (un-built) fix, for when we pick this up:
+
+1. **THE LINCHPIN — time doesn't pass.** The clock advances ONLY when the narration says
+   so: `apply-archivist-patch` calls `setWorldTime` only when the archivist emits
+   `patch.current_time`, and `archivist-system.md:7` says "Time advances only when the
+   narration says it does … Do not invent time progression." A conversational scene barely
+   advances time, so the clock freezes. The living tick reads the clock's BAND to place crew
+   — frozen band ⇒ every crew sent to their one night-routine room and stuck there ⇒ no
+   circulation, the daily rhythm (watch → mess → shift change → quarters) never plays out,
+   beats always fire in the same context. The movement/routine machinery is band-locked.
+   FIX: a deterministic SHIP-CLOCK for bounded worlds that ticks forward every turn
+   independent of the prose (cadence TBD — e.g. +20-30 min/turn, a band every ~8-18 turns),
+   so the band cycles, crew circulate, and the narrator narrates within the ship's time. The
+   narrator/archivist clock-ownership conflict must be resolved (ship-clock as source of truth
+   for bounded worlds, narrator told the current time).
+
+2. **NPCs are reactive, not proactive.** The narrator animates crew in response to the player;
+   nothing makes present crew INITIATE. FIX: a bounded-world narrator instruction — the crew
+   have their own business; have them interrupt, remark, go about tasks, not just answer.
+
+3. **Off-screen life barely surfaces.** Beats are rare (gated, and gated harder by the frozen
+   clock) and the 1-turn-lag feed is sparse. FIX: surface crew movement + recent beats more
+   prominently in the narrator context once the clock unlocks them.
+
+The clock (1) is highest-leverage: without it, (2) and (3) sit on a frozen world. This is the
+roadmap's "tiered forward simulation that lives drama" (v0.3.0). Status: DIAGNOSED, not built
+(user chose to decide the build later).
+
 ## RESOLVED: clock follows positions
 The earlier clock/position mismatch (sim persisted the arrival band while positions were
 the last-lived band) is fixed: `SimulateWorldForward` now sets `world_time =
