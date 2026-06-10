@@ -25,6 +25,12 @@ import { StubDramaPort } from '@/infrastructure/world-gen/stub-drama-port'
 const TEMPLATE: WorldArchetype = {
   id: 'test-scout',
   name: 'Test Scout',
+  isHub: true,
+  simulationRoomKey: 'mess',
+  entryLocationKey: 'bridge',
+  initialSceneTitle: 'Arrival',
+  defaultCharacterLabel: 'Newcomer',
+  playerIntroTemplate: 'just come aboard',
   rooms: [
     { key: 'bridge', name: 'Bridge', description: 'cmd', deck: 'A', layoutHint: null },
     { key: 'mess', name: 'Mess', description: 'galley', deck: 'A', layoutHint: null },
@@ -445,7 +451,7 @@ describe('createStarshipWorld', () => {
     const bridge = store.places.find((p) => p.name === 'Bridge')
     expect(player.current_place_id).toBe(bridge?.id)
     expect(player.name).toBe('Newcomer')
-    expect(player.description).toBe('A newcomer just come aboard — name not yet established.')
+    expect(player.description).toBe('A newcomer: just come aboard.')
   })
 
   it('uses the entered player name when provided', async () => {
