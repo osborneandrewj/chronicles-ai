@@ -14,6 +14,7 @@ import { getContainer } from '@/composition/container'
 import type { TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
+import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { packNarratorHistory } from '@/domain/services/history-packer'
 import { minutesToShipTime, shipTimeToMinutes } from '@/domain/services/ship-clock'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -61,10 +62,13 @@ const NARRATOR_HISTORY_TURNS = 16
 const HISTORY_FULL_TOKEN_BUDGET = 4200
 // Older turns that don't fit the full budget are compacted to this many chars.
 const COMPACTED_TURN_CHARS = 600
-// How many prior off-screen sim beats to surface into the narrator's context on
-// a bounded world. Small + bounded — just enough for the narrator to reference
-// what the rest of the crew have been doing elsewhere on the ship.
+// How many prior off-screen sim beats to surface as the soft fallback advisory
+// when no developing subplot is detected.
 const OFF_SCREEN_BEATS = 2
+// How many recent sim beats to read for arc clustering. Wider than the advisory
+// so a multi-beat subplot (a forming conspiracy) can be detected and promoted
+// rather than dropped after 2 loose beats (A7).
+const SIM_ARC_WINDOW = 14
 
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
@@ -203,14 +207,27 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   // OFF-SCREEN life (bounded worlds only). The during-play living tick runs
   // POST-stream, so the beats the narrator sees here are from PRIOR ticks — a
-  // natural one-turn lag. Surface the last ~2 sim beats so the narrator can let
-  // the player overhear what the rest of the crew have been up to elsewhere.
+  // natural one-turn lag. We read a wider window and cluster it: when a subplot
+  // is developing (the same characters recurring across several beats), promote
+  // it to a prominent DEVELOPING SUBPLOT block so the narrator can dramatize it
+  // — instead of dropping a fully-recorded conspiracy after 2 loose beats (A7).
+  // Otherwise fall back to the soft advisory of the last couple of beats.
   // Best-effort: a read failure must never block the turn.
   const isBounded = world.spatial_mode === 'bounded'
+  const offScreenNpcNames = narratorState.knownCharacters
+    .filter((c) => c.is_player !== 1)
+    .map((c) => c.name)
   const offScreenBlock = isBounded
     ? await timelineReader
-        .recentSimEvents(worldId, OFF_SCREEN_BEATS)
-        .then(formatOffScreenBlock)
+        .recentSimEvents(worldId, SIM_ARC_WINDOW)
+        .then((events) => {
+          const arcs = clusterSimArcs(
+            events.map((e) => ({ id: e.id, title: e.title, summary: e.summary })),
+            offScreenNpcNames,
+          )
+          const arcBlock = formatSimArcBlock(arcs)
+          return arcBlock || formatOffScreenBlock(events.slice(0, OFF_SCREEN_BEATS))
+        })
         .catch((err) => {
           console.error('[off-screen sim beats]', err)
           return ''
@@ -493,7 +510,28 @@ function formatOffScreenBlock(events: TimelineEvent[]): string {
   const lines = [...events]
     .reverse()
     .map((e) => `- ${e.title}: ${limitText(e.summary, 200)}`)
-  return `\n\nOFF-SCREEN (elsewhere on the ship):\n${lines.join('\n')}`
+  return `\n\nOFF-SCREEN (elsewhere):\n${lines.join('\n')}`
+}
+
+// Promote detected off-screen subplots into a prominent, authoritative-toned
+// block (A7). Unlike the loose advisory, this says "a real thread is developing
+// off the page" so the narrator can let it intersect the player's path — while
+// staying inside the protagonist's perception (no omniscient cutaways).
+function formatSimArcBlock(arcs: SimArc[]): string {
+  if (arcs.length === 0) return ''
+  const lines: string[] = [
+    '',
+    '### DEVELOPING OFF-SCREEN SUBPLOTS (the world has moved while the player was elsewhere)',
+    'These threads formed off the page. Let one surface when the player could plausibly notice, overhear, or intersect it — through evidence, a half-heard exchange, an NPC acting on it, or a consequence. Never narrate it omnisciently; stay inside the protagonist\'s perception.',
+  ]
+  for (const arc of arcs.slice(0, 2)) {
+    const who = arc.participants.join(' & ')
+    lines.push(`- ${who} (${arc.beatCount} beats):`)
+    for (const summary of arc.summaries.slice(-3)) {
+      lines.push(`  - ${limitText(summary, 180)}`)
+    }
+  }
+  return `\n${lines.join('\n')}`
 }
 
 function compactHistory(
