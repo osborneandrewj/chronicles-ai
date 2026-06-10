@@ -327,7 +327,7 @@ describe('tickLivingWorld', () => {
   it('moves off-scene crew to their band target and persists via setPlace', async () => {
     const fakes = buildFakes(roster, rivalRels)
     const result = await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 0 },
       fakes.deps,
     )
 
@@ -346,7 +346,7 @@ describe('tickLivingWorld', () => {
   it('does not move the NPC present in the player room or the player', async () => {
     const fakes = buildFakes(roster, rivalRels)
     const result = await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 0 },
       fakes.deps,
     )
 
@@ -362,7 +362,7 @@ describe('tickLivingWorld', () => {
   it('keeps an off-scene NPC already at its band target put (no setPlace)', async () => {
     const fakes = buildFakes(roster, rivalRels)
     const result = await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 0 },
       fakes.deps,
     )
 
@@ -376,7 +376,7 @@ describe('tickLivingWorld', () => {
   it('fires a gated beat and appends a provenance=sim timeline event', async () => {
     const fakes = buildFakes(roster, rivalRels)
     const result = await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 0 },
       fakes.deps,
     )
 
@@ -426,10 +426,10 @@ describe('tickLivingWorld', () => {
       created_at: '',
     }
     const fakes = buildFakes(roster, rivalRels, [priorEvent])
-    // maxSimTick was 11 → the living tick is 12, one past the pre-play sim's last
-    // beat. cooldownTicks 1 lets a beat fire one tick later (12 − 11 = 1 ≥ 1).
+    // currentTick 12 (a later turn) with a prior beat at 11 + cooldownTicks 1:
+    // 12 − 11 = 1 ≥ 1 ⇒ a beat fires, numbered 12 — past the pre-play sim's last.
     await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A, cooldownTicks: 1 },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 12, cooldownTicks: 1 },
       fakes.deps,
     )
 
@@ -457,11 +457,11 @@ describe('tickLivingWorld', () => {
       provenance: 'sim',
       created_at: '',
     }
-    // maxSimTick 5 → next tick 6; lastSimBeatTick 5; cooldown 2 ⇒ 6 − 5 = 1 < 2 ⇒
-    // gated FALSE. The rivals still take the deterministic chafe instead.
+    // currentTick 6, lastSimBeatTick 5, cooldown 2 ⇒ 6 − 5 = 1 < 2 ⇒ gated FALSE.
+    // The rivals still take the deterministic chafe instead.
     const fakes = buildFakes(roster, rivalRels, [recentEvent])
     const result = await tickLivingWorld(
-      { worldId: WORLD_ID, playerPlaceId: ROOM_A },
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 6 },
       fakes.deps,
     )
 
@@ -470,5 +470,34 @@ describe('tickLivingWorld', () => {
     // Deterministic rival chafe: −0.5 → −0.6, persisted as a −0.1 delta.
     expect(fakes.adjustCalls).toHaveLength(1)
     expect(fakes.adjustCalls[0]!.delta).toBeCloseTo(-0.1, 6)
+  })
+
+  it('does NOT deadlock the cooldown when prior beats exist (regression)', async () => {
+    // The bug: the tick was derived from maxSimTick+1, so a prior beat at 11 pinned
+    // the tick at 12 forever and (12 − 11 = 1) never cleared a cooldown of 2 — no
+    // beat ever fired during play. With a monotonic per-turn currentTick, a later
+    // turn (here 150) clears the cooldown against the prior beat at 11 and fires.
+    const priorBeat: TimelineEvent = {
+      id: 99,
+      world_id: WORLD_ID,
+      turn_id: null,
+      thread_id: null,
+      thread_title: null,
+      world_time: 'Day 1 — morning',
+      title: 'Pre-play beat',
+      summary: 'Before boarding.',
+      importance: 2,
+      sim_tick: 11,
+      provenance: 'sim',
+      created_at: '',
+    }
+    const fakes = buildFakes(roster, rivalRels, [priorBeat])
+    const result = await tickLivingWorld(
+      { worldId: WORLD_ID, playerPlaceId: ROOM_A, currentTick: 150 },
+      fakes.deps,
+    )
+
+    expect(result.beatsWritten).toBe(1)
+    expect(fakes.beatCalls[0]!.sim_tick).toBe(150)
   })
 })

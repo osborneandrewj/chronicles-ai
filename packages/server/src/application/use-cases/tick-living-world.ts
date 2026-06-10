@@ -39,6 +39,12 @@ import { worldTimeBand } from '@/domain/services/world-clock'
 export type TickLivingWorldInput = {
   worldId: number
   playerPlaceId: number | null
+  // A MONOTONIC per-turn counter (the player turn id). It anchors the tick number
+  // + the beat cooldown. It must NOT be derived from the last written sim_tick:
+  // doing so deadlocks the cooldown (with a prior beat at tick 11, maxSimTick+1
+  // pins it at 12 forever, so 12-11 never clears a cooldown of 2 and no beat ever
+  // fires). A turn id advances every turn, so the cooldown elapses as play continues.
+  currentTick: number
   cooldownTicks?: number
   tensionThreshold?: number
 }
@@ -96,7 +102,7 @@ function parseDailyLoop(dailyLoopJson: string | null): ResolvedDailyLoop {
 }
 
 export async function tickLivingWorld(
-  { worldId, playerPlaceId, cooldownTicks, tensionThreshold }: TickLivingWorldInput,
+  { worldId, playerPlaceId, currentTick, cooldownTicks, tensionThreshold }: TickLivingWorldInput,
   deps: TickLivingWorldDeps,
 ): Promise<TickLivingWorldResult> {
   const {
@@ -118,10 +124,6 @@ export async function tickLivingWorld(
   const cursor = await worlds.cursor(worldId)
   const worldTime = cursor.world_time
   const band = worldTimeBand(worldTime)
-
-  // The living tick continues numbering past the pre-play sim's last tick.
-  const maxTick = await timelineReader.maxSimTick(worldId)
-  const nextTick = (maxTick ?? -1) + 1
 
   // Room manifest → place_id → name (for beat input + readable timeline events).
   const placeRows = await places.forWorld(worldId)
@@ -211,7 +213,7 @@ export async function tickLivingWorld(
     const emit = shouldEmitBeat({
       characterIds: group.characterIds,
       relationships: relationshipsInGroup,
-      currentTick: nextTick,
+      currentTick: currentTick,
       lastBeatTick: lastBeatTickByPlace.get(placeId) ?? lastSimBeatTick,
       cooldownTicks: beatCooldown,
       tensionThreshold: beatThreshold,
@@ -231,7 +233,7 @@ export async function tickLivingWorld(
 
       const beat = await drama.generateBeat({
         world_id: worldId,
-        sim_tick: nextTick,
+        sim_tick: currentTick,
         world_time: worldTime,
         place_id: placeId,
         place_name: placeNameById.get(placeId) ?? '',
@@ -251,7 +253,7 @@ export async function tickLivingWorld(
         title: beat.title,
         summary: beat.summary,
         importance: BEAT_IMPORTANCE,
-        sim_tick: nextTick,
+        sim_tick: currentTick,
         provenance: 'sim',
       })
 
@@ -270,7 +272,7 @@ export async function tickLivingWorld(
         }
       }
 
-      lastBeatTickByPlace.set(placeId, nextTick)
+      lastBeatTickByPlace.set(placeId, currentTick)
       beatsWritten += 1
     } else {
       // No beat: deterministic co-location drift for this group's edges.

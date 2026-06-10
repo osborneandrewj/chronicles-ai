@@ -141,7 +141,7 @@ async function main() {
   let totalBeats = 0
   for (let call = 0; call < TICK_CALLS; call += 1) {
     const result = await tickLivingWorld(
-      { worldId, playerPlaceId, cooldownTicks: 2, tensionThreshold: 0.25 },
+      { worldId, playerPlaceId, currentTick: call * 5, cooldownTicks: 2, tensionThreshold: 0.25 },
       {
         characters: c.characters,
         placeConnections: c.placeConnections,

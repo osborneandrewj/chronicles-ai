@@ -263,7 +263,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       // Open worlds keep the turn pipeline's off-scene skip optimisation untouched.
       if (isBounded) {
         const livingTick = tickLivingWorld(
-          { worldId, playerPlaceId: narratorState.currentPlace?.id ?? null },
+          {
+            worldId,
+            playerPlaceId: narratorState.currentPlace?.id ?? null,
+            // The narrator turn id is the monotonic per-turn counter that anchors
+            // the tick + cooldown. ~4 turns between off-screen beats keeps the ship
+            // alive without spamming the timeline (or Haiku) every other turn.
+            currentTick: narratorTurn.id,
+            cooldownTicks: 4,
+          },
           {
             characters,
             clock,
