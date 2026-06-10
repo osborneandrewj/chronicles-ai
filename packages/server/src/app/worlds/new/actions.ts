@@ -187,39 +187,54 @@ export async function createAdventureAction(
   // adventure; the hub stays hidden (concealmentView) until the first awakening.
   let subworldId: number
   try {
-    // 1. Pick + silently seed the hub (friendly resident crew). Never surfaced.
+    // 1. Pick the hub archetype. The hub premise and arc engine are determined
+    //    before world creation so the bible can supply the hub's name.
     const hubs = (await c.decks.all()).filter((a) => a.isHub)
     const hub = pickHubArchetype(hubs, seed)
     const hubPremise = `A ${hub.name.toLowerCase()} with a small, friendly resident crew; ${
       hub.playerIntroTemplate ?? 'a newcomer has just arrived'
     }.`
-    const hubResult = await createBoundedWorld(
-      { templateId: hub.id, name: hub.name, premise: hubPremise, playerName },
-      { ...c, crew: c.ensembleGenerator },
-    )
-    await c.worlds.setLayer(hubResult.worldId, 'hub', null)
+    const arcEngine = pickArcEngine(seed)
 
-    // 2. Generate + store the Meta-Story Bible (best-effort — never blocks play).
+    // 2. Generate the Meta-Story Bible BEFORE creating the hub world so its
+    //    institutionName can become the hub's player-facing name. Best-effort —
+    //    never blocks play; falls back to an opaque codename on failure.
+    let bible: Awaited<ReturnType<typeof c.metaStoryGenerator.generate>> | undefined
     try {
-      const bible = await c.metaStoryGenerator.generate({
+      bible = await c.metaStoryGenerator.generate({
         hubName: hub.name,
         hubPremise,
-        arcEngine: pickArcEngine(seed),
+        arcEngine,
         genreLabels: [preset.label],
         seed,
       })
-      await c.worlds.setMetaStory(hubResult.worldId, JSON.stringify(bible))
     } catch (err) {
       console.error('[meta-story generation]', err)
     }
 
-    // 3. Open the durable session pointer.
+    // The hub's in-fiction name comes from the bible; fallback is an opaque
+    // codename — never the raw archetype label, which would spoil the story.
+    const hubName = bible?.institutionName?.trim() || generateCodename(seed)
+
+    // 3. Silently seed the hub world (friendly resident crew). Never surfaced.
+    const hubResult = await createBoundedWorld(
+      { templateId: hub.id, name: hubName, premise: hubPremise, playerName },
+      { ...c, crew: c.ensembleGenerator },
+    )
+    await c.worlds.setLayer(hubResult.worldId, 'hub', null)
+
+    // 4. Persist the bible if it was successfully generated.
+    if (bible) {
+      await c.worlds.setMetaStory(hubResult.worldId, JSON.stringify(bible))
+    }
+
+    // 5. Open the durable session pointer.
     const session = await c.sessions.create({
       hub_world_id: hubResult.worldId,
       player_identity: playerName?.trim() || 'the newcomer',
     })
 
-    // 4. Drop the player into the chosen historical simulation (what they see).
+    // 6. Drop the player into the chosen historical simulation (what they see).
     const sub = await enterSubworld(
       {
         hubWorldId: hubResult.worldId,

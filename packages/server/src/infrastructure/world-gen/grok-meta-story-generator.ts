@@ -28,6 +28,7 @@ const ActSchema = z.object({
 const BibleSchema = z.object({
   arcEngineId: z.string(),
   question: z.string(),
+  institutionName: z.string(),
   institution: z.string(),
   hiddenTruth: z.string(),
   antagonist: z.string(),

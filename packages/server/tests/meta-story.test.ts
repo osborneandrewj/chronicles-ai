@@ -30,6 +30,7 @@ describe('StubMetaStoryGenerator', () => {
       seed: 1,
     })
     expect(bible.arcEngineId).toBe(arcEngine.id)
+    expect(bible.institutionName.length).toBeGreaterThan(0)
     expect(bible.acts.length).toBeGreaterThanOrEqual(5)
     // Escalation ladder thresholds are non-decreasing.
     const thresholds = bible.acts.map((a) => a.lucidityThreshold)
