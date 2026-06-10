@@ -50,6 +50,7 @@ export type {
 } from './time-passage-estimator'
 export type { TimelineReader } from './timeline-reader'
 export type { TimelineEventInput, TimelineWriter } from './timeline-writer'
+export type { MetaStoryGenerator, MetaStoryGeneratorInput } from './meta-story-generator'
 export type { ReverieRepository } from './reverie-repository'
 export type { CreateSessionInput, SessionRepository } from './session-repository'
 export type {
