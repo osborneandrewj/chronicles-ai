@@ -12,6 +12,11 @@ export type DuplicatePair = {
 // Ignore short/boilerplate lines so "has a daughter" doesn't false-match.
 const FACT_MIN_LEN = 25
 
+// Placeholder labels that denote the protagonist, not a real NPC. A non-player
+// row carrying one of these is a stray pseudo-player to fold into the real
+// is_player=1 row (the duplicate-protagonist bug).
+const PSEUDO_PLAYER_NAMES = new Set(['player', 'you', 'protagonist', 'the player'])
+
 function distinctiveLines(text: string | null): Set<string> {
   if (!text) return new Set()
   return new Set(
@@ -72,5 +77,36 @@ export function findLikelyDuplicateCharacters(chars: Character[]): DuplicatePair
       if (reason) pairs.push({ aId: a.id, bId: b.id, aName: a.name, bName: b.name, reason })
     }
   }
+
+  // Single-player invariant (A9). The pairwise loop above skips is_player rows,
+  // so the duplicate-protagonist split was never flagged. Detect it directly:
+  // more than one is_player=1 row, or a stray "Player"/"You" NPC that should be
+  // folded into the protagonist.
+  const players = chars.filter((c) => c.is_player === 1 && c.status !== 'dead')
+  const canonicalPlayer = players[0] ?? null
+  for (let i = 1; i < players.length; i++) {
+    pairs.push({
+      aId: players[0].id,
+      bId: players[i].id,
+      aName: players[0].name,
+      bName: players[i].name,
+      reason: 'multiple player rows',
+    })
+  }
+  if (canonicalPlayer) {
+    for (const c of chars) {
+      if (c.is_player === 1 || c.status === 'dead') continue
+      if (PSEUDO_PLAYER_NAMES.has(c.name.trim().toLowerCase())) {
+        pairs.push({
+          aId: canonicalPlayer.id,
+          bId: c.id,
+          aName: canonicalPlayer.name,
+          bName: c.name,
+          reason: 'stray pseudo-player row',
+        })
+      }
+    }
+  }
+
   return pairs
 }

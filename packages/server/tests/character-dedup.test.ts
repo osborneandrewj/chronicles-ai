@@ -59,9 +59,36 @@ describe('findLikelyDuplicateCharacters', () => {
 
   it('excludes the player and dead characters', () => {
     const chars = [
-      ch({ id: 1, name: 'The Player Ghost', is_player: 1, current_place_id: 5 }),
+      ch({ id: 1, name: 'Helena', is_player: 1, current_place_id: 5 }),
       ch({ id: 2, name: 'Alice', current_place_id: 5 }),
       ch({ id: 3, name: 'The Corpse', current_place_id: 5, status: 'dead' }),
+    ]
+    expect(findLikelyDuplicateCharacters(chars)).toHaveLength(0)
+  })
+
+  it('flags more than one is_player row (single-player invariant)', () => {
+    const chars = [
+      ch({ id: 1, name: 'Andrew Osborne', is_player: 1 }),
+      ch({ id: 2, name: 'Andrew', is_player: 1 }),
+    ]
+    const pairs = findLikelyDuplicateCharacters(chars)
+    expect(pairs).toHaveLength(1)
+    expect(pairs[0]).toMatchObject({ aId: 1, bId: 2, reason: 'multiple player rows' })
+  })
+
+  it('flags a stray non-player "Player" row to fold into the protagonist', () => {
+    const chars = [
+      ch({ id: 1, name: 'Andrew Osborne', is_player: 1 }),
+      ch({ id: 2, name: 'Player', is_player: 0, memorable_facts: 'holds the Matrix notes' }),
+    ]
+    const pairs = findLikelyDuplicateCharacters(chars)
+    expect(pairs.some((p) => p.reason === 'stray pseudo-player row' && p.bId === 2)).toBe(true)
+  })
+
+  it('does not flag a normal cast around a single player', () => {
+    const chars = [
+      ch({ id: 1, name: 'Helena', is_player: 1 }),
+      ch({ id: 2, name: 'Marcus', current_place_id: 5 }),
     ]
     expect(findLikelyDuplicateCharacters(chars)).toHaveLength(0)
   })
@@ -82,6 +109,55 @@ describe('getFullWorldState.potentialDuplicates', () => {
     })
     const dup = getFullWorldState(world.id).potentialDuplicates
     expect(dup.some((p) => p.reason === 'descriptor + named at same place')).toBe(true)
+  })
+})
+
+describe('single-player invariant (self-naming)', () => {
+  it('renames the player row in place instead of inserting a second protagonist', async () => {
+    const world = createWorld({
+      name: `Self-name-${Math.random()}`,
+      premise: 'x',
+      // Default-ish placeholder protagonist name.
+      initialState: { time: 't', location: 'Bridge', identity: 'i', playerName: 'You' },
+    })
+    // The archivist learns the protagonist's name and marks them the player.
+    await applyArchivistPatch(world.id, 1, {
+      characters: [{ name: 'Andrew Osborne', is_player: true }],
+    })
+    const players = db
+      .prepare('SELECT id, name FROM characters WHERE world_id = ? AND is_player = 1')
+      .all(world.id) as Array<{ id: number; name: string }>
+    expect(players).toHaveLength(1)
+    expect(players[0].name).toBe('Andrew Osborne')
+    // No stray non-player "You" row left behind.
+    const strays = db
+      .prepare("SELECT COUNT(*) AS n FROM characters WHERE world_id = ? AND is_player = 0 AND lower(name) = 'you'")
+      .get(world.id) as { n: number }
+    expect(strays.n).toBe(0)
+  })
+
+  it('folds a stray non-player matching the new name into the one protagonist', async () => {
+    const world = createWorld({
+      name: `Self-name-merge-${Math.random()}`,
+      premise: 'x',
+      initialState: { time: 't', location: 'Bridge', identity: 'i', playerName: 'You' },
+    })
+    // A stray NPC row named like the eventual protagonist sneaks in first.
+    await applyArchivistPatch(world.id, 1, {
+      characters: [{ name: 'Andrew', current_place_name: 'Bridge' }],
+    })
+    // Then the protagonist is named — must collapse onto the single player row.
+    await applyArchivistPatch(world.id, 2, {
+      characters: [{ name: 'Andrew', is_player: true }],
+    })
+    const players = db
+      .prepare('SELECT id FROM characters WHERE world_id = ? AND is_player = 1')
+      .all(world.id) as Array<{ id: number }>
+    expect(players).toHaveLength(1)
+    const named = db
+      .prepare("SELECT COUNT(*) AS n FROM characters WHERE world_id = ? AND lower(name) = 'andrew'")
+      .get(world.id) as { n: number }
+    expect(named.n).toBe(1)
   })
 })
 

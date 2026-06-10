@@ -134,7 +134,10 @@ export function createWorld(input: CreateWorldInput): World {
     ) as { id: number }
     insertCharacterStmt.run(
       world.id,
-      initialState.playerName?.trim() || 'Player',
+      // Diegetic default: 'You', not the meta word 'Player'. The archivist
+      // renames this row in place when the protagonist is named (A9 single-
+      // player invariant), so it never spawns a second protagonist row.
+      initialState.playerName?.trim() || 'You',
       initialState.identity,
       place.id,
     )

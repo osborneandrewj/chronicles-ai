@@ -478,7 +478,29 @@ export async function applyArchivistPatch(
           c.current_place_name !== undefined
             ? await upsertPlace(c.current_place_name, undefined, undefined)
             : null
-        const existing = await resolveCharacter(c.name)
+        let existing = await resolveCharacter(c.name)
+
+        // Single-player invariant (A9): a patch marking a character as the
+        // player must land on the one is_player=1 row and rename it in place —
+        // never insert a second protagonist. This prevents the duplicate-player
+        // split seen in the playthrough (a stray "Player" row holding the real
+        // protagonist's notes alongside the named player row).
+        if (c.is_player === true) {
+          const canonicalPlayer = (await listCharacters()).find((row) => row.is_player === 1)
+          if (canonicalPlayer) {
+            if (existing && existing.id !== canonicalPlayer.id) {
+              // The new name matched a different row (a stray pseudo-player or a
+              // second is_player row) — fold it into the one protagonist.
+              await mergeCharacters(canonicalPlayer, existing, c.name)
+            } else if (
+              canonicalCharacterKey(canonicalPlayer.name) !== canonicalCharacterKey(c.name)
+            ) {
+              await characters.rename(c.name, canonicalPlayer.id)
+            }
+            existing =
+              (await listCharacters()).find((row) => row.id === canonicalPlayer.id) ?? canonicalPlayer
+          }
+        }
 
         // v0.6.10: tally NPC relocations for the scene-transition invariant.
         // A relocation = a non-player row whose patch sets a place resolving to
