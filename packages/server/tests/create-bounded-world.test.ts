@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  createStarshipWorld,
-  type CreateStarshipWorldDeps,
-} from '@/application/use-cases/create-starship-world'
+  createBoundedWorld,
+  type CreateBoundedWorldDeps,
+} from '@/application/use-cases/create-bounded-world'
 import type { Character, CharacterRelationship, Place, Scene } from '@/domain/entities'
 import type {
   Clock,
@@ -66,7 +66,7 @@ type Store = {
   shipClockMinutes: number | null
 }
 
-function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
+function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
   const store: Store = {
     characters: [],
     places: [],
@@ -97,7 +97,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     },
   }
 
-  const worlds: CreateStarshipWorldDeps['worlds'] = {
+  const worlds: CreateBoundedWorldDeps['worlds'] = {
     async createBounded() {
       return { id: worldId }
     },
@@ -133,7 +133,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async setSettingRegion() {},
   }
 
-  const places: CreateStarshipWorldDeps['places'] = {
+  const places: CreateBoundedWorldDeps['places'] = {
     async forWorld() {
       return store.places
     },
@@ -201,7 +201,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async setGeoResolution() {},
   }
 
-  const placeConnections: CreateStarshipWorldDeps['placeConnections'] = {
+  const placeConnections: CreateBoundedWorldDeps['placeConnections'] = {
     async forWorld() {
       return store.connections
     },
@@ -220,7 +220,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     },
   }
 
-  const characters: CreateStarshipWorldDeps['characters'] = {
+  const characters: CreateBoundedWorldDeps['characters'] = {
     async forWorld() {
       return store.characters
     },
@@ -298,7 +298,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async setDailyLoopIfEmpty() {},
   }
 
-  const relationships: CreateStarshipWorldDeps['relationships'] = {
+  const relationships: CreateBoundedWorldDeps['relationships'] = {
     async forWorld() {
       return store.relationships
     },
@@ -322,7 +322,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     },
   }
 
-  const scenes: CreateStarshipWorldDeps['scenes'] = {
+  const scenes: CreateBoundedWorldDeps['scenes'] = {
     async forWorld() {
       return store.scenes
     },
@@ -366,7 +366,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     },
   }
 
-  const timeline: CreateStarshipWorldDeps['timeline'] = {
+  const timeline: CreateBoundedWorldDeps['timeline'] = {
     async append() {},
   }
 
@@ -397,10 +397,10 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
   }
 }
 
-describe('createStarshipWorld', () => {
+describe('createBoundedWorld', () => {
   it('seeds a bounded world: rooms, crew, and topology written', async () => {
     const { deps, store } = makeDeps()
-    const result = await createStarshipWorld(
+    const result = await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )
@@ -413,7 +413,7 @@ describe('createStarshipWorld', () => {
 
   it('runs the sim with the ticks it is given (advancing the clock)', async () => {
     const { deps, store } = makeDeps()
-    await createStarshipWorld(
+    await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )
@@ -424,7 +424,7 @@ describe('createStarshipWorld', () => {
 
   it('defaults to SIM_TICKS (12) when ticks is omitted', async () => {
     const { deps, store } = makeDeps()
-    await createStarshipWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
+    await createBoundedWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
     // tickToWorldTime(12-1)=tickToWorldTime(11): 11 ticks past day 1 morning.
     // Bands cycle every 4 ticks ⇒ tick 11 is band index 3 = night, day 3.
     expect(store.worldTime).toBe('Day 3 — night')
@@ -432,7 +432,7 @@ describe('createStarshipWorld', () => {
 
   it('seeds the ship-clock from the boarding world_time (starship P6)', async () => {
     const { deps, store } = makeDeps()
-    await createStarshipWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
+    await createBoundedWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
     // Default 12 ticks ⇒ boarding world_time 'Day 3 — night'. worldTimeToMinutes
     // anchors a clock-less band phrase to a representative hour (night=23:00):
     // (3-1)*1440 + 23*60 = 4260. A non-null counter proves the clock is seeded.
@@ -441,7 +441,7 @@ describe('createStarshipWorld', () => {
 
   it('adds exactly one player on the Bridge (placeIds[0]) as a newcomer', async () => {
     const { deps, store } = makeDeps()
-    await createStarshipWorld(
+    await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )
@@ -456,7 +456,7 @@ describe('createStarshipWorld', () => {
 
   it('uses the entered player name when provided', async () => {
     const { deps, store } = makeDeps()
-    await createStarshipWorld(
+    await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', playerName: '  Rook  ', ticks: 4 },
       deps,
     )
@@ -466,7 +466,7 @@ describe('createStarshipWorld', () => {
 
   it('opens exactly one active scene on the Bridge, scene_number 1', async () => {
     const { deps, store } = makeDeps()
-    const result = await createStarshipWorld(
+    const result = await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )
@@ -482,7 +482,7 @@ describe('createStarshipWorld', () => {
 
   it('points the world cursor at the arrival scene', async () => {
     const { deps, store } = makeDeps()
-    const result = await createStarshipWorld(
+    const result = await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )
@@ -491,7 +491,7 @@ describe('createStarshipWorld', () => {
 
   it('returns the world, scene, and player ids', async () => {
     const { deps, store } = makeDeps()
-    const result = await createStarshipWorld(
+    const result = await createBoundedWorld(
       { templateId: 'test-scout', name: 'Aurora', premise: 'p', ticks: 4 },
       deps,
     )

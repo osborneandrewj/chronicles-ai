@@ -154,9 +154,9 @@ vocabulary visible; grep finds no starship/scout/crew/deck in domain/application
 
 ### Steps
 
-- [ ] **B0 — Feature flag** (Step 0 above) if not already in.
+- [x] **B0 — Feature flag** (Step 0 above) if not already in.
 
-- [ ] **B1 — Port/type renames** (mechanical; one commit per port; depcruise green each time).
+- [x] **B1 — Port/type renames** (mechanical; one commit per port; depcruise green each time).
   `domain/ports/crew-generator.ts → ensemble-generator.ts` (`CrewGenerator→EnsembleGenerator`,
   `GeneratedCrew→GeneratedEnsemble`, `GeneratedCrewMember→GeneratedCompanion`); container field
   `crewGenerator→ensembleGenerator` (container.ts:31,97,153,202); adapter classes
@@ -169,7 +169,7 @@ vocabulary visible; grep finds no starship/scout/crew/deck in domain/application
   `create-*-world.ts`. *Accept:* `npm run type-check`, `npm test`, `npm run test:mongo`,
   `npm run depcruise` all green; no behaviour change.
 
-- [ ] **B2 — Data-driven archetype registry (multiple hubs).**
+- [x] **B2 — Data-driven archetype registry (multiple hubs).**
   NEW `infrastructure/world-gen/archetypes/` — one file per archetype (`scout-vessel.ts`
   [genericized from `scout-template.ts`], `research-facility.ts`, `monastery.ts`,
   `bunker.ts`, …) + `index.ts` exporting a `Map<string, WorldArchetype>`. `WorldArchetype`
@@ -179,23 +179,23 @@ vocabulary visible; grep finds no starship/scout/crew/deck in domain/application
   archetype (seed injected). DELETE the hardcoded single-template default.
   *Test:* registry resolves by id; `pickHubArchetype` deterministic under a seed.
 
-- [ ] **B3 — Genre-preset registry (≥20 historical).**
+- [x] **B3 — Genre-preset registry (≥20 historical).**
   NEW `infrastructure/world-gen/genre-presets/` — `GenrePreset { id, label, hiddenPremise,
   eraTags, toneTags }`, the 24 settings from the design doc. The picker lists `label` only;
   `hiddenPremise` seeds the adventure and is **never** returned to a client.
 
-- [ ] **B4 — Codename generator.**
+- [x] **B4 — Codename generator.**
   NEW pure `domain/services/codename.ts`: `generateCodename(seed)` → "Protocol 457",
   "Sequence Theta-9", … that does **not** encode the genre. *Test:* deterministic under seed;
   no genre token in output.
 
-- [ ] **B5 — `CreateBoundedWorld` use case.**
+- [x] **B5 — `CreateBoundedWorld` use case.**
   `application/use-cases/create-starship-world.ts → create-bounded-world.ts`: all
   player-visible strings ("Arrival", "Newcomer", "Bridge") come from the archetype; the
   **player-facing world name = codename**; the rich internal name/premise is stored for the
   narrator but not surfaced. Entry room = `archetype.entryLocationKey` (fallback `placeIds[0]`).
 
-- [ ] **B6 — Concealed creation UI + action.**
+- [x] **B6 — Concealed creation UI + action.**
   Replace `app/worlds/new/StarshipLaunch.tsx` with a **genre picker** that lists genre
   **labels only** — no premise, no "ship", no "bounded/sub-world" words, no blurb; on submit
   show the codename. `app/worlds/new/actions.ts:36-43`: `createStarshipWorldAction →
@@ -204,15 +204,15 @@ vocabulary visible; grep finds no starship/scout/crew/deck in domain/application
   *Accept:* DOM/markup of the creation flow contains none of: premise text, "ship", "hub",
   "simulation", "sub-world".
 
-- [ ] **B7 — Generic prompts.**
+- [x] **B7 — Generic prompts.**
   `prompts/crew-dressing.md → ensemble-dressing.md`, `prompts/drama-beat.md → ensemble-beat.md`:
   strip ship/crew/deck/watch/mess/vessel; inject genre/era. Update the loader paths in the
   Grok/Haiku adapters.
 
-- [ ] **B8 — Era-keyed `NamePool`.** Extend A10's pool with the `eraTags` from the chosen
+- [x] **B8 — Era-keyed `NamePool`.** Extend A10's pool with the `eraTags` from the chosen
   `GenrePreset` so Rome→Roman names, Napoleon→French, etc.
 
-- [ ] **B9 — Rename scripts.** `scripts/*-ship.mjs → *-bounded-world.mjs`; parameterize by
+- [x] **B9 — Rename scripts.** `scripts/*-ship.mjs → *-bounded-world.mjs`; parameterize by
   `--template`. (Dev-only; low risk.)
 
 ---

@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
-import { createStarshipWorld } from '@/application/use-cases/create-starship-world'
+import { createBoundedWorld } from '@/application/use-cases/create-bounded-world'
 import { createWorld, type CreateWorldInput } from '@/application/use-cases/create-world'
 import { getContainer } from '@/composition/container'
 import { getGenrePreset } from '@/composition/onboarding'
@@ -214,7 +214,7 @@ export async function createStarshipWorldAction(
 
   let worldId: number
   try {
-    const result = await createStarshipWorld(
+    const result = await createBoundedWorld(
       {
         templateId: c.decks.defaultTemplateId(),
         name: STARSHIP_NAME,
