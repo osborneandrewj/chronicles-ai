@@ -9,8 +9,8 @@ import type { SeedBoundedWorldDeps } from '@/application/use-cases/seed-bounded-
 import type {
   CharacterRepository,
   Clock,
-  DeckPlanProvider,
-  DeckPlanTemplate,
+  WorldArchetypeProvider,
+  WorldArchetype,
   PlaceConnectionInput,
   PlaceConnectionRepository,
   PlaceRepository,
@@ -21,18 +21,18 @@ import type {
 import type { CharacterInput } from '@/domain/ports/character-repository'
 import type { PlaceInput } from '@/domain/ports/place-repository'
 import type { CreateBoundedWorldInput } from '@/domain/ports/world-repository'
-import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 
 // Unit test for SeedBoundedWorld (starship P1). Pure orchestration exercised with
 // in-memory fake ports that record their calls — no DB, no LLM (the deterministic
-// StubCrewGenerator stands in for the Grok seam). Asserts the seam writes one
+// StubEnsembleGenerator stands in for the Grok seam). Asserts the seam writes one
 // bounded world, one place per room, an edge per template edge, one character per
 // crew member at the right room, the relationship graph, and that it rejects a
 // disconnected template.
 
 // --- A small connected template: bridge ── mess ── quarters (2 edges, 3 rooms,
 // 2 crew slots). Distinct from the authored scout so the test owns its topology.
-const CONNECTED_TEMPLATE: DeckPlanTemplate = {
+const CONNECTED_TEMPLATE: WorldArchetype = {
   id: 'test-connected',
   name: 'Test Vessel',
   rooms: [
@@ -51,7 +51,7 @@ const CONNECTED_TEMPLATE: DeckPlanTemplate = {
 }
 
 // Same rooms, but the third room has no edge — a disconnected topology.
-const DISCONNECTED_TEMPLATE: DeckPlanTemplate = {
+const DISCONNECTED_TEMPLATE: WorldArchetype = {
   ...CONNECTED_TEMPLATE,
   id: 'test-disconnected',
   edges: [{ from: 'bridge', to: 'mess', kind: 'corridor', bidirectional: true }],
@@ -65,7 +65,7 @@ type Recorder = {
   relationshipsUpserted: RelationshipInput[]
 }
 
-function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDeps; rec: Recorder } {
+function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps; rec: Recorder } {
   const rec: Recorder = {
     worldsCreated: [],
     placesAdded: [],
@@ -76,7 +76,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
   let nextPlaceId = 100
   let nextCharacterId = 200
 
-  const decks: DeckPlanProvider = {
+  const decks: WorldArchetypeProvider = {
     async getTemplate(id) {
       return template && template.id === id ? template : null
     },
@@ -208,7 +208,7 @@ function makeDeps(template: DeckPlanTemplate | null): { deps: SeedBoundedWorldDe
   }
 
   return {
-    deps: { decks, crew: new StubCrewGenerator(), worlds, places, placeConnections, characters, relationships, clock },
+    deps: { decks, crew: new StubEnsembleGenerator(), worlds, places, placeConnections, characters, relationships, clock },
     rec,
   }
 }

@@ -146,7 +146,7 @@ export async function createStarshipWorldAction(
   }
   const { playerName } = parsed.data
 
-  // The container names the crew-generator port `crewGenerator`; the seed use
+  // The container names the crew-generator port `ensembleGenerator`; the seed use
   // case's deps call it `crew`, so map it here at the wiring edge.
   const c = getContainer()
 
@@ -160,7 +160,7 @@ export async function createStarshipWorldAction(
         playerName,
         ticks: STARSHIP_SIM_TICKS,
       },
-      { ...c, crew: c.crewGenerator },
+      { ...c, crew: c.ensembleGenerator },
     )
     worldId = result.worldId
     await generateOpeningTurn(openingTurnDeps(c), worldId, STARSHIP_PREMISE)

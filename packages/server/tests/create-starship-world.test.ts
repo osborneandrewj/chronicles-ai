@@ -7,22 +7,22 @@ import {
 import type { Character, CharacterRelationship, Place, Scene } from '@/domain/entities'
 import type {
   Clock,
-  DeckPlanProvider,
-  DeckPlanTemplate,
+  WorldArchetypeProvider,
+  WorldArchetype,
 } from '@/domain/ports'
-import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 import { StubDramaPort } from '@/infrastructure/world-gen/stub-drama-port'
 
 // Unit test for CreateStarshipWorld (starship P4a). Pure orchestration exercised
 // with STATEFUL in-memory fake ports (so reads reflect writes) plus the real
-// deterministic stubs (StubCrewGenerator / StubDramaPort — no spend) for the LLM
+// deterministic stubs (StubEnsembleGenerator / StubDramaPort — no spend) for the LLM
 // seams. Asserts the seam seeds a bounded world, runs the sim with the ticks it
 // is given, drops exactly one player (is_player=1) on the Bridge (rooms[0]),
 // opens exactly one active scene there, and points the world cursor at it.
 
 // A small connected template whose first room is the Bridge (mirrors the scout:
 // placeIds[0] is the entry room). bridge ── mess ── quarters.
-const TEMPLATE: DeckPlanTemplate = {
+const TEMPLATE: WorldArchetype = {
   id: 'test-scout',
   name: 'Test Scout',
   rooms: [
@@ -79,7 +79,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
   let nextConnId = 500
   const worldId = 42
 
-  const decks: DeckPlanProvider = {
+  const decks: WorldArchetypeProvider = {
     async getTemplate(id) {
       return id === TEMPLATE.id ? TEMPLATE : null
     },
@@ -373,7 +373,7 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
   return {
     deps: {
       decks,
-      crew: new StubCrewGenerator(),
+      crew: new StubEnsembleGenerator(),
       worlds,
       places,
       placeConnections,
@@ -424,7 +424,7 @@ describe('createStarshipWorld', () => {
   it('seeds the ship-clock from the boarding world_time (starship P6)', async () => {
     const { deps, store } = makeDeps()
     await createStarshipWorld({ templateId: 'test-scout', name: 'Aurora', premise: 'p' }, deps)
-    // Default 12 ticks ⇒ boarding world_time 'Day 3 — night'. shipTimeToMinutes
+    // Default 12 ticks ⇒ boarding world_time 'Day 3 — night'. worldTimeToMinutes
     // anchors a clock-less band phrase to a representative hour (night=23:00):
     // (3-1)*1440 + 23*60 = 4260. A non-null counter proves the clock is seeded.
     expect(store.shipClockMinutes).toBe(4260)

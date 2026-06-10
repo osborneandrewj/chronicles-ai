@@ -3,7 +3,7 @@ import type { SeedBoundedWorldDeps } from '@/application/use-cases/seed-bounded-
 import { simulateWorldForward } from '@/application/use-cases/simulate-world-forward'
 import type { SimulateWorldForwardDeps } from '@/application/use-cases/simulate-world-forward'
 import type { SceneRepository } from '@/domain/ports'
-import { shipTimeToMinutes } from '@/domain/services/ship-clock'
+import { worldTimeToMinutes } from '@/domain/services/narrative-clock'
 
 // CreateStarshipWorld (starship P4a) — pure orchestration that makes a bounded
 // starship world both creatable and playable in one synchronous flow: seed the
@@ -54,7 +54,7 @@ export async function createStarshipWorld(
   // world_time, so the boarding clock is anchored to the moment the crew are
   // positioned for. During play, narrate-turn advances this counter per beat.
   const { world_time: boardingWorldTime } = await worlds.cursor(seeded.worldId)
-  await worlds.setShipClockMinutes(seeded.worldId, shipTimeToMinutes(boardingWorldTime))
+  await worlds.setShipClockMinutes(seeded.worldId, worldTimeToMinutes(boardingWorldTime))
 
   // The scout template's first room is the Bridge, so placeIds[0] is the Bridge
   // place id — the entry room the boarding player lands in.

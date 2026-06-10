@@ -16,7 +16,7 @@ import type { CharacterRepository } from '@/domain/ports'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { packNarratorHistory } from '@/domain/services/history-packer'
-import { minutesToShipTime, shipTimeToMinutes } from '@/domain/services/ship-clock'
+import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -306,13 +306,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         // prior band). Backfill the counter from world_time on first use (null).
         try {
           const current =
-            world.ship_clock_minutes ?? shipTimeToMinutes(narratorState.worldTime)
+            world.ship_clock_minutes ?? worldTimeToMinutes(narratorState.worldTime)
           const { elapsedMinutes } = await timePassage.estimate({
             narration: trimmed,
             priorWorldTime: narratorState.worldTime,
           })
           const next = current + elapsedMinutes
-          const { worldTime } = minutesToShipTime(next)
+          const { worldTime } = minutesToWorldTime(next)
           await worlds.setShipClockMinutes(worldId, next)
           await worlds.setWorldTime(worldId, worldTime)
         } catch (err) {

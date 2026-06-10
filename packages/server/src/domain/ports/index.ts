@@ -22,12 +22,12 @@ export type {
   UpdateStoryThreadInput,
 } from './dossier-writer'
 export type {
-  DeckPlanCrewSlot,
-  DeckPlanEdge,
-  DeckPlanProvider,
-  DeckPlanRoom,
-  DeckPlanTemplate,
-} from './deck-plan-provider'
+  EnsembleSlot,
+  LocationConnection,
+  LocationNode,
+  WorldArchetype,
+  WorldArchetypeProvider,
+} from './world-archetype-provider'
 export type {
   DramaBeat,
   DramaBeatInput,

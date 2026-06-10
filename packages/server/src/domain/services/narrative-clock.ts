@@ -1,6 +1,6 @@
 import { bandForHour, type WorldTimeBand, worldTimeBand } from './world-clock'
 
-// The prose-driven ship-clock (starship P6). Time for a bounded world is tracked
+// The prose-driven narrative clock (starship P6). Time for a bounded world is tracked
 // as minutes since a Day-1 00:00 baseline. A small step estimates how much
 // in-world time the latest narration covered and advances the counter by that;
 // these pure functions turn the counter into a NARRATIVE render (a time-of-day
@@ -12,7 +12,7 @@ const MINUTES_PER_HOUR = 60
 // A natural time-of-day phrase per hour. CRITICAL: every phrase must round-trip
 // through worldTimeBand() back to the SAME band the hour belongs to. We guarantee
 // this two ways: the phrase carries the band word (the keyword branch), and
-// minutesToShipTime appends a '~HH:MM' clock token (the clock branch, which
+// minutesToWorldTime appends a '~HH:MM' clock token (the clock branch, which
 // worldTimeBand trusts first). Bands: morning 5–11, midday 11–17, evening 17–21,
 // night 21–5.
 function hourPhrase(hour: number): string {
@@ -30,7 +30,7 @@ function hourPhrase(hour: number): string {
 // Minutes since the Day-1 00:00 baseline → a narrative render + the WorldTimeBand
 // (for routines). day rolls over every 1440 minutes; the '~HH:MM' suffix makes the
 // phrase parse back to the same band via worldTimeBand's clock branch.
-export function minutesToShipTime(minutes: number): {
+export function minutesToWorldTime(minutes: number): {
   worldTime: string
   band: WorldTimeBand
 } {
@@ -50,7 +50,7 @@ export function minutesToShipTime(minutes: number): {
 // init/backfill. Best-effort: reads the day and the '~HH:MM' clock token (falling
 // back to worldTimeBand's keyword reading when no clock is present); defaults to
 // Day 1, midday (12:00) when nothing parses.
-export function shipTimeToMinutes(worldTime: string | null): number {
+export function worldTimeToMinutes(worldTime: string | null): number {
   if (!worldTime) return 12 * MINUTES_PER_HOUR
 
   const dayMatch = worldTime.match(/\bday\s+(\d+)/i)
@@ -73,7 +73,7 @@ export function shipTimeToMinutes(worldTime: string | null): number {
   return (day - 1) * MINUTES_PER_DAY + hour * MINUTES_PER_HOUR + minute
 }
 
-// A representative hour for each band, used only when shipTimeToMinutes gets a
+// A representative hour for each band, used only when worldTimeToMinutes gets a
 // phrase with no clock token (so the band survives the round-trip).
 function bandAnchorHour(band: WorldTimeBand): number {
   switch (band) {

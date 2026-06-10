@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import type { PlaceConnection } from '@/domain/entities'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
-import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
+import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
 import { SCOUT_TEMPLATE_ID } from '@/infrastructure/world-gen/scout-template'
-import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 
-// Unit tests for the starship P1 world-gen seam: the authored DeckPlanProvider
+// Unit tests for the starship P1 world-gen seam: the authored WorldArchetypeProvider
 // (returns a single connected scout template) and the deterministic
-// StubCrewGenerator (3–5 crew with valid room-key references), neither of which
+// StubEnsembleGenerator (3–5 crew with valid room-key references), neither of which
 // touches the LLM or the DB.
 
 const BANDS: WorldTimeBand[] = ['morning', 'midday', 'evening', 'night']
@@ -34,8 +34,8 @@ function connectionsFromTemplate(
   return { connections, placeIds: [...idOf.values()], idOf }
 }
 
-describe('AuthoredDeckPlanProvider', () => {
-  const provider = new AuthoredDeckPlanProvider()
+describe('AuthoredWorldArchetypeProvider', () => {
+  const provider = new AuthoredWorldArchetypeProvider()
 
   it('returns the scout template for its id', async () => {
     const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
@@ -70,9 +70,9 @@ describe('AuthoredDeckPlanProvider', () => {
   })
 })
 
-describe('StubCrewGenerator', () => {
-  const provider = new AuthoredDeckPlanProvider()
-  const stub = new StubCrewGenerator()
+describe('StubEnsembleGenerator', () => {
+  const provider = new AuthoredWorldArchetypeProvider()
+  const stub = new StubEnsembleGenerator()
 
   it('produces 3–5 crew, one per template slot', async () => {
     const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)

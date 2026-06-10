@@ -5,7 +5,7 @@ import type {
   CharacterRepository,
   Clock,
   CorrectionRepository,
-  DeckPlanProvider,
+  WorldArchetypeProvider,
   DossierRepository,
   DossierWriter,
   DramaPort,
@@ -28,7 +28,7 @@ import type {
   UsageRepository,
   WorldRepository,
 } from '@/domain/ports'
-import type { CrewGenerator } from '@/domain/ports/crew-generator'
+import type { EnsembleGenerator } from '@/domain/ports/ensemble-generator'
 import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { ConsoleLogger } from '@/infrastructure/logging/console-logger'
@@ -52,8 +52,8 @@ import { SqliteMemoryRepository } from '@/infrastructure/persistence/sqlite/memo
 import { SqliteUsageRepository } from '@/infrastructure/persistence/sqlite/usage-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
-import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
-import { GrokCrewGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
+import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
+import { GrokEnsembleGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
 import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
 import { HaikuTimePassageEstimator } from '@/infrastructure/world-gen/haiku-time-passage-estimator'
 
@@ -93,8 +93,8 @@ export type Container = {
   memory: MemoryRepository
   speech: SpeechSynthesizer
   backgroundTasks: BackgroundTasks
-  decks: DeckPlanProvider
-  crewGenerator: CrewGenerator
+  decks: WorldArchetypeProvider
+  ensembleGenerator: EnsembleGenerator
   drama: DramaPort
   timePassage: TimePassageEstimator
 }
@@ -149,8 +149,8 @@ function buildSqlite(): Container {
     memory: new SqliteMemoryRepository(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
-    decks: new AuthoredDeckPlanProvider(),
-    crewGenerator: new GrokCrewGenerator(),
+    decks: new AuthoredWorldArchetypeProvider(),
+    ensembleGenerator: new GrokEnsembleGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
   }
@@ -198,8 +198,8 @@ export async function initContainer(): Promise<Container> {
     logger: new ConsoleLogger(),
     speech: new XaiSpeechSynthesizer(),
     backgroundTasks: new ProcessBackgroundTasks(),
-    decks: new AuthoredDeckPlanProvider(),
-    crewGenerator: new GrokCrewGenerator(),
+    decks: new AuthoredWorldArchetypeProvider(),
+    ensembleGenerator: new GrokEnsembleGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
     ...repos,

@@ -1,16 +1,16 @@
 import 'server-only'
 
 import type {
-  CrewGenerator,
-  CrewGeneratorInput,
-  GeneratedCrew,
-  GeneratedCrewMember,
+  EnsembleGenerator,
+  EnsembleGeneratorInput,
+  GeneratedEnsemble,
+  GeneratedCompanion,
   GeneratedRelationship,
-} from '@/domain/ports/crew-generator'
+} from '@/domain/ports/ensemble-generator'
 import { sample } from '@/domain/services/name-pool'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 
-// StubCrewGenerator (starship P1) — a deterministic, LLM-free CrewGenerator for
+// StubEnsembleGenerator (starship P1) — a deterministic, LLM-free EnsembleGenerator for
 // tests and the offline seed script. It derives one crew member per template
 // crew slot (always within the 3–5 bound for an authored template), anchors each
 // daily loop to that crew member's real home room plus the first room as a shared
@@ -40,18 +40,18 @@ function namesForTemplate(templateId: string, count: number): string[] {
   return pairs.map((p) => `${p.given} ${p.surname}`)
 }
 
-export class StubCrewGenerator implements CrewGenerator {
-  async generate(input: CrewGeneratorInput): Promise<GeneratedCrew> {
+export class StubEnsembleGenerator implements EnsembleGenerator {
+  async generate(input: EnsembleGeneratorInput): Promise<GeneratedEnsemble> {
     const { template } = input
     const sharedRoomKey = template.rooms[0]?.key ?? ''
 
     const pooledNames = namesForTemplate(template.id, template.crew.length)
 
-    const crew: GeneratedCrewMember[] = template.crew.map((slot, index) => {
+    const crew: GeneratedCompanion[] = template.crew.map((slot, index) => {
       const homeRoomKey = slot.homeRoomKey
       // Morning + evening at home room; midday + night in the shared room so the
       // stubbed ship still co-locates crew somewhere.
-      const dailyLoop = {} as GeneratedCrewMember['dailyLoop']
+      const dailyLoop = {} as GeneratedCompanion['dailyLoop']
       for (const band of BANDS) {
         const atHome = band === 'morning' || band === 'evening'
         dailyLoop[band] = {

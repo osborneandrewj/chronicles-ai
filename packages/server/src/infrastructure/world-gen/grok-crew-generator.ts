@@ -9,10 +9,10 @@ import { generateObject } from 'ai'
 import { z } from 'zod'
 
 import type {
-  CrewGenerator,
-  CrewGeneratorInput,
-  GeneratedCrew,
-} from '@/domain/ports/crew-generator'
+  EnsembleGenerator,
+  EnsembleGeneratorInput,
+  GeneratedEnsemble,
+} from '@/domain/ports/ensemble-generator'
 import { sample } from '@/domain/services/name-pool'
 import { withObjectRetry } from '@/infrastructure/llm/generate-object'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -35,14 +35,14 @@ function nameSeed(templateId: string, premise: string): number {
   return (hashString(templateId) ^ hashString(premise)) >>> 0
 }
 
-// GrokCrewGenerator (starship P1) — the live CrewGenerator adapter. One-shot
+// GrokEnsembleGenerator (starship P1) — the live EnsembleGenerator adapter. One-shot
 // structured Grok call (mirrors lib/world-generator.ts's generateObject pattern,
 // but Grok via @ai-sdk/xai instead of Haiku, and living in infrastructure). It
 // turns an authored deck-plan template + premise into a dressed crew: ship name,
 // room descriptions, 3–5 crew with time-banded daily loops, and a relationship
 // graph. The system prompt is loaded at runtime from prompts/crew-dressing.md so
 // it stays git-diffable; Zod validates the model output, and a deterministic
-// StubCrewGenerator backs tests + the offline seed script with no spend.
+// StubEnsembleGenerator backs tests + the offline seed script with no spend.
 
 const DAILY_LOOP_ENTRY = z.object({
   activity: z.string().min(1).max(200),
@@ -96,8 +96,8 @@ function loadCrewDressingPrompt(): string {
   return readFileSync(file, 'utf8').trim()
 }
 
-export class GrokCrewGenerator implements CrewGenerator {
-  async generate(input: CrewGeneratorInput): Promise<GeneratedCrew> {
+export class GrokEnsembleGenerator implements EnsembleGenerator {
+  async generate(input: EnsembleGeneratorInput): Promise<GeneratedEnsemble> {
     const { template, premise, playerName } = input
 
     // Sample a candidate name list from the NamePool using a deterministic seed

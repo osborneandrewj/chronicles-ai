@@ -1,4 +1,4 @@
-// CrewGenerator port (starship P1) — the Grok dressing seam. Given an authored
+// EnsembleGenerator port (starship P1) — the Grok dressing seam. Given an authored
 // deck-plan template + the world premise, it produces the *content* the seeder
 // writes onto the fixed topology: a ship name, per-room descriptive dressing,
 // 3–5 crew members (each with a persona, goal, home room, and a time-banded
@@ -13,11 +13,11 @@
 //     (key for homeRoomKey; key or display name for dailyLoop place)
 //   - relationship fromRole/toRole reference generated crew roles
 
-import type { DeckPlanTemplate } from '@/domain/ports/deck-plan-provider'
+import type { WorldArchetype } from '@/domain/ports/world-archetype-provider'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 
-export type CrewGeneratorInput = {
-  template: DeckPlanTemplate
+export type EnsembleGeneratorInput = {
+  template: WorldArchetype
   premise: string
   playerName?: string
 }
@@ -25,18 +25,18 @@ export type CrewGeneratorInput = {
 // One room of a crew member's routine: what they do in a given time band and the
 // room it happens in. `place` references a template room (key or display name);
 // the seeder snaps it to a real place id.
-export type CrewDailyLoopEntry = {
+export type CompanionDailyLoopEntry = {
   activity: string
   place: string
 }
 
-export type GeneratedCrewMember = {
+export type GeneratedCompanion = {
   role: string
   name: string
   persona: string
   goal: string
   homeRoomKey: string
-  dailyLoop: Record<WorldTimeBand, CrewDailyLoopEntry>
+  dailyLoop: Record<WorldTimeBand, CompanionDailyLoopEntry>
 }
 
 export type GeneratedRelationship = {
@@ -51,14 +51,14 @@ export type GeneratedRoomDressing = {
   description: string
 }
 
-export type GeneratedCrew = {
+export type GeneratedEnsemble = {
   shipName: string
   premise: string
   roomDressing: GeneratedRoomDressing[]
-  crew: GeneratedCrewMember[]
+  crew: GeneratedCompanion[]
   relationships: GeneratedRelationship[]
 }
 
-export interface CrewGenerator {
-  generate(input: CrewGeneratorInput): Promise<GeneratedCrew>
+export interface EnsembleGenerator {
+  generate(input: EnsembleGeneratorInput): Promise<GeneratedEnsemble>
 }

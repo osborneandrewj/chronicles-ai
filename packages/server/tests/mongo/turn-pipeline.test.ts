@@ -17,8 +17,8 @@ import { MongoTimelineWriter } from '@/infrastructure/persistence/mongo/reposito
 import { MongoTurnRepository } from '@/infrastructure/persistence/mongo/repositories/turn-repository.mongo'
 import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/repositories/world-repository.mongo'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
-import { AuthoredDeckPlanProvider } from '@/infrastructure/world-gen/deck-plan-provider'
-import { StubCrewGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
+import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 import { buildPlaceOccupancySnapshotVia } from '@/lib/place-population'
 import { getNarratorWorldStateVia } from '@/lib/world-state'
 
@@ -129,8 +129,8 @@ d('mongo turn pipeline (e2e)', () => {
     expect(state.knownPlaces.map((p) => p.id)).toContain(seededPlaces[0]?.id)
   })
 
-  it('seeds a BOUNDED world via SeedBoundedWorld (StubCrewGenerator), readable through the ports', async () => {
-    const decks = new AuthoredDeckPlanProvider()
+  it('seeds a BOUNDED world via SeedBoundedWorld (StubEnsembleGenerator), readable through the ports', async () => {
+    const decks = new AuthoredWorldArchetypeProvider()
     const worlds = new MongoWorldRepository(h.ctx)
     const places = new MongoPlaceRepository(h.ctx)
     const placeConnections = new MongoPlaceConnectionRepository(h.ctx)
@@ -141,7 +141,7 @@ d('mongo turn pipeline (e2e)', () => {
       { templateId: decks.defaultTemplateId(), name: 'Scout Vessel', premise: 'a long survey run' },
       {
         decks,
-        crew: new StubCrewGenerator(),
+        crew: new StubEnsembleGenerator(),
         worlds,
         places,
         placeConnections,

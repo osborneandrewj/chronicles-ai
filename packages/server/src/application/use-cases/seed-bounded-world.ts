@@ -2,8 +2,8 @@ import type { PlaceConnection } from '@/domain/entities'
 import type {
   CharacterRepository,
   Clock,
-  DeckPlanProvider,
-  DeckPlanTemplate,
+  WorldArchetypeProvider,
+  WorldArchetype,
   PlaceConnectionInput,
   PlaceConnectionRepository,
   PlaceRepository,
@@ -12,10 +12,10 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type {
-  CrewDailyLoopEntry,
-  CrewGenerator,
-  GeneratedCrew,
-} from '@/domain/ports/crew-generator'
+  CompanionDailyLoopEntry,
+  EnsembleGenerator,
+  GeneratedEnsemble,
+} from '@/domain/ports/ensemble-generator'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
 
 // SeedBoundedWorld (starship P1) — pure orchestration that turns an authored
@@ -60,8 +60,8 @@ export type SeedBoundedWorldResult = {
 }
 
 export type SeedBoundedWorldDeps = {
-  decks: DeckPlanProvider
-  crew: CrewGenerator
+  decks: WorldArchetypeProvider
+  crew: EnsembleGenerator
   worlds: WorldRepository
   places: PlaceRepository
   placeConnections: PlaceConnectionRepository
@@ -71,12 +71,12 @@ export type SeedBoundedWorldDeps = {
 }
 
 // Resolve a crew member's daily-loop place reference (a template room key OR its
-// display name, per the CrewGenerator contract) to a seeded place id. Anything
+// display name, per the EnsembleGenerator contract) to a seeded place id. Anything
 // that fails to resolve falls back to the crew member's home room so the loop
 // always points at a real room rather than free text (the seed-time invariant).
 function resolveDailyLoop(
-  dailyLoop: Record<string, CrewDailyLoopEntry>,
-  template: DeckPlanTemplate,
+  dailyLoop: Record<string, CompanionDailyLoopEntry>,
+  template: WorldArchetype,
   placeIdByRoomKey: Map<string, number>,
   homePlaceId: number,
 ): Record<string, { activity: string; place_id: number }> {
@@ -102,7 +102,7 @@ export async function seedBoundedWorld(
   const template = await decks.getTemplate(templateId)
   if (!template) throw new TemplateNotFoundError(templateId)
 
-  const dressing: GeneratedCrew = await crew.generate({ template, premise, playerName })
+  const dressing: GeneratedEnsemble = await crew.generate({ template, premise, playerName })
   const dressingByRoomKey = new Map(dressing.roomDressing.map((d) => [d.key, d.description]))
 
   const { id: worldId } = await worlds.createBounded({

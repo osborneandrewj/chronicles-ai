@@ -1,11 +1,11 @@
 import 'server-only'
 
-import type { DeckPlanTemplate } from '@/domain/ports/deck-plan-provider'
+import type { WorldArchetype } from '@/domain/ports/world-archetype-provider'
 
 // The one authored deck plan for P1: a small scout vessel. Six rooms across two
 // decks, a single connected corridor/ladder graph (deck-graph.isConnected passes
 // on it), and four crew-role slots, each anchored to a real room key. Pure domain
-// value — the DeckPlanProvider adapter returns it and the SeedBoundedWorld use
+// value — the WorldArchetypeProvider adapter returns it and the SeedBoundedWorld use
 // case turns it into places + place_connections + crew. The LLM dressing step
 // only fills ship/room/crew prose; the topology here is fixed and map-able.
 //
@@ -23,7 +23,7 @@ import type { DeckPlanTemplate } from '@/domain/ports/deck-plan-provider'
 
 export const SCOUT_TEMPLATE_ID = 'scout-vessel'
 
-export const SCOUT_TEMPLATE: DeckPlanTemplate = {
+export const SCOUT_TEMPLATE: WorldArchetype = {
   id: SCOUT_TEMPLATE_ID,
   name: 'Scout Vessel',
   rooms: [
