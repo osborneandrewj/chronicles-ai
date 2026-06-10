@@ -2,14 +2,22 @@
 
 import { useState } from 'react'
 
+import { AdventurePicker } from './AdventurePicker'
 import { CreateWorldForm } from './CreateWorldForm'
 import { QuickStartForm } from './QuickStartForm'
 import { StarshipLaunch } from './StarshipLaunch'
 
 type Mode = 'basic' | 'advanced'
 
-export function CreateModeTabs() {
+interface CreateModeTabsProps {
+  // When provided (SIM_HUB flag on), the concealed adventure picker replaces the
+  // legacy bounded-world launch. Labels only — no premise or architecture leaks.
+  adventureOptions?: { id: string; label: string }[] | null
+}
+
+export function CreateModeTabs({ adventureOptions = null }: CreateModeTabsProps) {
   const [mode, setMode] = useState<Mode>('basic')
+  const concealed = adventureOptions !== null && adventureOptions.length > 0
 
   return (
     <div className="space-y-6">
@@ -24,7 +32,7 @@ export function CreateModeTabs() {
 
       {mode === 'basic' ? (
         <div className="space-y-6">
-          <StarshipLaunch />
+          {concealed ? <AdventurePicker options={adventureOptions} /> : <StarshipLaunch />}
           <div className="relative">
             <div className="absolute inset-0 flex items-center" aria-hidden>
               <div className="w-full border-t border-neutral-800" />

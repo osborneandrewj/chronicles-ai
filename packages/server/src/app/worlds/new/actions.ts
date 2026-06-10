@@ -6,6 +6,8 @@ import { z } from 'zod'
 import { createStarshipWorld } from '@/application/use-cases/create-starship-world'
 import { createWorld, type CreateWorldInput } from '@/application/use-cases/create-world'
 import { getContainer } from '@/composition/container'
+import { getGenrePreset } from '@/composition/onboarding'
+import { generateCodename } from '@/domain/services/codename'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
@@ -28,6 +30,26 @@ const BasicWorldSchema = z.object({
   playerName: z.string().trim().max(120).optional(),
   genre: z.string().trim().refine(isGenre, 'Pick a genre from the list'),
 })
+
+// Concealed onboarding (Phase B, B6): the player picks a historical genre by
+// label only; the world they get is named with an ambiguous codename, and the
+// rich premise that seeds the narrator is NEVER surfaced. (The hub/session/sim
+// drop-in is wired silently in C10; until then the genre adventure is created as
+// a standalone playable world.)
+const AdventureSchema = z.object({
+  playerName: z.string().trim().max(120).optional(),
+  genreId: z.string().trim().min(1),
+})
+
+// Deterministic, low-cost string hash for seeding the codename generator.
+function hashString(value: string): number {
+  let h = 2166136261
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
 
 const StarshipWorldSchema = z.object({
   playerName: z.string().trim().max(120).optional(),
@@ -125,6 +147,46 @@ export async function createBasicWorldAction(
       location: generated.location,
       identity: generated.identity,
       playerName: playerName ?? undefined,
+    },
+  })
+}
+
+// Concealed adventure creation (Phase B, B6). The player chose a genre LABEL;
+// we look up its hidden premise, mint an ambiguous codename for the world's
+// player-facing name, and create a playable world. Nothing here surfaces the
+// premise or any simulation/hub vocabulary — the codename is all the player
+// sees. `redirect` throws by design, so it stays outside the try.
+export async function createAdventureAction(
+  _prev: CreateWorldFormState,
+  formData: FormData,
+): Promise<CreateWorldFormState> {
+  const parsed = AdventureSchema.safeParse({
+    playerName: formData.get('playerName') || undefined,
+    genreId: formData.get('genreId'),
+  })
+  if (!parsed.success) {
+    return { error: 'Pick an adventure from the list.' }
+  }
+  const { playerName, genreId } = parsed.data
+  const preset = getGenrePreset(genreId)
+  if (!preset) {
+    return { error: 'Pick an adventure from the list.' }
+  }
+
+  // Seed the codename from the genre id plus per-creation entropy so repeats of
+  // the same genre still get distinct designators.
+  const codename = generateCodename(hashString(genreId) ^ Date.now())
+
+  return createAndOpenWorld({
+    // Player-facing name = codename. The rich premise seeds the narrator but is
+    // never shown in the creation/join UI.
+    name: codename,
+    premise: preset.hiddenPremise,
+    initialState: {
+      time: 'Day 1, morning',
+      location: preset.label,
+      identity: 'a newcomer, name not yet established',
+      playerName,
     },
   })
 }
