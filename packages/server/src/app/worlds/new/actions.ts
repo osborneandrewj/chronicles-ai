@@ -5,9 +5,12 @@ import { z } from 'zod'
 
 import { createBoundedWorld } from '@/application/use-cases/create-bounded-world'
 import { createWorld, type CreateWorldInput } from '@/application/use-cases/create-world'
+import { enterSubworld } from '@/application/use-cases/enter-subworld'
 import { getContainer } from '@/composition/container'
 import { getGenrePreset } from '@/composition/onboarding'
+import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
+import { pickHubArchetype } from '@/domain/services/pick-hub-archetype'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
@@ -173,22 +176,73 @@ export async function createAdventureAction(
     return { error: 'Pick an adventure from the list.' }
   }
 
-  // Seed the codename from the genre id plus per-creation entropy so repeats of
-  // the same genre still get distinct designators.
-  const codename = generateCodename(hashString(genreId) ^ Date.now())
+  // Seed the codename + selections from the genre id plus per-creation entropy.
+  const seed = (hashString(genreId) ^ Date.now()) >>> 0
+  const codename = generateCodename(seed)
+  const c = getContainer()
 
-  return createAndOpenWorld({
-    // Player-facing name = codename. The rich premise seeds the narrator but is
-    // never shown in the creation/join UI.
-    name: codename,
-    premise: preset.hiddenPremise,
-    initialState: {
-      time: 'Day 1, morning',
-      location: preset.label,
-      identity: 'a newcomer, name not yet established',
-      playerName,
-    },
-  })
+  // The full concealed-onboarding flow (C10): silently seed a randomly-designated
+  // hub (+ its Meta-Story Bible), open a session, then drop the player into the
+  // chosen historical simulation. The player sees ONLY the codename and the
+  // adventure; the hub stays hidden (concealmentView) until the first awakening.
+  let subworldId: number
+  try {
+    // 1. Pick + silently seed the hub (friendly resident crew). Never surfaced.
+    const hubs = (await c.decks.all()).filter((a) => a.isHub)
+    const hub = pickHubArchetype(hubs, seed)
+    const hubPremise = `A ${hub.name.toLowerCase()} with a small, friendly resident crew; ${
+      hub.playerIntroTemplate ?? 'a newcomer has just arrived'
+    }.`
+    const hubResult = await createBoundedWorld(
+      { templateId: hub.id, name: hub.name, premise: hubPremise, playerName },
+      { ...c, crew: c.ensembleGenerator },
+    )
+    await c.worlds.setLayer(hubResult.worldId, 'hub', null)
+
+    // 2. Generate + store the Meta-Story Bible (best-effort — never blocks play).
+    try {
+      const bible = await c.metaStoryGenerator.generate({
+        hubName: hub.name,
+        hubPremise,
+        arcEngine: pickArcEngine(seed),
+        genreLabels: [preset.label],
+        seed,
+      })
+      await c.worlds.setMetaStory(hubResult.worldId, JSON.stringify(bible))
+    } catch (err) {
+      console.error('[meta-story generation]', err)
+    }
+
+    // 3. Open the durable session pointer.
+    const session = await c.sessions.create({
+      hub_world_id: hubResult.worldId,
+      player_identity: playerName?.trim() || 'the newcomer',
+    })
+
+    // 4. Drop the player into the chosen historical simulation (what they see).
+    const sub = await enterSubworld(
+      {
+        hubWorldId: hubResult.worldId,
+        sessionId: session.id,
+        name: codename,
+        premise: preset.hiddenPremise,
+        initialState: {
+          time: 'Day 1, morning',
+          location: preset.label,
+          identity: 'a newcomer, name not yet established',
+          playerName,
+        },
+      },
+      { worlds: c.worlds, sessions: c.sessions },
+    )
+    subworldId = sub.subworldId
+    await generateOpeningTurn(openingTurnDeps(c), subworldId, preset.hiddenPremise)
+  } catch (err) {
+    console.error('[adventure creation failed]', err)
+    return { error: "Couldn't begin — try again." }
+  }
+
+  redirect(`/worlds/${subworldId}/play`)
 }
 
 // Bounded "living world" mode: seed the authored scout ship (real Grok crew),
