@@ -21,6 +21,7 @@ export type {
   PopulationTemplateRow,
 } from './occupancy'
 export type { FlareCandidate, ReverieInput, ReverieRow } from './reverie'
+export type { SimulationSession, SimulationStatus } from './session'
 export type {
   StoryClue,
   StoryDossier,

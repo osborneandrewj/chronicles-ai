@@ -51,6 +51,7 @@ export type {
 export type { TimelineReader } from './timeline-reader'
 export type { TimelineEventInput, TimelineWriter } from './timeline-writer'
 export type { ReverieRepository } from './reverie-repository'
+export type { CreateSessionInput, SessionRepository } from './session-repository'
 export type {
   NpcIntentRepository,
   ReconcileBatchResult,

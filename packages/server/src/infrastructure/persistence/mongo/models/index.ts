@@ -844,8 +844,40 @@ WorldCorrectionSchema.index({ worldId: 1, id: -1 })
 // Model registry — bound to a specific connection (test isolation + the
 // createConnection pattern from connection.ts, NOT the mongoose global).
 // ---------------------------------------------------------------------------
+// Simulation session (Phase C, C2) — the hub<->subworld pointer.
+export type SimulationSessionDoc = {
+  _id: Types.ObjectId
+  id: number
+  hubWorldId: number
+  subworldWorldId: number | null
+  playerIdentity: string
+  status: 'in_hub' | 'in_subworld'
+  hasAwoken: boolean
+  lucidity: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+const SimulationSessionSchema = new Schema<SimulationSessionDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    hubWorldId: { type: Number, required: true },
+    subworldWorldId: { type: Number, default: null },
+    playerIdentity: { type: String, required: true },
+    status: { type: String, enum: ['in_hub', 'in_subworld'], default: 'in_subworld' },
+    hasAwoken: { type: Boolean, default: false },
+    lucidity: { type: Number, default: 0 },
+    createdAt: { type: Date, required: true },
+    updatedAt: { type: Date, required: true },
+  },
+  { collection: 'simulation_session', minimize: false, versionKey: false },
+)
+SimulationSessionSchema.index({ hubWorldId: 1 })
+SimulationSessionSchema.index({ subworldWorldId: 1 })
+
 export type MongoModels = {
   Counter: Model<CounterDoc>
+  SimulationSession: Model<SimulationSessionDoc>
   World: Model<WorldDoc>
   Turn: Model<TurnDoc>
   Character: Model<CharacterDoc>
@@ -886,6 +918,7 @@ function bind<T>(
 export function buildModels(connection: Connection): MongoModels {
   return {
     Counter: bind(connection, 'Counter', CounterSchema),
+    SimulationSession: bind(connection, 'SimulationSession', SimulationSessionSchema),
     World: bind(connection, 'World', WorldSchema),
     Turn: bind(connection, 'Turn', TurnSchema),
     Character: bind(connection, 'Character', CharacterSchema),

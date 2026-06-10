@@ -921,6 +921,32 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'meta_story_json', 'TEXT')
     },
   },
+  {
+    // Phase C (C2) — the simulation session: the durable "where is the player
+    // right now" pointer that ties a hub to the subworld currently being played.
+    // The route resolves the active world_id through it; advanceTurn stays
+    // world-id-driven. `lucidity` (the reality-bending track, D1) rides along so
+    // it needs no later migration.
+    version: 32,
+    name: 'simulation_session',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS simulation_session (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          hub_world_id      INTEGER NOT NULL,
+          subworld_world_id INTEGER,
+          player_identity   TEXT    NOT NULL,
+          status            TEXT    NOT NULL DEFAULT 'in_subworld',
+          has_awoken        INTEGER NOT NULL DEFAULT 0,
+          lucidity          INTEGER NOT NULL DEFAULT 0,
+          created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS simulation_session_hub ON simulation_session(hub_world_id);
+        CREATE INDEX IF NOT EXISTS simulation_session_subworld ON simulation_session(subworld_world_id);
+      `)
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

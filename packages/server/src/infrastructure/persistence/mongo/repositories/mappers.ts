@@ -10,6 +10,7 @@ import type {
   PlaceProfileRow,
   PopulationTemplateRow,
   Scene,
+  SimulationSession,
   StoryClue,
   StoryObjective,
   StoryResource,
@@ -30,6 +31,7 @@ import type {
   PlaceDoc,
   ReverieDoc,
   SceneDoc,
+  SimulationSessionDoc,
   StoryClueDoc,
   StoryObjectiveDoc,
   StoryResourceDoc,
@@ -55,6 +57,20 @@ export function toSqliteDatetime(d: Date | null | undefined): string {
 
 function bool(n: boolean): number {
   return n ? 1 : 0
+}
+
+export function mapSimulationSession(d: SimulationSessionDoc): SimulationSession {
+  return {
+    id: d.id,
+    hub_world_id: d.hubWorldId,
+    subworld_world_id: d.subworldWorldId ?? null,
+    player_identity: d.playerIdentity,
+    status: d.status,
+    has_awoken: d.hasAwoken ? 1 : 0,
+    lucidity: d.lucidity ?? 0,
+    created_at: toSqliteDatetime(d.createdAt),
+    updated_at: toSqliteDatetime(d.updatedAt),
+  }
 }
 
 export function mapWorld(d: WorldDoc): World {
