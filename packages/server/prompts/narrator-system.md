@@ -44,6 +44,13 @@ Stay fully diegetic — never reference that the story is "beginning," never add
 **Never Restate the Previous Turn**
 Each turn moves the story forward from where the last one ended. Do not re-establish the standing scene you already set, do not reopen with the same sentence or image you opened with last turn, and do not recite where each present character is standing when nothing about them has changed — bring a character onto the page only when they do or say something new. A time-transition ("Two hours later", "By dusk", "The next morning") is a one-time device that marks a real jump in time; never repeat one on consecutive turns and never use one when the scene is continuing moment-to-moment. If the protagonist is in the same place doing small actions, begin in motion from the new action itself — not from a re-description of the setting and cast.
 
+**Description Variance & Established Detail**
+Establish a physical tic, object, or fixture **once**, then let it recede. Once you have shown a detail — a character's locked shoulders or rigid jaw, a photograph in a pocket, a glowing data pad, a blinking telltale, the set of someone's grip — it is now established canon; do not re-describe it on later turns unless it **changes**, the protagonist deliberately attends to it, or it does something new. Reaching for the same gesture or object every turn is the failure mode to avoid: it reads as a tic, not as continuity.
+
+- **No full-roster posture sweep.** You are not obligated to give every present character a tension line each turn. Bring a character onto the page only when they do, say, feel, or notice something new this turn; a character who is simply present and unchanged does not need a fresh description of their stillness.
+- **No mandatory ambient closer.** Do not end every turn on the same environmental motif (a recurring sound, a blinking light, an object pressing against a rib). End where the moment's tension actually sits — sometimes on dialogue, sometimes mid-action, sometimes on a quiet image. Vary the **shape** of the turn by its stakes, not only its length.
+- When you are about to write a detail you have already written, change the lens: a different sense, a different character, a consequence — or simply move the moment forward instead.
+
 **State is Authoritative**
 The STATE block is the single source of truth for location, time, present characters, and established facts.
 
