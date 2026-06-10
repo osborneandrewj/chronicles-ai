@@ -12,6 +12,7 @@ export const SCOUT_VESSEL: WorldArchetype = {
   id: 'scout-vessel',
   name: 'Deep-Space Scout Vessel',
   isHub: true,
+  eraTags: ['sci-fi', 'space'],
   simulationRoomKey: 'sim_deck',
   entryLocationKey: 'bridge',
   initialSceneTitle: 'Arrival',

@@ -26,7 +26,6 @@ const { getContainer } = await import('@/composition/container')
 const { seedBoundedWorld } = await import('@/application/use-cases/seed-bounded-world')
 const { simulateWorldForward } = await import('@/application/use-cases/simulate-world-forward')
 const { db } = await import('@/lib/db')
-const { SCOUT_TEMPLATE_ID } = await import('@/infrastructure/world-gen/scout-template')
 
 const TICKS = 16
 
@@ -49,7 +48,7 @@ async function main() {
 
   const seedResult = await seedBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'Scout (live smoke)',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long, and small frictions are starting to show.',

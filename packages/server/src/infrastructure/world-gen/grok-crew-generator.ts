@@ -106,7 +106,10 @@ export class GrokEnsembleGenerator implements EnsembleGenerator {
     //   as `exclude` here, so the avoid-list prevents cross-world surname repeats.
     const avoidList: string[] = []
     const seed = nameSeed(template.id, premise)
-    const candidates = sample(['sci-fi', 'space', 'generic'], 12, { seed, exclude: avoidList })
+    // Era-key the candidate names to the archetype's own setting (B8) — a
+    // starship draws sci-fi names, a monastery medieval, a facility modern.
+    const eraTags = template.eraTags && template.eraTags.length > 0 ? template.eraTags : ['generic']
+    const candidates = sample(eraTags, 12, { seed, exclude: avoidList })
     const candidateLines = candidates
       .map((c) => `${c.given} ${c.surname}`)
       .join(', ')

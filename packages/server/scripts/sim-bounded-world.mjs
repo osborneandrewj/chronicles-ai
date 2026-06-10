@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline proof for starship P2 + P3 (the deterministic forward sim + the
 // threshold-gated LLM beat seam). Builds the SQLite container against a throwaway
-// temp DB, seeds a scout ship with the deterministic StubCrewGenerator (free,
+// temp DB, seeds a scout ship with the deterministic StubEnsembleGenerator (free,
 // reproducible, no API key), then runs the SimulateWorldForward use case for 24
 // ticks. P2: pure NPC movement + co-location + relationship drift. P3: when a
 // co-located group has enough seeded tension and the cooldown has elapsed, it
@@ -44,16 +44,13 @@ const { seedBoundedWorld } = await import(
 const { simulateWorldForward } = await import(
   '@/application/use-cases/simulate-world-forward'
 )
-const { StubCrewGenerator } = await import(
+const { StubEnsembleGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
 )
 const { StubDramaPort } = await import(
   '@/infrastructure/world-gen/stub-drama-port'
 )
 const { db } = await import('@/lib/db')
-const { SCOUT_TEMPLATE_ID } = await import(
-  '@/infrastructure/world-gen/scout-template'
-)
 const { tickToBand } = await import('@/domain/services/sim-clock')
 
 const TICKS = 24
@@ -65,14 +62,14 @@ async function main() {
   // Seed a scout ship with the deterministic stub crew (free + reproducible).
   const seedResult = await seedBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'EMS Wayfarer',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long.',
     },
     {
       decks: c.decks,
-      crew: new StubCrewGenerator(),
+      crew: new StubEnsembleGenerator(),
       worlds: c.worlds,
       places: c.places,
       placeConnections: c.placeConnections,
@@ -90,7 +87,7 @@ async function main() {
   const startValenceById = new Map(startRelationships.map((r) => [r.id, r.valence]))
 
   // Run the forward sim. cooldownTicks/tensionThreshold are set so the seeded
-  // ally tension (StubCrewGenerator emits valence 0.4 ally edges, |valence| >=
+  // ally tension (StubEnsembleGenerator emits valence 0.4 ally edges, |valence| >=
   // 0.3) clears the gate and beats fire when co-located crew share a room. The
   // real SqliteTimelineWriter persists each beat; the StubDramaPort generates them
   // free + deterministically (no spend).

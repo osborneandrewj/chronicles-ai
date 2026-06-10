@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline proof for starship P4a (creatable + playable Starship). Builds the
 // SQLite container against a throwaway temp DB, then runs the CreateStarshipWorld
-// use case with the deterministic StubCrewGenerator + StubDramaPort swapped in for
+// use case with the deterministic StubEnsembleGenerator + StubDramaPort swapped in for
 // the real Grok/Haiku adapters (so the run is free + reproducible + needs no API
 // key — and it deliberately does NOT call the opening turn / real Grok, which is
 // browser-verified). It seeds the authored scout ship, runs the player-less
@@ -36,17 +36,14 @@ process.env.DATABASE_PATH = path.join(tmpDir, 'create-starship.sqlite')
 process.env.PERSISTENCE = 'sqlite'
 
 const { getContainer } = await import('@/composition/container')
-const { createStarshipWorld } = await import(
-  '@/application/use-cases/create-starship-world'
+const { createBoundedWorld } = await import(
+  '@/application/use-cases/create-bounded-world'
 )
-const { StubCrewGenerator } = await import(
+const { StubEnsembleGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
 )
 const { StubDramaPort } = await import(
   '@/infrastructure/world-gen/stub-drama-port'
-)
-const { SCOUT_TEMPLATE_ID } = await import(
-  '@/infrastructure/world-gen/scout-template'
 )
 
 const TICKS = 12
@@ -58,10 +55,10 @@ async function main() {
   // Build the CreateStarshipWorld deps from the container, but swap in the
   // deterministic stubs for the Grok crew generator + Haiku drama port so the run
   // is free + reproducible (no spend, no API key). This is the same DI surface the
-  // real createStarshipWorldAction wires from the container.
+  // real createBoundedWorldAction wires from the container.
   const deps = {
     decks: c.decks,
-    crew: new StubCrewGenerator(),
+    crew: new StubEnsembleGenerator(),
     worlds: c.worlds,
     places: c.places,
     placeConnections: c.placeConnections,
@@ -73,9 +70,9 @@ async function main() {
     clock: c.clock,
   }
 
-  const result = await createStarshipWorld(
+  const result = await createBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'EMS Wayfarer',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long.',

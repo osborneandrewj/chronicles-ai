@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 // Offline proof for starship P6 (the PROSE-DRIVEN ship-clock). Mirrors
 // sim-ship.mjs: it builds the SQLite container against a throwaway temp DB and
-// seeds a scout ship with the deterministic StubCrewGenerator (free, no key). It
+// seeds a scout ship with the deterministic StubEnsembleGenerator (free, no key). It
 // then sets the world's ship_clock_minutes near a band boundary (late 'night')
 // and simulates a few player turns. On each turn a deterministic
 // StubTimePassageEstimator returns a CHUNK of elapsed in-world minutes (the
 // prose-time the narration would have covered); the script advances the clock by
 // that chunk EXACTLY as narrate-turn does — ship_clock_minutes += elapsed, then
-// minutesToShipTime(next) renders the new world_time + band, persisted via
+// minutesToWorldTime(next) renders the new world_time + band, persisted via
 // setShipClockMinutes + setWorldTime. It PRINTS the world_time + band after every
 // step.
 //
 // Assertions (exit non-zero on any failure):
 //   1. The clock advances every step (ship_clock_minutes strictly increases).
 //   2. The narrative band SHIFTS across at least one boundary (night -> morning).
-//   3. minutesToShipTime's band matches worldTimeBand(the rendered world_time) on
+//   3. minutesToWorldTime's band matches worldTimeBand(the rendered world_time) on
 //      every step (the round-trip the living tick relies on).
 // Ends with an OK line.
 //
@@ -42,17 +42,14 @@ const { getContainer } = await import('@/composition/container')
 const { seedBoundedWorld } = await import(
   '@/application/use-cases/seed-bounded-world'
 )
-const { StubCrewGenerator } = await import(
+const { StubEnsembleGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
 )
 const { StubTimePassageEstimator } = await import(
   '@/infrastructure/world-gen/stub-time-passage-estimator'
 )
-const { SCOUT_TEMPLATE_ID } = await import(
-  '@/infrastructure/world-gen/scout-template'
-)
-const { minutesToShipTime, shipTimeToMinutes } = await import(
-  '@/domain/services/ship-clock'
+const { minutesToWorldTime, worldTimeToMinutes } = await import(
+  '@/domain/services/narrative-clock'
 )
 const { worldTimeBand } = await import('@/domain/services/world-clock')
 
@@ -76,14 +73,14 @@ async function main() {
   // Seed a scout ship with the deterministic stub crew (free + reproducible).
   const seedResult = await seedBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'EMS Wayfarer',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long.',
     },
     {
       decks: c.decks,
-      crew: new StubCrewGenerator(),
+      crew: new StubEnsembleGenerator(),
       worlds: c.worlds,
       places: c.places,
       placeConnections: c.placeConnections,
@@ -99,7 +96,7 @@ async function main() {
   // Start the clock late at 'night' (just before the 05:00 morning boundary), so
   // the first chunk of prose-time crosses into morning. 04:10 on Day 3.
   const startMinutes = 2 * 1440 + 4 * 60 + 10 // Day 3, 04:10
-  const startRender = minutesToShipTime(startMinutes)
+  const startRender = minutesToWorldTime(startMinutes)
   await c.worlds.setShipClockMinutes(worldId, startMinutes)
   await c.worlds.setWorldTime(worldId, startRender.worldTime)
 
@@ -132,7 +129,7 @@ async function main() {
   for (const [i, turn] of TURNS.entries()) {
     const world = await c.worlds.getWorld(worldId)
     // backfill-on-null exactly like the narrate-turn integration.
-    const current = world?.ship_clock_minutes ?? shipTimeToMinutes(world?.world_time ?? null)
+    const current = world?.ship_clock_minutes ?? worldTimeToMinutes(world?.world_time ?? null)
 
     const { elapsedMinutes } = await estimator.estimate({
       narration: turn.narration,
@@ -142,7 +139,7 @@ async function main() {
     // band visibly walks across boundaries.
     const elapsed = turn.elapsedMinutes + elapsedMinutes
     const next = current + elapsed
-    const { worldTime, band } = minutesToShipTime(next)
+    const { worldTime, band } = minutesToWorldTime(next)
 
     await c.worlds.setShipClockMinutes(worldId, next)
     await c.worlds.setWorldTime(worldId, worldTime)
@@ -179,14 +176,14 @@ async function main() {
     process.exit(1)
   }
 
-  // 2. minutesToShipTime's band matches worldTimeBand(the rendered string) on
+  // 2. minutesToWorldTime's band matches worldTimeBand(the rendered string) on
   //    every step — the round-trip the living tick relies on.
   for (const step of steps) {
     const parsed = worldTimeBand(step.worldTime)
     if (parsed !== step.band) {
       console.error(
         `FAIL: band round-trip broke for "${step.worldTime}" — ` +
-          `minutesToShipTime said '${step.band}' but worldTimeBand parsed '${parsed}'`,
+          `minutesToWorldTime said '${step.band}' but worldTimeBand parsed '${parsed}'`,
       )
       process.exit(1)
     }

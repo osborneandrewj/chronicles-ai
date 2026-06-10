@@ -6,7 +6,7 @@
 // TickLivingWorld use case does exactly that against a throwaway temp SQLite DB.
 //
 // It builds the SQLite container, seeds a scout ship with the deterministic
-// StubCrewGenerator (free, reproducible, no API key), then sets the player in ONE
+// StubEnsembleGenerator (free, reproducible, no API key), then sets the player in ONE
 // room and drives the LIVE world clock to a known band so the crew's daily_loop
 // has somewhere to send them. It calls tickLivingWorld several times — printing
 // off-scene crew positions before/after each tick and the provenance='sim' beats
@@ -46,16 +46,13 @@ const { seedBoundedWorld } = await import(
 const { tickLivingWorld } = await import(
   '@/application/use-cases/tick-living-world'
 )
-const { StubCrewGenerator } = await import(
+const { StubEnsembleGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
 )
 const { StubDramaPort } = await import(
   '@/infrastructure/world-gen/stub-drama-port'
 )
 const { db } = await import('@/lib/db')
-const { SCOUT_TEMPLATE_ID } = await import(
-  '@/infrastructure/world-gen/scout-template'
-)
 const { worldTimeBand } = await import('@/domain/services/world-clock')
 
 // The live clock band the tick reads off. Midday sends every crew member's
@@ -70,14 +67,14 @@ async function main() {
   // Seed a scout ship with the deterministic stub crew (free + reproducible).
   const seedResult = await seedBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'EMS Wayfarer',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long.',
     },
     {
       decks: c.decks,
-      crew: new StubCrewGenerator(),
+      crew: new StubEnsembleGenerator(),
       worlds: c.worlds,
       places: c.places,
       placeConnections: c.placeConnections,

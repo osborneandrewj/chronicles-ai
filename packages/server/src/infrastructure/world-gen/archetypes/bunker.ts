@@ -9,6 +9,7 @@ export const BUNKER: WorldArchetype = {
   id: 'bunker',
   name: 'Underground Bunker',
   isHub: true,
+  eraTags: ['generic', 'modern'],
   simulationRoomKey: 'isolation_chamber',
   entryLocationKey: 'blast_doors',
   initialSceneTitle: 'Arrival',

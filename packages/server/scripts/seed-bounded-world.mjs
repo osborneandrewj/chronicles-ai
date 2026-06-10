@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline proof for starship P1 (the seed pipeline). Builds the SQLite container
 // against a throwaway temp DB, runs the SeedBoundedWorld use case with the
-// deterministic StubCrewGenerator swapped in for the real Grok adapter (so it is
+// deterministic StubEnsembleGenerator swapped in for the real Grok adapter (so it is
 // free + reproducible + needs no API key), then reads the seeded world back
 // through the repos and prints the ship, its rooms, the connectivity graph, the
 // crew, and the relationship graph. It asserts the deck graph is connected and
@@ -34,11 +34,8 @@ const { getContainer } = await import('@/composition/container')
 const { seedBoundedWorld } = await import(
   '@/application/use-cases/seed-bounded-world'
 )
-const { StubCrewGenerator } = await import(
+const { StubEnsembleGenerator } = await import(
   '@/infrastructure/world-gen/stub-crew-generator'
-)
-const { SCOUT_TEMPLATE_ID } = await import(
-  '@/infrastructure/world-gen/scout-template'
 )
 
 async function main() {
@@ -49,7 +46,7 @@ async function main() {
   // stub crew generator so the run is free + reproducible.
   const deps = {
     decks: c.decks,
-    crew: new StubCrewGenerator(),
+    crew: new StubEnsembleGenerator(),
     worlds: c.worlds,
     places: c.places,
     placeConnections: c.placeConnections,
@@ -60,7 +57,7 @@ async function main() {
 
   const result = await seedBoundedWorld(
     {
-      templateId: SCOUT_TEMPLATE_ID,
+      templateId: 'scout-vessel',
       name: 'EMS Wayfarer',
       premise:
         'A lone scout vessel runs a long, quiet survey arc through an unmapped fringe; the crew has been alone with each other for far too long.',

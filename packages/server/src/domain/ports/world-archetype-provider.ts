@@ -61,6 +61,10 @@ export type WorldArchetype = {
   defaultCharacterLabel?: string
   // A short diegetic intro line seeded as the protagonist's identity/notes.
   playerIntroTemplate?: string
+  // NamePool era/culture tags for the archetype's OWN resident ensemble (a
+  // starship → sci-fi names, a monastery → medieval). Distinct from the genre
+  // preset's eraTags, which key the sub-world cast (B8).
+  eraTags?: string[]
 }
 
 export interface WorldArchetypeProvider {
