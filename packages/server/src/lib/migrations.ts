@@ -906,6 +906,21 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'story_resources', 'salient', 'INTEGER NOT NULL DEFAULT 0')
     },
   },
+  {
+    // Phase C (C1) — world layering for the simulation hub. A world is a 'hub'
+    // (the concealed home base), a 'subworld' (a historical simulation entered
+    // from a hub), or 'standalone' (the legacy open/bounded worlds, unchanged).
+    // `parent_world_id` links a subworld to its hub; `meta_story_json` holds the
+    // hub-only generated Meta-Story Bible. All keyed per-world; the turn pipeline
+    // still runs inside one world at a time.
+    version: 31,
+    name: 'world_layering',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'world_layer', "TEXT NOT NULL DEFAULT 'standalone'")
+      addColumnIfMissing(db, 'worlds', 'parent_world_id', 'INTEGER')
+      addColumnIfMissing(db, 'worlds', 'meta_story_json', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

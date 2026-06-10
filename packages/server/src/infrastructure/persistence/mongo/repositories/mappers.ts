@@ -67,6 +67,9 @@ export function mapWorld(d: WorldDoc): World {
     spatial_mode: d.spatialMode ?? 'open',
     template_id: d.templateId ?? null,
     ship_clock_minutes: d.shipClockMinutes ?? null,
+    world_layer: d.worldLayer ?? 'standalone',
+    parent_world_id: d.parentWorldId ?? null,
+    meta_story_json: d.metaStory ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }

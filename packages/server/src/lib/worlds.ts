@@ -10,7 +10,7 @@ export type { InitialState, World, WorldSummary }
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
    VALUES (?, ?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, created_at`,
+   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, created_at`,
 )
 
 // Bare bounded-world insert (starship P1). Unlike createWorld, this seeds NO
@@ -23,7 +23,7 @@ const insertBoundedWorldStmt = db.prepare<[string, string, string, string]>(
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, created_at
+  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, created_at
    FROM worlds WHERE id = ?`,
 )
 

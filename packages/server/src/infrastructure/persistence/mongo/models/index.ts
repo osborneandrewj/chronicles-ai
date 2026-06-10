@@ -55,6 +55,10 @@ export type WorldDoc = {
   // Prose-driven ship-clock (v29 / starship P6): minutes since the Day-1 00:00
   // baseline. Set for bounded worlds; null for open. SQLite: ship_clock_minutes.
   shipClockMinutes: number | null
+  // Simulation-hub layering (C1).
+  worldLayer: 'hub' | 'subworld' | 'standalone'
+  parentWorldId: number | null
+  metaStory: string | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -71,6 +75,9 @@ const WorldSchema = new Schema<WorldDoc>(
     spatialMode: { type: String, enum: ['open', 'bounded'], default: 'open' },
     templateId: { type: String, default: null },
     shipClockMinutes: { type: Number, default: null },
+    worldLayer: { type: String, enum: ['hub', 'subworld', 'standalone'], default: 'standalone' },
+    parentWorldId: { type: Number, default: null },
+    metaStory: { type: String, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },

@@ -3,6 +3,11 @@
 
 export type SpatialMode = 'open' | 'bounded'
 
+// Phase C (C1) — simulation-hub layering. 'hub' = concealed home base,
+// 'subworld' = a historical simulation entered from a hub, 'standalone' = legacy
+// open/bounded worlds (the default, unchanged).
+export type WorldLayer = 'hub' | 'subworld' | 'standalone'
+
 export type World = {
   id: number
   name: string
@@ -14,6 +19,11 @@ export type World = {
   // Prose-driven ship-clock (starship P6): minutes since a Day-1 00:00 baseline.
   // Set for bounded worlds; null for open worlds (which keep current_time).
   ship_clock_minutes: number | null
+  // Simulation-hub layering (C1). `parent_world_id` links a subworld to its hub;
+  // `meta_story_json` is the hub-only Meta-Story Bible (generated, never rendered).
+  world_layer: WorldLayer
+  parent_world_id: number | null
+  meta_story_json: string | null
   created_at: string
 }
 
