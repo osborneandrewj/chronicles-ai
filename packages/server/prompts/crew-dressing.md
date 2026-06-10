@@ -5,6 +5,8 @@ You are given:
 - The world PREMISE (tone, era, stakes).
 - The ROOM MANIFEST: each room's `key`, current name, and a baseline description. Use the `key` values exactly when you reference rooms.
 - The CREW SLOTS: 3–5 role anchors, each tied to a real room `key` (`homeRoomKey`). Fill one crew member per slot, in the same order.
+- **CANDIDATE NAMES**: a pre-sampled list of given + surname pairs suited to the premise era and culture. Draw on these or names of the same era/culture — do NOT default to the same generic surnames every story (e.g. do not reuse "Voss", "Kane", "Drake" across every crew).
+- **RECENTLY USED** (avoid-list): surnames that have appeared in recent worlds. Do not use any surname on this list, even if it fits the era.
 
 Return a single JSON object matching the schema. No prose outside the JSON.
 
@@ -18,7 +20,7 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 
 - One crew member per slot, in slot order. 3–5 total — never fewer, never more.
 - `role` — echo the slot's role (e.g. "captain", "engineer").
-- `name` — a fitting personal name for the era/tone. No franchise names. Honor a provided protagonist name only if it's clearly distinct from the crew.
+- `name` — draw primarily from the provided CANDIDATE NAMES list or invent a name of the same era/culture. No franchise names. Honor a provided protagonist name only if it's clearly distinct from the crew. **Do NOT reuse any surname in the RECENTLY USED list.** Avoid defaulting every story to the same small set of surnames.
 - `persona` — 1–2 sentences: who they are, how they carry themselves, a defining trait or tension.
 - `goal` — one concrete present want driving them this voyage (not a life philosophy).
 - `homeRoomKey` — the slot's anchor room key, unchanged. MUST be a real room key.
@@ -37,3 +39,4 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 - Reference rooms ONLY by the given keys/names. Never invent a deck, room, or corridor.
 - 3–5 crew, every `dailyLoop` has all four bands, every `place` and `homeRoomKey` is a real room, every `valence` is within −1..1, every relationship role is a crew role you generated.
 - Keep it grounded and specific. Concrete sensory and social detail over generic space-opera tropes.
+- Name diversity: every crew member should have a distinct-feeling name; draw from the CANDIDATE NAMES list; avoid repeating surnames used in the RECENTLY USED list.
