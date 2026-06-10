@@ -11,14 +11,16 @@ import {
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
 import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
-import type { TimelineEvent } from '@/domain/entities'
+import type { SimulationSession, TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import { packNarratorHistory } from '@/domain/services/history-packer'
+import { lucidityDelta, lucidityStage } from '@/domain/services/lucidity'
 import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
+import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -261,9 +263,39 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       .map((t) => t.title),
   })
 
+  // Reality-bending cue (Phase D) — subworlds only. Surface the lucidity stage
+  // and any hub bleed motifs so the narrator can crack the simulation as the
+  // player earns lucidity. The session is reused post-stream to bump lucidity.
+  // Best-effort; never blocks the turn.
+  let realityBlock = ''
+  let subworldSession: SimulationSession | null = null
+  if (world.world_layer === 'subworld') {
+    try {
+      subworldSession = await sessions.byWorld(worldId)
+      if (subworldSession) {
+        const stage = lucidityStage(subworldSession.lucidity)
+        let bleed: string[] = []
+        const hub = await worlds.getWorld(subworldSession.hub_world_id)
+        if (hub?.meta_story_json) {
+          try {
+            const bible = JSON.parse(hub.meta_story_json) as { bleedMotifs?: string[] }
+            bleed = selectBleedThreads(bible.bleedMotifs ?? [], { seed: worldId })
+          } catch {
+            // Malformed bible JSON — skip the bleed motifs, keep the stage cue.
+          }
+        }
+        realityBlock = `\n\n### REALITY\nstage: ${stage}${
+          bleed.length > 0 ? `\nbleed: ${bleed.join('; ')}` : ''
+        }`
+      }
+    } catch (err) {
+      console.error('[reality cue]', err)
+    }
+  }
+
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${premiseBlock}\n\n${stateBlock}${offScreenBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${premiseBlock}\n\n${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
   }
   const modelMessages: ModelMessage[] = [
     { role: 'system', content: NARRATOR_BASE },
@@ -432,6 +464,20 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           }
         } catch (err) {
           console.error('[subworld-exit]', err)
+        }
+      }
+
+      // Reality-bending track (Phase D, D1): a discovery / rule-violation beat
+      // earns the player lucidity, escalating cracks -> affordances over time.
+      // Best-effort; uses the session read pre-stream.
+      if (subworldSession) {
+        try {
+          const delta = lucidityDelta(playerText, trimmed, subworldSession.lucidity)
+          if (delta > 0) {
+            await sessions.setLucidity(subworldSession.id, subworldSession.lucidity + delta)
+          }
+        } catch (err) {
+          console.error('[lucidity bump]', err)
         }
       }
 
