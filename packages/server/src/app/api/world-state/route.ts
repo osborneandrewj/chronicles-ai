@@ -21,7 +21,11 @@ export async function GET(req: Request) {
   try {
     const state = await inspectWorld(
       { worldId },
-      { worlds: container.worlds, project: (id) => getFullWorldStateVia(container, id) },
+      {
+        worlds: container.worlds,
+        sessions: container.sessions,
+        project: (id) => getFullWorldStateVia(container, id),
+      },
     )
     return Response.json(state)
   } catch (err) {
