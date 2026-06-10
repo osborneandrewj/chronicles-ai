@@ -148,6 +148,217 @@ export const NAME_POOL: NameBucket[] = [
       'Thane', 'Ulron', 'Varce', 'Westlin', 'Xen', 'Yarrow',
     ],
   },
+  // ── Phase B era buckets ───────────────────────────────────────────────────
+  {
+    tags: ['egyptian', 'ancient-egypt', 'pharaonic'],
+    given: [
+      'Ahmose', 'Amenhotep', 'Amunet', 'Ankhesenamun', 'Baketaten',
+      'Hatshepsut', 'Horemheb', 'Hunefer', 'Iput', 'Isetnofret',
+      'Khentkaus', 'Meritaten', 'Nefertari', 'Nefertiti', 'Ramesses',
+      'Sethnakht', 'Sitamun', 'Thutmose', 'Tiye', 'Wadjet',
+    ],
+    surnames: [
+      'of Abydos', 'of Akhetaten', 'of Avaris', 'of Edfu', 'of Heliopolis',
+      'of Karnak', 'of Memphis', 'of Saqqara', 'of Thebes', 'of Waset',
+      'sa-Amun', 'sa-Ptah', 'sa-Ra', 'sa-Sobek', 'sa-Thoth',
+      'weret-Isis', 'weret-Mut', 'weret-Neith', 'weret-Sekhmet', 'weret-Wadjet',
+    ],
+  },
+  {
+    tags: ['greek', 'hellenic', 'ancient-greece'],
+    given: [
+      'Achilles', 'Alexios', 'Alkibiades', 'Ariadne', 'Aspasia',
+      'Chryseis', 'Demetrios', 'Eirene', 'Eukleia', 'Hekabe',
+      'Kallirrhoe', 'Kleisthenes', 'Lysander', 'Menandros', 'Nikias',
+      'Perikles', 'Phaedra', 'Sostrate', 'Thucydides', 'Xanthippe',
+    ],
+    surnames: [
+      'Alkmaionidai', 'Bouzyges', 'Eupatridai', 'ho Athenaios', 'ho Korinthios',
+      'ho Lakedaimonios', 'ho Makedón', 'ho Milésios', 'ho Syrakosios', 'ho Thebaios',
+      'Philaidai', 'tou Aischylou', 'tou Demosthenous', 'tou Kleomenous', 'tou Miltiádou',
+      'tou Perikléous', 'tou Solonos', 'tou Themistokleous', 'tou Thukydidou', 'tou Xenophontos',
+    ],
+  },
+  {
+    tags: ['mongol', 'mongol-empire', 'steppe'],
+    given: [
+      'Alaqai', 'Arghun', 'Batu', 'Berke', 'Borte',
+      'Chagatai', 'Guyuk', 'Hoelun', 'Hulagu', 'Jebe',
+      'Jochi', 'Kublai', 'Muqali', 'Ogedei', 'Sorghaghtani',
+      'Subutai', 'Temuge', 'Temujin', 'Toregene', 'Yesugei',
+    ],
+    surnames: [
+      'Barlas', 'Borjigin', 'Jadaran', 'Jalayir', 'Kereyid',
+      'Kiyad', 'Mangqut', 'Merkit', 'Naiman', 'Oirat',
+      'Onggut', 'Qonggirat', "Taichi'ud", 'Uriankhai', 'Uyghur',
+      'Wanyan', 'Xixia', 'Yesunin', 'Zunghar', 'Jalairs',
+    ],
+  },
+  {
+    tags: ['italian', 'renaissance-italy', 'renaissance'],
+    given: [
+      'Agnolo', 'Bartolomea', 'Benedetto', 'Caterina', 'Cosimo',
+      'Fiammetta', 'Filippo', 'Ginevra', 'Giovanni', 'Giulia',
+      'Jacopo', 'Leonora', 'Lorenzo', 'Lucrezia', 'Matteo',
+      'Nicolò', 'Piero', 'Rinaldo', 'Simonetta', 'Vittoria',
+    ],
+    surnames: [
+      'Alberti', 'Bandini', 'Borgia', 'Bracciolini', 'Castiglione',
+      'della Rovere', 'di Medici', 'Farnese', 'Gonzaga', 'Grimaldi',
+      'Machiavelli', 'Malaspina', 'Orsini', 'Pazzi', 'Piccolomini',
+      'Sforza', 'Strozzi', 'Tornabuoni', 'Uzzano', 'Visconti',
+    ],
+  },
+  {
+    tags: ['american', 'american-revolution', 'colonial-american'],
+    given: [
+      'Abigail', 'Amos', 'Bathsheba', 'Benjamin', 'Caleb',
+      'Deborah', 'Elias', 'Ezekiel', 'Hannah', 'Hezekiah',
+      'Jedediah', 'Mercy', 'Nathaniel', 'Obadiah', 'Patience',
+      'Prudence', 'Reuben', 'Silas', 'Submit', 'Thankful',
+    ],
+    surnames: [
+      'Adams', 'Aldrich', 'Brewster', 'Cabot', 'Carver',
+      'Choate', 'Cottle', 'Emerson', 'Fairfax', 'Hancock',
+      'Harrison', 'Hooper', 'Jefferson', 'Madison', 'Monroe',
+      'Otis', 'Revere', 'Standish', 'Washington', 'Wentworth',
+    ],
+  },
+  {
+    tags: ['turkish', 'ottoman', 'ottoman-empire'],
+    given: [
+      'Abdülhamid', 'Ayşe', 'Bayezid', 'Fatma', 'Hafsa',
+      'Hürrem', 'Ibrahim', 'Kösem', 'Mahidevran', 'Mehmed',
+      'Mihrimah', 'Murad', 'Mustafa', 'Nurbanu', 'Osman',
+      'Rabia', 'Selim', 'Suleiman', 'Turhan', 'Yavuz',
+    ],
+    surnames: [
+      'Akkoyunlu', 'Anadolu', 'Çelebi', 'Dülkadiroğlu', 'Enderunlu',
+      'Germiyanoğlu', 'Hamidoğlu', 'Jandaroğlu', 'Karamanoğlu', 'Kızılahmedli',
+      'Menteşeoğlu', 'Osmanoğlu', 'Ramazanoğlu', 'Saruhanoğlu', 'Sultanî',
+      'Tekeoğlu', 'Ülkeroğlu', 'Zülkadiroğlu', 'Paşazade', 'Bey',
+    ],
+  },
+  {
+    tags: ['chinese', 'imperial-china', 'ming-china'],
+    given: [
+      'Bao', 'Changying', 'Fang', 'Guang', 'Hongwu',
+      'Jiajing', 'Lan', 'Longqing', 'Meiling', 'Mingzhu',
+      'Qiong', 'Ronglu', 'Shunzhi', 'Wei', 'Wuzetian',
+      'Xiao', 'Yan', 'Yongle', 'Zhaodi', 'Zhengde',
+    ],
+    surnames: [
+      'Cai', 'Chen', 'Cui', 'Han', 'Huang',
+      'Li', 'Lin', 'Liu', 'Lu', 'Ma',
+      'Sun', 'Wang', 'Wu', 'Xia', 'Xu',
+      'Yang', 'Zhang', 'Zhao', 'Zheng', 'Zhou',
+    ],
+  },
+  {
+    tags: ['spanish', 'conquistador', 'golden-age-spain'],
+    given: [
+      'Álvaro', 'Beatriz', 'Cristóbal', 'Diego', 'Elvira',
+      'Esperanza', 'Fernando', 'Francisco', 'Hernán', 'Inés',
+      'Isabel', 'Juana', 'Leonor', 'Luis', 'María',
+      'Pedro', 'Rodrigo', 'Sancho', 'Teresa', 'Ximena',
+    ],
+    surnames: [
+      'Almagro', 'Alvarado', 'Balboa', 'Bobadilla', 'Cabeza de Vaca',
+      'Cisneros', 'Coronado', 'de Ayala', 'de la Cruz', 'de Luna',
+      'de Soto', 'de Valdivia', 'Grijalva', 'Mendoza', 'Narváez',
+      'Ojeda', 'Ovando', 'Pizarro', 'Velázquez', 'Zumarraga',
+    ],
+  },
+  {
+    tags: ['nahua', 'aztec', 'mesoamerica'],
+    given: [
+      'Acolmiztli', 'Chimalli', 'Cihuatl', 'Coyolxauhqui', 'Cuauhtli',
+      'Cuicatl', 'Ehecatl', 'Huitzil', 'Itzcoatl', 'Malinalli',
+      'Mazatl', 'Necahual', 'Ocelotl', 'Tezcatl', 'Tlapalteotl',
+      'Tonatiuh', 'Xochitl', 'Yaotl', 'Yohualli', 'Zipactli',
+    ],
+    surnames: [
+      'Acamapichtli', 'Ahuizotl', 'Axayacatl', 'Chimalpopoca', 'Huitzilihuitl',
+      'Motecuhzoma', 'Netzahualcoyotl', 'Tecuichpo', 'Tezozomoc', 'Tlacaelel',
+      'Tlacopan', 'Tlatelolco', 'Tlotzin', 'Tochtli', 'Tollan',
+      'Totoquihuaztli', 'Xayacatl', 'Xicoténcatl', 'Yacatecuhtli', 'Zumárraga',
+    ],
+  },
+  {
+    tags: ['caribbean', 'golden-age-piracy', 'buccaneer'],
+    given: [
+      'Anne', 'Baptiste', 'Bartholomew', 'Calico', 'Celestine',
+      'Charles', 'Cochon', 'Delphine', 'Édouard', 'Edward',
+      'Ezekiel', 'Françoise', 'Isadora', 'Jacques', 'Jean',
+      'Josephine', 'Mary', 'Patience', 'Samuel', 'Thomas',
+    ],
+    surnames: [
+      'Bellamy', 'Bonny', 'Capot', 'Condent', 'Davis',
+      'de Graaf', 'England', 'Every', 'Hornigold', 'Jennings',
+      'Kidd', 'Lafitte', 'Levasseur', 'Low', 'Rackham',
+      'Read', 'Roberts', 'Teach', 'Vane', 'Williams',
+    ],
+  },
+  {
+    tags: ['persian', 'achaemenid', 'achaemenid-persia'],
+    given: [
+      'Amestris', 'Ariaramnes', 'Arsames', 'Artabazus', 'Artaphernes',
+      'Artaxerxes', 'Atossa', 'Cambyses', 'Cassandane', 'Cyrus',
+      'Darius', 'Gotarzes', 'Hystaspes', 'Mandane', 'Masistes',
+      'Parysatis', 'Roxane', 'Smerdis', 'Stateira', 'Xerxes',
+    ],
+    surnames: [
+      'Achaemenid', 'of Anshan', 'of Bactria', 'of Ecbatana', 'of Lydia',
+      'of Media', 'of Pasargadae', 'of Persepolis', 'of Susa', 'of the Medes',
+      'Parthian', 'Pharnacid', 'son of Arsames', 'son of Cambyses', 'son of Cyrus',
+      'son of Darius', 'son of Hystaspes', 'son of Teispes', 'son of Vishtaspa', 'Teispid',
+    ],
+  },
+  {
+    tags: ['german', 'cold-war-berlin', 'cold-war'],
+    given: [
+      'Brigitte', 'Christoph', 'Dieter', 'Erika', 'Ernst',
+      'Friedrich', 'Gerda', 'Hans', 'Ilse', 'Ingeborg',
+      'Karl', 'Klaus', 'Lotte', 'Manfred', 'Marlene',
+      'Rolf', 'Sigrid', 'Ulrich', 'Ursula', 'Werner',
+    ],
+    surnames: [
+      'Bergmann', 'Brandt', 'Fischer', 'Hoffmann', 'Kaiser',
+      'Klein', 'Koch', 'Krause', 'Lehmann', 'Meyer',
+      'Müller', 'Neumann', 'Peters', 'Richter', 'Schäfer',
+      'Schneider', 'Schulz', 'Schwarz', 'Wagner', 'Weber',
+    ],
+  },
+  {
+    tags: ['arabic', 'crusades-era', 'levantine'],
+    given: [
+      'Aisha', 'Ali', 'Dawud', 'Fatima', 'Hamza',
+      'Hassan', 'Husayn', 'Ibrahim', 'Khalid', 'Khadija',
+      'Maryam', 'Muhammad', 'Nur', 'Omar', 'Saladin',
+      'Salih', 'Shajar', 'Umar', 'Usama', 'Zaynab',
+    ],
+    surnames: [
+      'al-Ayyubi', 'al-Din', 'al-Fadl', 'al-Ghazali', 'al-Khwarizmi',
+      'al-Mansur', 'al-Mawsili', 'al-Munqidh', 'al-Rashid', 'al-Zafir',
+      'ibn Abi Talib', 'ibn Khaldun', 'ibn Rushd', 'ibn Shaddad', 'ibn Sina',
+      'ibn Umar', 'ibn Zafir', 'of Damascus', 'of Jerusalem', 'of Mosul',
+    ],
+  },
+  {
+    tags: ['european', 'wwi-europe', 'wwii-europe'],
+    given: [
+      'Aleksander', 'Annelies', 'Casimir', 'Celeste', 'Dirk',
+      'Elzbieta', 'Emile', 'Franziska', 'Helena', 'Henryk',
+      'Jan', 'Klara', 'Lena', 'Marek', 'Mathilde',
+      'Miroslav', 'Olga', 'Pavel', 'Renata', 'Stefaan',
+    ],
+    surnames: [
+      'Bergström', 'Bonnet', 'Brouwer', 'Dabrowski', 'De Smet',
+      'Dubois', 'Horváth', 'Jansen', 'Kowalski', 'Leblanc',
+      'Mazur', 'Novak', 'Peeters', 'Poulain', 'Smits',
+      'Svensson', 'Szabo', 'Vermeersch', 'Wiśniewski', 'Wolff',
+    ],
+  },
 ]
 
 // ── Public API ────────────────────────────────────────────────────────────────

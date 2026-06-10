@@ -151,3 +151,45 @@ describe('sample — n and pool-size capping', () => {
     }
   })
 })
+
+describe('sample — Phase B era buckets', () => {
+  it('returns greek names for the "greek" tag and at least one is in the bucket', () => {
+    const bucket = NAME_POOL.find((b) => b.tags.includes('greek'))!
+    const bucketGiven = new Set(bucket.given)
+
+    const result = sample(['greek'], 5, { seed: 1 })
+    expect(result.length).toBeGreaterThan(0)
+    const hasGreekName = result.some(({ given }) => bucketGiven.has(given))
+    expect(hasGreekName).toBe(true)
+  })
+
+  it('returns names from each new era bucket when sampled by primary tag', () => {
+    const newTags = [
+      'egyptian', 'mongol', 'italian', 'american', 'turkish',
+      'chinese', 'spanish', 'nahua', 'caribbean', 'persian',
+      'german', 'arabic', 'european',
+    ]
+    for (const tag of newTags) {
+      const bucket = NAME_POOL.find((b) => b.tags.includes(tag))!
+      expect(bucket, `missing bucket for tag "${tag}"`).toBeDefined()
+      const givenSet = new Set(bucket.given)
+      const result = sample([tag], 4, { seed: 7 })
+      expect(result.length, `empty result for tag "${tag}"`).toBeGreaterThan(0)
+      const allFromBucket = result.every(({ given }) => givenSet.has(given))
+      expect(allFromBucket, `result for "${tag}" contains names outside its bucket`).toBe(true)
+    }
+  })
+
+  it('still falls back to generic for a completely unknown tag after Phase B', () => {
+    const genericBucket = NAME_POOL.find((b) => b.tags.includes('generic'))!
+    const givenSet = new Set(genericBucket.given)
+    const surnameSet = new Set(genericBucket.surnames)
+
+    const result = sample(['no-such-era-phase-b-zzzz'], 5, { seed: 5 })
+    expect(result.length).toBeGreaterThan(0)
+    for (const { given, surname } of result) {
+      expect(givenSet.has(given)).toBe(true)
+      expect(surnameSet.has(surname)).toBe(true)
+    }
+  })
+})
