@@ -29,7 +29,7 @@ const getWorldStmt = db.prepare<[number]>(
 
 const listWorldsStmt = db.prepare(`
   SELECT
-    w.id, w.name, w.premise, w.created_at, w.archived_at,
+    w.id, w.name, w.premise, w.created_at, w.archived_at, w.world_layer,
     COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
   FROM worlds w
   WHERE w.archived_at IS NULL
@@ -38,11 +38,22 @@ const listWorldsStmt = db.prepare(`
 
 const listArchivedWorldsStmt = db.prepare(`
   SELECT
-    w.id, w.name, w.premise, w.created_at, w.archived_at,
+    w.id, w.name, w.premise, w.created_at, w.archived_at, w.world_layer,
     COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
   FROM worlds w
   WHERE w.archived_at IS NOT NULL
   ORDER BY w.archived_at DESC, w.id DESC
+`)
+
+// Simulations launched from a given hub (Phase v0.2.1, Item 2). Newest-first;
+// fuels the hub's read-only "Past Simulations" archive.
+const simulationsForHubStmt = db.prepare<[number]>(`
+  SELECT
+    w.id, w.name, w.premise, w.created_at, w.archived_at, w.world_layer,
+    COALESCE((SELECT COUNT(*) FROM turns t WHERE t.world_id = w.id AND t.role = 'assistant'), 0) AS turn_count
+  FROM worlds w
+  WHERE w.parent_world_id = ? AND w.world_layer = 'subworld'
+  ORDER BY w.created_at DESC, w.id DESC
 `)
 
 const archiveWorldStmt = db.prepare<[number]>(
@@ -204,6 +215,10 @@ export function listWorlds(): WorldSummary[] {
 
 export function listArchivedWorlds(): WorldSummary[] {
   return listArchivedWorldsStmt.all() as WorldSummary[]
+}
+
+export function simulationsForHub(hubWorldId: number): WorldSummary[] {
+  return simulationsForHubStmt.all(hubWorldId) as WorldSummary[]
 }
 
 export function archiveWorld(id: number): void {

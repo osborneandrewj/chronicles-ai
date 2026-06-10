@@ -8,6 +8,7 @@ import {
   getWorld,
   listArchivedWorlds,
   listWorlds,
+  simulationsForHub,
   setSettingRegion,
   setShipClockMinutes,
   setWorldSceneCursor,
@@ -60,6 +61,10 @@ export class SqliteWorldRepository implements WorldRepository {
 
   listArchivedWorlds(): Promise<WorldSummary[]> {
     return Promise.resolve(listArchivedWorlds())
+  }
+
+  simulationsForHub(hubWorldId: number): Promise<WorldSummary[]> {
+    return Promise.resolve(simulationsForHub(hubWorldId))
   }
 
   archiveWorld(id: number): Promise<void> {

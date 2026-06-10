@@ -56,6 +56,29 @@ describe('SqliteWorldRepository.createBounded', () => {
   })
 })
 
+describe('SqliteWorldRepository.simulationsForHub', () => {
+  it('returns only the hub\'s subworlds, newest-first', async () => {
+    const hub = await createWorld(`hub-${Math.random()}`)
+    await worlds.setLayer(hub, 'hub', null)
+    const otherHub = await createWorld(`other-${Math.random()}`)
+    await worlds.setLayer(otherHub, 'hub', null)
+
+    const sim1 = await createWorld(`sim1-${Math.random()}`)
+    await worlds.setLayer(sim1, 'subworld', hub)
+    const sim2 = await createWorld(`sim2-${Math.random()}`)
+    await worlds.setLayer(sim2, 'subworld', hub)
+    const otherSim = await createWorld(`othersim-${Math.random()}`)
+    await worlds.setLayer(otherSim, 'subworld', otherHub)
+
+    const sims = await worlds.simulationsForHub(hub)
+    expect(sims.map((s) => s.id).sort()).toEqual([sim1, sim2].sort())
+    // Newest-first ordering (sim2 created after sim1).
+    expect(sims[0].id).toBe(sim2)
+    // world_layer is projected for the home-list visibility rule.
+    expect(sims.every((s) => s.world_layer === 'subworld')).toBe(true)
+  })
+})
+
 describe('SqlitePlaceRepository.add', () => {
   it('round-trips a room carrying deck + layout_hint', async () => {
     const worldId = await createWorld(`places-${Math.random()}`)

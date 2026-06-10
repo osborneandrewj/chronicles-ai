@@ -104,6 +104,9 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async listArchivedWorlds() {
       return []
     },
+    async simulationsForHub() {
+      return []
+    },
     async archiveWorld() {},
     async unarchiveWorld() {},
     async cursor() {

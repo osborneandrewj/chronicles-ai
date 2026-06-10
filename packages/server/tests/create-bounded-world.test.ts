@@ -113,6 +113,9 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     async listArchivedWorlds() {
       return []
     },
+    async simulationsForHub() {
+      return []
+    },
     async archiveWorld() {},
     async unarchiveWorld() {},
     async cursor() {

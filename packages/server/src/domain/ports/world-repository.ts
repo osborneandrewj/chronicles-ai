@@ -46,6 +46,8 @@ export interface WorldRepository {
   getWorld(id: number): Promise<World | null>
   listWorlds(): Promise<WorldSummary[]>
   listArchivedWorlds(): Promise<WorldSummary[]>
+  /** Simulations launched from a hub (parent_world_id = hubId), newest-first. */
+  simulationsForHub(hubWorldId: number): Promise<WorldSummary[]>
   archiveWorld(id: number): Promise<void>
   unarchiveWorld(id: number): Promise<void>
   /** (world_time, current_scene_id) cursor for a world. */

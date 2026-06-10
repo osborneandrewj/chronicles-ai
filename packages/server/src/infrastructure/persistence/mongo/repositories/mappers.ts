@@ -101,6 +101,7 @@ export function mapWorldSummary(
     created_at: toSqliteDatetime(d.createdAt),
     archived_at: d.archivedAt ? toSqliteDatetime(d.archivedAt) : null,
     turn_count: turnCount,
+    world_layer: d.worldLayer ?? 'standalone',
   }
 }
 

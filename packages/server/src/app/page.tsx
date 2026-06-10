@@ -5,6 +5,7 @@ import { ArchivedSection } from '@/components/ArchivedSection'
 import { WorldRowMenu } from '@/components/WorldRowMenu'
 import { getContainer } from '@/composition/container'
 import type { WorldSummary } from '@/domain/entities'
+import { isWorldListVisible } from '@/domain/services/world-visibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,15 +16,12 @@ export default async function Home() {
   // Components onto ports.)
   const { sessions, worlds: worldRepo } = getContainer()
   const allWorlds = await worldRepo.listWorlds()
-  // Concealment (C7/C10): a hub whose session hasn't awoken must not appear in
-  // the world list — the reveal stays hidden until the first awakening. The
-  // subworld the player is actually in still shows.
+  // One entry per playthrough (v0.2.1): the active simulation while the hub is
+  // concealed, the hub once the player has awoken (past simulations move into
+  // the hub's archive). Standalone worlds always show. The pure
+  // isWorldListVisible rule decides; we just resolve each world's session.
   const visibility = await Promise.all(
-    allWorlds.map(async (w) => {
-      const s = await sessions.byWorld(w.id)
-      const concealedHub = s !== null && s.hub_world_id === w.id && s.has_awoken === 0
-      return !concealedHub
-    }),
+    allWorlds.map(async (w) => isWorldListVisible(w, await sessions.byWorld(w.id))),
   )
   const worlds = allWorlds.filter((_, i) => visibility[i])
   const archived = await worldRepo.listArchivedWorlds()

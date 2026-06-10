@@ -38,6 +38,9 @@ type Props = {
   // initialHasOlder is true when more turns exist before this slice.
   initialOldestId: number | null;
   initialHasOlder: boolean;
+  // Read-only review (v0.2.1): render the transcript with no composer, no slash
+  // menu, and no completion refresh — used to revisit a completed simulation.
+  readOnly?: boolean;
 };
 
 
@@ -48,6 +51,7 @@ export function Chat({
   initialUsage,
   initialOldestId,
   initialHasOlder,
+  readOnly = false,
 }: Props) {
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
@@ -509,6 +513,7 @@ export function Chat({
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/90 to-transparent" />
       </div>
 
+      {!readOnly && (
       <form
         onSubmit={onSubmit}
         // Floating composer at every viewport. Absolutely positioned over the
@@ -586,6 +591,7 @@ export function Chat({
           Enter to send · Shift+Enter for newline
         </p>
       </form>
+      )}
     </div>
   );
 }

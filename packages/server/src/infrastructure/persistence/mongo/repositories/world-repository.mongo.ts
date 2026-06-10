@@ -195,6 +195,10 @@ export class MongoWorldRepository implements WorldRepository {
     return this.summaries({ archivedAt: { $ne: null } })
   }
 
+  simulationsForHub(hubWorldId: number): Promise<WorldSummary[]> {
+    return this.summaries({ parentWorldId: hubWorldId, worldLayer: 'subworld' })
+  }
+
   async archiveWorld(id: number): Promise<void> {
     await this.ctx.models.World.updateOne(
       { id },

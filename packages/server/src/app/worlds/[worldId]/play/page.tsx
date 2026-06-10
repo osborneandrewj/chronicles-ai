@@ -2,8 +2,10 @@ import { notFound, redirect } from 'next/navigation'
 
 import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
+import { HubSimulationsMenu, type HubSimulationEntry } from '@/components/HubSimulationsMenu'
 import { getContainer } from '@/composition/container'
 import { resolveActiveWorldId } from '@/domain/services/resolve-active-world'
+import { generateOpeningTurn } from '@/lib/opening-turn'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +24,8 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   if (!Number.isInteger(worldId) || worldId <= 0) notFound()
 
   const container = getContainer()
-  const { characters, decks, places, scenes, sessions, worlds, turns: turnRepo } = container
+  const { characters, decks, dossiers, occupancy, places, scenes, sessions, worlds, turns: turnRepo } =
+    container
   const world = await worlds.getWorld(worldId)
   if (!world) notFound()
 
@@ -41,8 +44,27 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       const cast = await characters.forWorld(worldId)
       const player = cast.find((c) => c.is_player === 1)
       if (player?.status === 'dead') {
-        await returnToHub({ session }, { worlds, places, scenes, characters, sessions, decks })
-        redirect(`/worlds/${session.hub_world_id}/play`)
+        const result = await returnToHub(
+          { session },
+          { worlds, places, scenes, characters, sessions, decks },
+        )
+        const hubWorldId = result?.hubWorldId ?? session.hub_world_id
+        // Item 4: the narrator takes the first hub turn — the awakening lands
+        // with prose, not an empty scene. Runs exactly once (this branch is
+        // gated on has_awoken===0, which returnToHub then flips). Best-effort.
+        const hub = await worlds.getWorld(hubWorldId)
+        const awakeningPremise = [
+          hub?.premise ?? '',
+          "The protagonist has just died inside a simulation and surfaces into the waking world — the facility's simulation room, the resident crew close by. This is the reveal: the codename, the room, and the people suddenly make sense. Open on the disorientation of coming to.",
+        ]
+          .filter(Boolean)
+          .join(' ')
+        await generateOpeningTurn(
+          { characters, dossiers, occupancy, places, scenes, turns: turnRepo, worlds },
+          hubWorldId,
+          awakeningPremise,
+        ).catch((err) => console.error('[hub awakening opening]', err))
+        redirect(`/worlds/${hubWorldId}/play`)
       }
     }
     const activeWorldId = resolveActiveWorldId(worldId, session)
@@ -66,7 +88,17 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
 
   const hasOlder = turns.length > 0 ? await turnRepo.hasTurnBefore(worldId, turns[0].id) : false
 
-  return (
+  // In the hub, surface the read-only archive of past simulations (v0.2.1).
+  const pastSimulations: HubSimulationEntry[] =
+    world.world_layer === 'hub'
+      ? (await worlds.simulationsForHub(worldId)).map((s) => ({
+          id: s.id,
+          name: s.name,
+          turnCount: s.turn_count,
+        }))
+      : []
+
+  const chat = (
     <Chat
       worldId={worldId}
       worldName={world.name}
@@ -75,5 +107,13 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       initialOldestId={turns[0]?.id ?? null}
       initialHasOlder={hasOlder}
     />
+  )
+
+  if (world.world_layer !== 'hub') return chat
+  return (
+    <div className="relative">
+      {chat}
+      <HubSimulationsMenu simulations={pastSimulations} />
+    </div>
   )
 }

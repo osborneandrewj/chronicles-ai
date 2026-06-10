@@ -91,6 +91,7 @@ function fakeWorld(exists: boolean): WorldRepository {
     getWorld: async () => (exists ? ({ id: 1, premise: 'A test premise.' } as never) : null),
     listWorlds: async () => [],
     listArchivedWorlds: async () => [],
+    simulationsForHub: async () => [],
     archiveWorld: async () => {},
     unarchiveWorld: async () => {},
     cursor: async () => ({ world_time: null, current_scene_id: null }),

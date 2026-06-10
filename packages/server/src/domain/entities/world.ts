@@ -34,6 +34,9 @@ export type WorldSummary = {
   created_at: string
   archived_at: string | null
   turn_count: number
+  // Simulation-hub layer (v0.2.1) — lets the home list decide what to show per
+  // playthrough (the active simulation while concealed, the hub once revealed).
+  world_layer: WorldLayer
 }
 
 // Initial-state shape supplied by the new-world form. After v0.5 this still
