@@ -4,7 +4,6 @@ import type { PlaceConnection } from '@/domain/entities'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
-import { SCOUT_TEMPLATE_ID } from '@/infrastructure/world-gen/scout-template'
 import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 
 // Unit tests for the starship P1 world-gen seam: the authored WorldArchetypeProvider
@@ -38,9 +37,9 @@ describe('AuthoredWorldArchetypeProvider', () => {
   const provider = new AuthoredWorldArchetypeProvider()
 
   it('returns the scout template for its id', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     expect(template).not.toBeNull()
-    expect(template?.id).toBe(SCOUT_TEMPLATE_ID)
+    expect(template?.id).toBe('scout-vessel')
     expect(template?.rooms.length).toBeGreaterThanOrEqual(6)
   })
 
@@ -49,7 +48,7 @@ describe('AuthoredWorldArchetypeProvider', () => {
   })
 
   it('returns a single connected component (no orphan rooms)', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const { connections, placeIds } = connectionsFromTemplate(
       template!.rooms,
       template!.edges,
@@ -60,7 +59,7 @@ describe('AuthoredWorldArchetypeProvider', () => {
   })
 
   it('anchors every crew slot to a real room key', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const roomKeys = new Set(template!.rooms.map((r) => r.key))
     expect(template!.crew.length).toBeGreaterThanOrEqual(3)
     expect(template!.crew.length).toBeLessThanOrEqual(5)
@@ -75,7 +74,7 @@ describe('StubEnsembleGenerator', () => {
   const stub = new StubEnsembleGenerator()
 
   it('produces 3–5 crew, one per template slot', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const result = await stub.generate({ template: template!, premise: 'A deep-space scouting run.' })
     expect(result.crew.length).toBe(template!.crew.length)
     expect(result.crew.length).toBeGreaterThanOrEqual(3)
@@ -83,7 +82,7 @@ describe('StubEnsembleGenerator', () => {
   })
 
   it('references only real room keys for home rooms and daily loops', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const result = await stub.generate({ template: template!, premise: 'A deep-space scouting run.' })
     const roomKeys = new Set(template!.rooms.map((r) => r.key))
     const roomNames = new Set(template!.rooms.map((r) => r.name))
@@ -98,7 +97,7 @@ describe('StubEnsembleGenerator', () => {
   })
 
   it('emits relationships within −1..1 valence between real crew roles', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const result = await stub.generate({ template: template!, premise: 'A deep-space scouting run.' })
     const roles = new Set(result.crew.map((c) => c.role))
     for (const rel of result.relationships) {
@@ -110,7 +109,7 @@ describe('StubEnsembleGenerator', () => {
   })
 
   it('is deterministic for the same template', async () => {
-    const template = await provider.getTemplate(SCOUT_TEMPLATE_ID)
+    const template = await provider.getTemplate('scout-vessel')
     const a = await stub.generate({ template: template!, premise: 'Run A.' })
     const b = await stub.generate({ template: template!, premise: 'Run A.' })
     expect(a.crew.map((c) => c.name)).toEqual(b.crew.map((c) => c.name))

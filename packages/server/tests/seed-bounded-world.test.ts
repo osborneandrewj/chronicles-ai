@@ -80,6 +80,9 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async getTemplate(id) {
       return template && template.id === id ? template : null
     },
+    async all() {
+      return template ? [template] : []
+    },
     defaultTemplateId() {
       return template?.id ?? ''
     },

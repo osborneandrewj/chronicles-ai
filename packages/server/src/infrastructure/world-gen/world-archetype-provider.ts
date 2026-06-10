@@ -1,24 +1,27 @@
 import 'server-only'
 
-import type { WorldArchetypeProvider, WorldArchetype } from '@/domain/ports/world-archetype-provider'
-import { SCOUT_TEMPLATE, SCOUT_TEMPLATE_ID } from '@/infrastructure/world-gen/scout-template'
+import type { WorldArchetype, WorldArchetypeProvider } from '@/domain/ports/world-archetype-provider'
+import { WORLD_ARCHETYPES, listWorldArchetypes } from '@/infrastructure/world-gen/archetypes'
 
-// WorldArchetypeProvider adapter (starship P1). Serves the authored deck-plan
-// templates the SeedBoundedWorld use case dresses into bounded worlds. For P1
-// there is exactly one template — the scout vessel — looked up by id; unknown
-// ids return null so the use case can surface a "no such ship" error. Adding a
-// second ship is a one-line registry entry (P5).
+// WorldArchetypeProvider adapter (Phase B, B2). Serves the data-driven archetype
+// registry (a scout vessel, a research facility, a monastery, a bunker, …) the
+// SeedBoundedWorld use case dresses into bounded worlds. Adding an archetype is a
+// registry entry — nothing here privileges the ship. The concealed-onboarding
+// path picks a hub via the pure pickHubArchetype service; defaultTemplateId is
+// kept as a stable fallback for callers with no archetype in mind.
 
-const TEMPLATES: Record<string, WorldArchetype> = {
-  [SCOUT_TEMPLATE_ID]: SCOUT_TEMPLATE,
-}
+const DEFAULT_TEMPLATE_ID = 'scout-vessel'
 
 export class AuthoredWorldArchetypeProvider implements WorldArchetypeProvider {
   async getTemplate(templateId: string): Promise<WorldArchetype | null> {
-    return TEMPLATES[templateId] ?? null
+    return WORLD_ARCHETYPES.get(templateId) ?? null
+  }
+
+  async all(): Promise<WorldArchetype[]> {
+    return listWorldArchetypes()
   }
 
   defaultTemplateId(): string {
-    return SCOUT_TEMPLATE_ID
+    return DEFAULT_TEMPLATE_ID
   }
 }

@@ -1,3 +1,5 @@
+import 'server-only'
+
 // All 24 historical-adventure genre presets.
 // Each hiddenPremise is a vivid, in-medias-res setup for narrator/archivist seeding.
 // These are NEVER surfaced to the player.

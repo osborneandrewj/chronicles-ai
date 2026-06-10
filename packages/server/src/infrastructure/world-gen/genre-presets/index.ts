@@ -1,3 +1,5 @@
+import 'server-only'
+
 // Genre-preset registry: public API.
 // listGenrePresets() returns ONLY id + label — hiddenPremise is never sent to the player.
 // getGenrePreset() returns the full preset for internal use (narrator/archivist seeding).

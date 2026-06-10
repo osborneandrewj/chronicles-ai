@@ -36,18 +36,38 @@ export type EnsembleSlot = {
 }
 
 // The authored template value object returned by getTemplate().
+//
+// Phase B (B2): the registry holds MULTIPLE archetypes (a deep-space scout, a
+// research facility, a monastery, a bunker, …) — the ship is row 1, not a
+// privileged path. The hub fields below are optional so existing fixtures stay
+// valid; the seeder falls back (entry room → first room, labels → generic).
 export type WorldArchetype = {
   id: string
   name: string
   rooms: LocationNode[]
   edges: LocationConnection[]
   crew: EnsembleSlot[]
+  // True for a concealed home-base archetype eligible for pickHubArchetype().
+  isHub?: boolean
+  // The room the player surfaces into on awakening (the tank / Animus chair /
+  // loom / cradle). Must reference a real room key. Hub archetypes set this.
+  simulationRoomKey?: string
+  // Where a freshly-seeded player starts (room key); falls back to the first room.
+  entryLocationKey?: string
+  // Title for the opening scene, e.g. 'Arrival'; falls back to `At <room>`.
+  initialSceneTitle?: string
+  // Player-visible label for the protagonist before they are named, e.g.
+  // 'Newcomer'; falls back to the generic 'You'.
+  defaultCharacterLabel?: string
+  // A short diegetic intro line seeded as the protagonist's identity/notes.
+  playerIntroTemplate?: string
 }
 
 export interface WorldArchetypeProvider {
   getTemplate(templateId: string): Promise<WorldArchetype | null>
+  // All registered archetypes (for hub selection + listing).
+  all(): Promise<WorldArchetype[]>
   // The id of the template a "create a bounded world" entry point should seed
-  // when the caller has no specific ship in mind. Lets a driving adapter launch
-  // the default starship without importing the infrastructure template constant.
+  // when the caller has no specific archetype in mind.
   defaultTemplateId(): string
 }

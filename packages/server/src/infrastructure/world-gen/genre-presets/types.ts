@@ -1,3 +1,5 @@
+import 'server-only'
+
 // Genre preset type for historical-adventure world creation.
 // The hiddenPremise is a rich internal seed NEVER shown to the player —
 // only id + label are surfaced to the picker UI.

@@ -2,30 +2,21 @@ import 'server-only'
 
 import type { WorldArchetype } from '@/domain/ports/world-archetype-provider'
 
-// The one authored deck plan for P1: a small scout vessel. Six rooms across two
-// decks, a single connected corridor/ladder graph (deck-graph.isConnected passes
-// on it), and four crew-role slots, each anchored to a real room key. Pure domain
-// value — the WorldArchetypeProvider adapter returns it and the SeedBoundedWorld use
-// case turns it into places + place_connections + crew. The LLM dressing step
-// only fills ship/room/crew prose; the topology here is fixed and map-able.
-//
-// Topology (undirected component over the 6 room keys):
-//   bridge ── corridor ── mess ── corridor ── crew_quarters
-//                │                    │
-//             corridor              corridor
-//                │                    │
-//             sim_deck            med_bay
-//                │
-//             ladder
-//                │
-//             engine_room
-// Every room is reachable from the bridge.
+// Deep-space scout vessel — one hub archetype among many (Phase B, B2). Six
+// rooms across two decks, a single connected corridor/ladder graph, four crew
+// slots. The sim deck doubles as the simulation room the player surfaces into on
+// awakening. Genericised from the old single SCOUT_TEMPLATE — the ship is now
+// row 1 of a data-driven registry, not a privileged path.
 
-export const SCOUT_TEMPLATE_ID = 'scout-vessel'
-
-export const SCOUT_TEMPLATE: WorldArchetype = {
-  id: SCOUT_TEMPLATE_ID,
-  name: 'Scout Vessel',
+export const SCOUT_VESSEL: WorldArchetype = {
+  id: 'scout-vessel',
+  name: 'Deep-Space Scout Vessel',
+  isHub: true,
+  simulationRoomKey: 'sim_deck',
+  entryLocationKey: 'bridge',
+  initialSceneTitle: 'Arrival',
+  defaultCharacterLabel: 'Newcomer',
+  playerIntroTemplate: 'the newest member of the crew, just come aboard',
   rooms: [
     {
       key: 'bridge',
@@ -55,7 +46,7 @@ export const SCOUT_TEMPLATE: WorldArchetype = {
       key: 'sim_deck',
       name: 'Sim Deck',
       description:
-        'A reconfigurable training and planning bay with a holo-table and restraint rigging, used for mission rehearsal, sparring, and off-watch decompression.',
+        'A reconfigurable immersion bay with a reclining rig and a ring of projectors — used for mission rehearsal and full-sensory simulation runs.',
       deck: 'A',
       layoutHint: JSON.stringify({ zone: 'mid', x: -1, y: 1 }),
     },
@@ -88,19 +79,19 @@ export const SCOUT_TEMPLATE: WorldArchetype = {
       role: 'captain',
       homeRoomKey: 'bridge',
       description:
-        'Commands the vessel; sets the mission tempo and carries the weight of every call. Anchored to the bridge.',
+        'Commands the vessel; sets the mission tempo and carries the weight of every call. Warm with the new arrival, anchored to the bridge.',
     },
     {
       role: 'pilot',
       homeRoomKey: 'sim_deck',
       description:
-        'Flies the ship and runs approach rehearsals; restless off-watch, drawn to the sim deck.',
+        'Flies the ship and runs approach rehearsals; restless off-watch, drawn to the sim deck, quick to befriend a newcomer.',
     },
     {
       role: 'engineer',
       homeRoomKey: 'engine_room',
       description:
-        'Keeps the drive and life support alive; happiest elbow-deep in the engine room, wary of the bridge.',
+        'Keeps the drive and life support alive; happiest elbow-deep in the engine room, gruff but loyal.',
     },
     {
       role: 'medic',

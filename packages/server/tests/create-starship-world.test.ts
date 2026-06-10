@@ -83,6 +83,9 @@ function makeDeps(): { deps: CreateStarshipWorldDeps; store: Store } {
     async getTemplate(id) {
       return id === TEMPLATE.id ? TEMPLATE : null
     },
+    async all() {
+      return [TEMPLATE]
+    },
     defaultTemplateId() {
       return TEMPLATE.id
     },
