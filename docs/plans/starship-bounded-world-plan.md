@@ -374,6 +374,28 @@ every turn. Build a per-player-turn "living tick" reusing the pre-play sim machi
   player hears about them (needs a small timeline-read port method).
 - Cost: ~4 NPCs, deterministic movement free, beats gated/rare. Works on both stores (ports).
 
+## P6: the ship-clock — PROSE-DRIVEN narrative time (binding)
+Decision (user): build the ship-clock so time flows from the STORY, not a fixed simulation
+tick. A small step examines the narration and estimates elapsed in-world time; the clock
+advances by that, so the band shifts as the story moves and the crew circulate. Lean
+narrative — render time-of-day, not a minute readout. Kept SEPARATE from the archivist.
+
+- **Schema:** migration v29 adds `worlds.ship_clock_minutes` (INTEGER, nullable; set for
+  bounded worlds). Backfill on first use from the current `world_time` when null.
+- **Pure service** `domain/services/ship-clock.ts`: `minutesToShipTime(minutes) → { worldTime,
+  band }` — minutes since Day-1 00:00 → a NARRATIVE render ("Day 3 — early morning") + the
+  WorldTimeBand (for routines). `shipTimeToMinutes(worldTime)` for init/backfill.
+- **Port** `TimePassageEstimator` (domain/ports) — `estimate({ narration, priorWorldTime }) →
+  elapsedMinutes`. Haiku adapter (prompt `prompts/time-passage.md`) reading the just-written
+  prose: brief exchange ~2-5, activity/meal ~30-90, "later"/a watch a few hours, sleep/skip to
+  the stated time. Lean toward letting time flow. Plus a deterministic Stub for tests/scripts.
+- **Integration:** `narrate-turn`, bounded worlds, POST-stream and BEFORE the living tick:
+  estimate elapsed → `ship_clock_minutes += elapsed` → `setWorldTime(render)`. Fail-open. The
+  living tick then sees the advanced band. CreateStarshipWorld inits `ship_clock_minutes` from
+  the boarding time (the pre-play sim's final clock).
+- Reuses everything downstream (living tick uses the band). Open worlds untouched (they keep the
+  archivist's `current_time`). Build on both stores via ports; SQLite byte-green.
+
 ## DIAGNOSIS (not yet built): why the ship still doesn't feel alive
 Observed after the living tick worked (beats fire, crew can move): the ship feels static —
 NPCs only react when engaged, and the world clock is frozen (e.g. "Day 3 — night, ~0323"
