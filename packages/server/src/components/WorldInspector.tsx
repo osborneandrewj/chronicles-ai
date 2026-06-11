@@ -109,7 +109,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
         </div>
         <div className="border-b border-neutral-900">
           <div className="flex min-h-14 items-center justify-between px-4 py-2">
-            <h2 className="text-[11px] font-medium uppercase tracking-[0.18em] text-neutral-400">
+            <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-400">
               World inspector
             </h2>
             <button
@@ -129,7 +129,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
             remaining space. */}
         <div
           className={
-            "h-[calc(88svh-6rem)] text-[13px] text-neutral-300 sm:h-[calc(100%-6rem)] " +
+            "h-[calc(88svh-6rem)] text-sm leading-relaxed text-neutral-300 sm:h-[calc(100%-6rem)] " +
             (tab === "archivist"
               ? "overflow-hidden"
               : "overflow-y-auto px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:pb-3")
@@ -165,7 +165,7 @@ function TabStrip({ active, onChange }: { active: InspectorTab; onChange: (t: In
             onClick={() => onChange(t.id)}
             title={t.description}
             className={
-              "min-h-11 flex-1 rounded-full px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
+              "min-h-11 flex-1 rounded-full px-2 py-2 text-xs font-semibold uppercase tracking-[0.1em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
               (isActive
                 ? "bg-amber-500/15 text-amber-300"
                 : "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300")
@@ -414,7 +414,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
               aria-selected={isActive}
               onClick={() => setSub(s)}
               className={
-                "min-h-11 flex-1 rounded-full border px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
+                "min-h-11 flex-1 rounded-full border px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
                 (isActive
                   ? "border-neutral-700 bg-neutral-900 text-neutral-100"
                   : "border-neutral-900 bg-neutral-950 text-neutral-500 hover:border-neutral-800 hover:text-neutral-300")
@@ -490,8 +490,8 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
                 <TimestampText label="Updated" value={p.updated_at} />
                 {p.description && <p className="mt-0.5 text-neutral-400">{p.description}</p>}
                 {p.player_notes && (
-                  <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-[12px]">
-                    <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-400/80">
+                  <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-sm">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-400/80">
                       Player canon
                     </div>
                     <ul className="mt-0.5 list-disc pl-4 text-neutral-300">
@@ -618,7 +618,7 @@ function CharacterDetail({
     <>
       <TimestampText label="Updated" value={c.updated_at} />
       {currentPlace && (
-        <div className="mt-0.5 text-[11px] text-neutral-500">
+        <div className="mt-0.5 text-xs text-neutral-500">
           <span className="text-neutral-600">at</span> {currentPlace}
         </div>
       )}
@@ -627,8 +627,8 @@ function CharacterDetail({
       )}
       {c.description && <p className="mt-0.5 text-neutral-400">{c.description}</p>}
       {c.player_notes && (
-        <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-[12px]">
-          <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-400/80">
+        <div className="mt-1 rounded border border-emerald-900/50 bg-emerald-900/10 px-2 py-1 text-sm">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-400/80">
             Player canon
           </div>
           <ul className="mt-0.5 list-disc pl-4 text-neutral-300">
@@ -642,7 +642,7 @@ function CharacterDetail({
         </div>
       )}
       {hasAgencyFields && (
-        <dl className="mt-1.5 space-y-1.5 text-[12px]">
+        <dl className="mt-1.5 space-y-1.5 text-[13px] leading-relaxed">
           {hasMindFields && (
             <CharacterStateGroup label="Mind">
               {c.long_term_agenda && (
@@ -735,7 +735,7 @@ function PlayerProfileGroups({
   turnNumbers: Record<number, number>;
 }) {
   return (
-    <dl className="mt-1.5 space-y-1.5 text-[12px]">
+    <dl className="mt-1.5 space-y-1.5 text-[13px] leading-relaxed">
       {groups.map((group) => (
         <CharacterStateGroup key={group.key} label={group.label}>
           <ul className="space-y-0.5">
@@ -767,7 +767,7 @@ function NpcAgencySummary({
   if (lastTick) parts.push(`agent tick ${lastTick}`);
 
   return (
-    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
+    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] uppercase tracking-[0.1em] text-neutral-600">
       {parts.map((part) => (
         <span key={part}>{part}</span>
       ))}
@@ -786,7 +786,7 @@ function DossierGroup({ label, items }: { label: string; items: DossierEntry[] }
   const { openId, toggle } = useAccordion();
   return (
     <div>
-      <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-neutral-600">{label}</div>
+      <div className="mb-1 text-[11px] uppercase tracking-[0.1em] text-neutral-600">{label}</div>
       <ul className="space-y-1">
         {items.map((it) => (
           <Disclosure
@@ -845,7 +845,7 @@ function BadgeRow({ badges }: { badges: InspectorBadge[] }) {
         <span
           key={`${b.tone}-${b.label}`}
           className={
-            "rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] " +
+            "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] " +
             BADGE_TONE_CLASS[b.tone]
           }
         >
@@ -898,7 +898,7 @@ function Disclosure({
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500">
+    <h3 className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-neutral-500">
       {children}
     </h3>
   );
@@ -921,7 +921,7 @@ function CharacterStateGroup({
 }) {
   return (
     <div className="border-l border-neutral-800/80 pl-2">
-      <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-neutral-600">
+      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-600">
         {label}
       </div>
       <div className="space-y-0.5">{children}</div>
@@ -1001,7 +1001,7 @@ function StateEntryList({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mb-1 inline-flex min-h-7 items-center rounded-full border border-neutral-800 bg-neutral-950/60 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-500 transition hover:border-neutral-700 hover:text-neutral-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+          className="mb-1 inline-flex min-h-8 items-center rounded-full border border-neutral-800 bg-neutral-950/60 px-2.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-neutral-500 transition hover:border-neutral-700 hover:text-neutral-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
         >
           {expanded ? "Show recent only" : `Show ${hiddenCount} older ${collapsedLabel}`}
         </button>
@@ -1033,7 +1033,7 @@ function StateEntryLine({
     <span>
       {entry.text}
       {turnNo && (
-        <span className="ml-1.5 whitespace-nowrap text-[10px] text-neutral-500">
+        <span className="ml-1.5 whitespace-nowrap text-[11px] text-neutral-500">
           #{turnNo}
         </span>
       )}
@@ -1041,7 +1041,7 @@ function StateEntryLine({
         <time
           dateTime={dateTimeAttr(timestamp)}
           title={formatFullTimestamp(timestamp)}
-          className="ml-1.5 whitespace-nowrap text-[10px] text-neutral-600"
+          className="ml-1.5 whitespace-nowrap text-[11px] text-neutral-600"
         >
           {formatTimestamp(timestamp)}
         </time>
@@ -1056,7 +1056,7 @@ function TimestampText({ label, value }: { label: string; value: string | null |
     <time
       dateTime={dateTimeAttr(value)}
       title={formatFullTimestamp(value)}
-      className="mt-0.5 block text-[10px] uppercase tracking-[0.12em] text-neutral-600"
+      className="mt-0.5 block text-[11px] uppercase tracking-[0.1em] text-neutral-600"
     >
       {label} {formatTimestamp(value)}
     </time>

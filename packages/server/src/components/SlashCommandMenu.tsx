@@ -19,7 +19,7 @@ export function SlashCommandMenu({ commands, activeIndex, onSelect, onHover }: P
   }, [activeIndex]);
 
   return (
-    <div className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-2xl border border-neutral-700/80 bg-[#1b1c1f] shadow-2xl shadow-black/50">
+    <div className="absolute right-0 bottom-full left-0 mb-2 max-w-full overflow-hidden rounded-2xl border border-neutral-700/80 bg-[#1b1c1f] shadow-2xl shadow-black/50">
       <ul className="max-h-72 overflow-y-auto py-2" role="listbox">
         {commands.map((cmd, i) => {
           const active = i === activeIndex;
@@ -34,12 +34,12 @@ export function SlashCommandMenu({ commands, activeIndex, onSelect, onHover }: P
                 e.preventDefault();
                 onSelect(cmd);
               }}
-              className={`flex min-h-12 cursor-pointer items-baseline gap-3 px-4 py-3 text-sm ${
+              className={`flex min-h-12 cursor-pointer flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-baseline sm:gap-3 ${
                 active ? "bg-neutral-800/80" : ""
               }`}
             >
               <span className="font-mono text-amber-500/90">{cmd.name}</span>
-              <span className="text-xs text-neutral-500">{cmd.description}</span>
+              <span className="text-sm leading-snug text-neutral-500 sm:text-xs">{cmd.description}</span>
             </li>
           );
         })}

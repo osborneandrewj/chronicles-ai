@@ -21,7 +21,7 @@ export function CreateModeTabs({ adventureOptions = null }: CreateModeTabsProps)
 
   return (
     <div className="space-y-6">
-      <div className="inline-flex rounded-xl border border-neutral-800 bg-neutral-900/60 p-1">
+      <div className="inline-flex max-w-full rounded-xl border border-neutral-800 bg-neutral-900/60 p-1">
         <TabButton active={mode === 'basic'} onClick={() => setMode('basic')}>
           Quick start
         </TabButton>
@@ -66,7 +66,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-lg px-4 py-1.5 text-sm font-medium transition focus:outline-none ${
+      className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none ${
         active ? 'bg-amber-500/90 text-neutral-950' : 'text-neutral-400 hover:text-neutral-100'
       }`}
     >

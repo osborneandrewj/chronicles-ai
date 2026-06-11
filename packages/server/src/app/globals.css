@@ -9,6 +9,7 @@
   html,
   body {
     height: 100%;
+    overflow-x: hidden;
   }
 
   /* Subtle scrollbar styling for the dark theme */

@@ -27,8 +27,8 @@ export default async function Home() {
   const archived = await worldRepo.listArchivedWorlds()
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col bg-black px-4 py-5 sm:px-8 sm:py-8">
-      <header className="mb-7 flex min-h-14 items-center justify-between gap-3">
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col overflow-x-hidden bg-black px-4 py-5 sm:px-8 sm:py-8">
+      <header className="mb-7 flex min-h-14 min-w-0 items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <h1 className="truncate text-2xl font-semibold tracking-tight text-neutral-100">
@@ -94,7 +94,7 @@ function WorldRow({
   const muted = menuVariant === 'unarchive'
   return (
     <div
-      className={`group relative flex min-h-28 items-center gap-3 rounded-[1.75rem] border border-neutral-800 bg-[#1b1c1f] px-4 py-4 shadow-lg shadow-black/20 transition hover:border-neutral-700 hover:bg-[#1f2024] sm:px-5 ${
+      className={`group relative flex min-h-28 max-w-full items-center gap-3 overflow-hidden rounded-[1.75rem] border border-neutral-800 bg-[#1b1c1f] px-4 py-4 shadow-lg shadow-black/20 transition hover:border-neutral-700 hover:bg-[#1f2024] sm:px-5 ${
         muted ? 'opacity-60' : ''
       }`}
     >
@@ -111,10 +111,10 @@ function WorldRow({
               {world.turn_count}
             </span>
           </div>
-          <p className="mt-2 line-clamp-2 font-serif text-base leading-relaxed text-neutral-300">
+          <p className="mt-2 line-clamp-2 break-words font-serif text-base leading-relaxed text-neutral-300">
             {world.premise}
           </p>
-          <div className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
+          <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-neutral-500">
             <ClockIcon />
             <span>{formatCreatedAt(world.created_at)}</span>
             <span aria-hidden>·</span>

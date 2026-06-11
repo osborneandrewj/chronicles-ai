@@ -21,11 +21,79 @@ import type {
   AgentCostDTO as AgentCost,
   MessageMetadata,
   OlderResponseDTO as OlderResponse,
-  OlderTurnDTO as OlderTurn,
   TurnCostDTO as TurnCost,
 } from "@chronicles/contracts";
 
 const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
+const READER_SIZE_STORAGE_KEY = "chronicles.reader.size";
+const READER_THEME_STORAGE_KEY = "chronicles.reader.theme";
+
+type ReaderSize = "default" | "large" | "xlarge";
+type ReaderTheme = "dark" | "light";
+
+const READER_SIZE_OPTIONS: {
+  id: ReaderSize;
+  label: string;
+  fontSize: string;
+  lineHeight: string;
+}[] = [
+  { id: "default", label: "Default", fontSize: "17px", lineHeight: "1.8" },
+  { id: "large", label: "Large", fontSize: "19px", lineHeight: "1.85" },
+  { id: "xlarge", label: "Extra large", fontSize: "24px", lineHeight: "1.95" },
+];
+
+const READER_THEME_OPTIONS: {
+  id: ReaderTheme;
+  label: string;
+  vars: Record<string, string>;
+}[] = [
+  {
+    id: "dark",
+    label: "Dark",
+    vars: {
+      "--reader-bg": "#0f0f0d",
+      "--reader-bg-muted": "#151513",
+      "--reader-panel": "#20201d",
+      "--reader-panel-strong": "#292824",
+      "--reader-border": "#34322c",
+      "--reader-text": "#eee8dc",
+      "--reader-muted": "#a59c8c",
+      "--reader-faint": "#746d62",
+      "--reader-accent": "#d79a28",
+      "--reader-accent-soft": "rgba(215, 154, 40, 0.18)",
+      "--reader-button-text": "#f2eadc",
+      "--reader-button-hover": "#2d2b26",
+      "--reader-field": "#1f1f1c",
+      "--reader-field-focus": "#25241f",
+      "--reader-shadow": "rgba(0, 0, 0, 0.45)",
+      "--reader-top-fade": "linear-gradient(to bottom, #0f0f0d, rgba(15, 15, 13, 0))",
+      "--reader-bottom-fade": "linear-gradient(to top, #0f0f0d, rgba(15, 15, 13, 0.9), rgba(15, 15, 13, 0))",
+    },
+  },
+  {
+    id: "light",
+    label: "Light",
+    vars: {
+      "--reader-bg": "#f4efe6",
+      "--reader-bg-muted": "#ebe3d6",
+      "--reader-panel": "#fffaf1",
+      "--reader-panel-strong": "#f0e7d9",
+      "--reader-border": "#d5c8b5",
+      "--reader-text": "#252018",
+      "--reader-muted": "#6e6253",
+      "--reader-faint": "#928674",
+      "--reader-accent": "#9b6412",
+      "--reader-accent-soft": "rgba(155, 100, 18, 0.14)",
+      "--reader-button-text": "#2a2116",
+      "--reader-button-hover": "#eadfcc",
+      "--reader-field": "#fffaf1",
+      "--reader-field-focus": "#fff7e9",
+      "--reader-shadow": "rgba(70, 45, 15, 0.16)",
+      "--reader-top-fade": "linear-gradient(to bottom, #f4efe6, rgba(244, 239, 230, 0))",
+      "--reader-bottom-fade": "linear-gradient(to top, #f4efe6, rgba(244, 239, 230, 0.9), rgba(244, 239, 230, 0))",
+    },
+  },
+];
 
 export type ChroniclesMessage = UIMessage<MessageMetadata>;
 
@@ -91,9 +159,23 @@ export function Chat({
 
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshKey, setInspectorRefreshKey] = useState(0);
+  const [readerSize, setReaderSize] = useState<ReaderSize>("default");
+  const [readerTheme, setReaderTheme] = useState<ReaderTheme>("dark");
   useEffect(() => {
     if (typeof window === "undefined") return;
     setInspectorOpen(window.localStorage.getItem(INSPECTOR_STORAGE_KEY) === "1");
+    const storedReaderSize = window.localStorage.getItem(READER_SIZE_STORAGE_KEY);
+    if (
+      storedReaderSize === "default" ||
+      storedReaderSize === "large" ||
+      storedReaderSize === "xlarge"
+    ) {
+      setReaderSize(storedReaderSize);
+    }
+    const storedReaderTheme = window.localStorage.getItem(READER_THEME_STORAGE_KEY);
+    if (storedReaderTheme === "dark" || storedReaderTheme === "light") {
+      setReaderTheme(storedReaderTheme);
+    }
   }, []);
   const toggleInspector = useCallback(() => {
     setInspectorOpen((prev) => {
@@ -103,6 +185,18 @@ export function Chat({
       }
       return next;
     });
+  }, []);
+  const updateReaderSize = useCallback((next: ReaderSize) => {
+    setReaderSize(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(READER_SIZE_STORAGE_KEY, next);
+    }
+  }, []);
+  const updateReaderTheme = useCallback((next: ReaderTheme) => {
+    setReaderTheme(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(READER_THEME_STORAGE_KEY, next);
+    }
   }, []);
 
   const router = useRouter();
@@ -208,6 +302,15 @@ export function Chat({
 
   const costByMessageId = useMemo(() => buildCostMap(messages, usage), [messages, usage]);
   const sessionTotal = usage.reduce((s, t) => s + t.total, 0);
+  const readerOption =
+    READER_SIZE_OPTIONS.find((option) => option.id === readerSize) ?? READER_SIZE_OPTIONS[0];
+  const readerThemeOption =
+    READER_THEME_OPTIONS.find((option) => option.id === readerTheme) ?? READER_THEME_OPTIONS[0];
+  const readerStyle = {
+    "--reader-font-size": readerOption.fontSize,
+    "--reader-line-height": readerOption.lineHeight,
+    ...readerThemeOption.vars,
+  } as React.CSSProperties;
   const latestMessage = messages[messages.length - 1];
   const streamingAssistantId =
     streaming && latestMessage?.role === "assistant" ? latestMessage.id : undefined;
@@ -367,23 +470,26 @@ export function Chat({
   }
 
   return (
-    <div className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden bg-black">
+    <div
+      className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden overflow-x-hidden bg-[var(--reader-bg)]"
+      style={readerStyle}
+    >
       <WorldInspector
         worldId={worldId}
         open={inspectorOpen}
         onClose={toggleInspector}
         refreshKey={inspectorRefreshKey}
       />
-      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b border-neutral-900 bg-black/90 px-2.5 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-black/75 sm:px-4">
+      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b border-[var(--reader-border)] bg-[color:var(--reader-bg)]/90 px-2.5 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--reader-bg)]/75 sm:px-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <Link
             href="/"
             aria-label="Back to worlds"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-900 hover:text-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
           >
             <BackIcon />
           </Link>
-          <span className="truncate text-lg font-semibold tracking-tight text-neutral-100">
+          <span className="truncate text-lg font-semibold tracking-tight text-[var(--reader-text)]">
             {worldName}
           </span>
         </div>
@@ -391,9 +497,15 @@ export function Chat({
           {/* Session total — hidden when there's not enough room next to the
               world name. The per-turn footer carries the cost on every turn,
               so this chip is supplemental. */}
-          <div className="mr-1 hidden text-xs tabular-nums text-neutral-500 md:block">
+          <div className="mr-1 hidden text-xs tabular-nums text-[var(--reader-faint)] md:block">
             {usage.length} turn{usage.length === 1 ? "" : "s"} · ~{formatUsd(sessionTotal)}
           </div>
+          <ReaderSettingsMenu
+            size={readerSize}
+            theme={readerTheme}
+            onSizeChange={updateReaderSize}
+            onThemeChange={updateReaderTheme}
+          />
           <HeaderIconButton
             onClick={toggleInspector}
             pressed={inspectorOpen}
@@ -420,7 +532,7 @@ export function Chat({
           // pb-56 clears the floating composer plus the optional scroll-to-end
           // button, so bottom content can scroll above the controls instead of
           // being covered by them.
-          className="h-full space-y-8 overflow-y-auto overscroll-y-contain px-4 pt-6 pb-56 sm:px-8 sm:pt-8"
+          className="h-full max-w-full space-y-8 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 pt-6 pb-56 sm:px-8 sm:pt-8"
         >
           {hasOlder && (
             <li className="flex justify-center">
@@ -428,7 +540,7 @@ export function Chat({
                 type="button"
                 onClick={() => void loadOlder()}
                 disabled={loadingOlder}
-                className="min-h-11 rounded-full border border-neutral-800 bg-neutral-950/80 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400 transition hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-200 disabled:cursor-wait disabled:opacity-50"
+                className="min-h-11 rounded-full border border-[var(--reader-border)] bg-[var(--reader-field)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] disabled:cursor-wait disabled:opacity-50"
               >
                 {loadingOlder ? "Loading…" : "Load older"}
               </button>
@@ -436,7 +548,7 @@ export function Chat({
           )}
 
           {messages.length === 0 && (
-            <li className="pt-12 text-center text-sm text-neutral-500">
+            <li className="pt-12 text-center text-sm text-[var(--reader-faint)]">
               <p className="font-serif italic">The page is blank. Begin.</p>
             </li>
           )}
@@ -496,7 +608,7 @@ export function Chat({
                 <button
                   type="button"
                   onClick={() => setErrorDismissed(true)}
-                  className="min-h-10 rounded-full border border-neutral-700 px-4 py-2 text-xs font-semibold text-neutral-300 transition hover:bg-neutral-800"
+                  className="min-h-10 rounded-full border border-[var(--reader-border)] px-4 py-2 text-xs font-semibold text-[var(--reader-button-text)] transition hover:bg-[var(--reader-button-hover)]"
                 >
                   Dismiss
                 </button>
@@ -509,8 +621,14 @@ export function Chat({
 
         {/* Edge fades: soften the chat-→-composer overlap at every viewport.
             The bottom fade is sized to match the composer clearance. */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-black to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/90 to-transparent" />
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-6"
+          style={{ background: "var(--reader-top-fade)" }}
+        />
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-40"
+          style={{ background: "var(--reader-bottom-fade)" }}
+        />
       </div>
 
       {!readOnly && (
@@ -530,7 +648,8 @@ export function Chat({
               onClick={scrollToEnd}
               aria-label="Scroll to end"
               title="Scroll to end"
-              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-neutral-700/80 bg-[#1b1c1f] text-neutral-200 shadow-xl shadow-black/40 transition hover:border-amber-500/50 hover:bg-neutral-800 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--reader-border)] bg-[var(--reader-panel)] text-[var(--reader-button-text)] shadow-xl transition hover:border-amber-500/50 hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              style={{ boxShadow: "0 18px 40px var(--reader-shadow)" }}
             >
               <ScrollEndIcon />
             </button>
@@ -540,7 +659,10 @@ export function Chat({
             sits on top; an action row sits below with
             the slash-command button on the left and a round Send affordance
             on the right. */}
-        <div className="pointer-events-auto group relative mx-auto flex max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border border-neutral-700/80 bg-[#1b1c1f] px-4 pt-3 pb-2.5 shadow-2xl shadow-black/50 backdrop-blur transition focus-within:border-neutral-500 focus-within:bg-[#1f2024]">
+        <div
+          className="pointer-events-auto group relative mx-auto flex w-full max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border border-[var(--reader-border)] bg-[var(--reader-panel)] px-4 pt-3 pb-2.5 shadow-2xl backdrop-blur transition focus-within:bg-[var(--reader-field-focus)]"
+          style={{ boxShadow: "0 24px 60px var(--reader-shadow)" }}
+        >
           {slashOpen && (
             <SlashCommandMenu
               commands={filteredSlashCommands}
@@ -558,7 +680,7 @@ export function Chat({
             disabled={busy}
             // text-base (16px) at every size — prevents iOS Safari from auto-
             // zooming on focus, and reads more comfortably on desktop too.
-            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed text-neutral-100 placeholder:text-neutral-500 focus:outline-none disabled:opacity-50"
+            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed text-[var(--reader-text)] placeholder:text-[var(--reader-faint)] focus:outline-none disabled:opacity-50"
           />
           <div className="flex min-h-11 items-center justify-between gap-2">
             <div className="flex items-center gap-1">
@@ -570,7 +692,7 @@ export function Chat({
                 }}
                 aria-label="Slash command"
                 title="Slash command"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
               >
                 <SlashIcon />
               </button>
@@ -579,7 +701,7 @@ export function Chat({
               type="submit"
               disabled={busy || !input.trim()}
               aria-label="Send"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-amber-500 text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-600 disabled:shadow-none"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--reader-accent)] text-[var(--reader-bg)] shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-[var(--reader-panel-strong)] disabled:text-[var(--reader-faint)] disabled:shadow-none"
             >
               {busy ? <BusyDots /> : <SendIcon />}
             </button>
@@ -587,7 +709,7 @@ export function Chat({
         </div>
         {/* Keyboard hint — useful for users with a physical keyboard. Hidden
             below sm where touch input is the norm. */}
-        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] text-neutral-600 sm:block">
+        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] text-[var(--reader-faint)] sm:block">
           Enter to send · Shift+Enter for newline
         </p>
       </form>
@@ -598,20 +720,20 @@ export function Chat({
 
 function UserTurn({ text, createdAt }: { text: string; createdAt: string | undefined }) {
   return (
-    <div className="flex flex-col items-end">
-      <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-600">
+    <div className="flex max-w-full flex-col items-end">
+      <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--reader-faint)]">
         <span>You</span>
         {createdAt && (
           <time
             dateTime={dateTimeAttr(createdAt)}
             title={formatFullTimestamp(createdAt)}
-            className="font-normal normal-case tracking-normal text-neutral-700"
+            className="font-normal normal-case tracking-normal text-[var(--reader-faint)]"
           >
             {formatTimestamp(createdAt)}
           </time>
         )}
       </div>
-      <div className="mt-1.5 max-w-[90%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-[#1f2024] px-4 py-3 text-base leading-relaxed text-neutral-100 sm:max-w-[85%]">
+      <div className="mt-1.5 max-w-[90%] overflow-hidden whitespace-pre-wrap break-words rounded-3xl rounded-br-lg bg-[var(--reader-panel-strong)] px-4 py-3 text-base leading-relaxed text-[var(--reader-text)] sm:max-w-[85%]">
         {text}
       </div>
     </div>
@@ -638,15 +760,15 @@ function AudioProgressBar({
       aria-valuemin={0}
       aria-valuemax={determinate ? 100 : undefined}
       aria-valuenow={pct}
-      className="mt-1.5 h-0.5 w-full max-w-56 overflow-hidden rounded-full bg-neutral-800"
+      className="mt-1.5 h-0.5 w-full max-w-56 overflow-hidden rounded-full bg-[var(--reader-panel-strong)]"
     >
       {determinate ? (
         <div
-          className="h-full rounded-full bg-amber-500/80 transition-[width] duration-150 ease-linear"
+          className="h-full rounded-full bg-[var(--reader-accent)] transition-[width] duration-150 ease-linear"
           style={{ width: `${pct}%` }}
         />
       ) : (
-        <div className="chronicles-audio-sweep h-full w-1/3 rounded-full bg-amber-500/70" />
+        <div className="chronicles-audio-sweep h-full w-1/3 rounded-full bg-[var(--reader-accent)]" />
       )}
     </div>
   );
@@ -672,27 +794,27 @@ function NarratorTurn({
   onReplay: () => void;
 }) {
   return (
-    <div className="border-l-2 border-amber-500/40 pl-4">
+    <div className="max-w-full border-l-2 border-[var(--reader-accent)] pl-4">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/70">
+        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--reader-accent)]">
           Narrator
         </span>
         {audioStatus !== "idle" && (
           <span
             aria-label={audioStatus === "loading" ? "Narrator audio loading" : "Narrator speaking"}
-            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500/80"
+            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--reader-accent)]"
           />
         )}
         {audioStatus === "loading" && (
-          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-neutral-500">
+          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--reader-faint)]">
             Preparing audio
           </span>
         )}
       </div>
       <AudioProgressBar status={audioStatus} progress={audioProgress} />
-      <div className="mt-1.5 whitespace-pre-wrap font-serif text-[17px] leading-[1.8] text-neutral-100">
+      <div className="mt-1.5 max-w-full whitespace-pre-wrap break-words font-serif text-[var(--reader-font-size)] leading-[var(--reader-line-height)] text-[var(--reader-text)]">
         {text}
-        {streaming && <span className="chronicles-cursor text-amber-500/70" />}
+        {streaming && <span className="chronicles-cursor text-[var(--reader-accent)]" />}
       </div>
       {!streaming && (cost || canReplay) && (
         <div className="mt-3 flex flex-col items-start gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -715,13 +837,135 @@ function NarratorTurn({
                     ? "Restart playback"
                     : "Replay"
               }
-              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-neutral-700/80 bg-neutral-900/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-200 transition hover:border-amber-500/60 hover:bg-neutral-800 hover:text-amber-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700/80 disabled:hover:bg-neutral-900/80 disabled:hover:text-neutral-200"
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-[var(--reader-border)] bg-[var(--reader-field)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--reader-button-text)] transition hover:border-amber-500/60 hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ReplayIcon />
               <span>Replay</span>
             </button>
           )}
           {cost && <CostFooter cost={cost} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReaderSettingsMenu({
+  size,
+  theme,
+  onSizeChange,
+  onThemeChange,
+}: {
+  size: ReaderSize;
+  theme: ReaderTheme;
+  onSizeChange: (size: ReaderSize) => void;
+  onThemeChange: (theme: ReaderTheme) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const currentSize = READER_SIZE_OPTIONS.find((option) => option.id === size);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Reader settings"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-pressed={size !== "default" || theme !== "dark"}
+        title="Reader settings"
+        className={
+          "inline-flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
+          (size !== "default" || theme !== "dark" || open
+            ? "bg-[var(--reader-accent-soft)] text-[var(--reader-accent)] hover:bg-[var(--reader-button-hover)]"
+            : "text-[var(--reader-muted)] hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)]")
+        }
+      >
+        A
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-xl border border-[var(--reader-border)] bg-[var(--reader-panel)] py-1 shadow-xl backdrop-blur"
+          style={{ boxShadow: "0 18px 40px var(--reader-shadow)" }}
+        >
+          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--reader-faint)]">
+            Text size
+          </div>
+          {READER_SIZE_OPTIONS.map((option) => {
+            const selected = option.id === size;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onSizeChange(option.id);
+                }}
+                className={
+                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-[var(--reader-button-hover)] " +
+                  (selected ? "text-[var(--reader-accent)]" : "text-[var(--reader-button-text)]")
+                }
+              >
+                <span>{option.label}</span>
+                <span className="font-serif text-[var(--reader-muted)]" style={{ fontSize: option.fontSize }}>
+                  A
+                </span>
+              </button>
+            );
+          })}
+          <div className="border-t border-[var(--reader-border)] px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--reader-faint)]">
+            Theme
+          </div>
+          {READER_THEME_OPTIONS.map((option) => {
+            const selected = option.id === theme;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onThemeChange(option.id);
+                }}
+                className={
+                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-[var(--reader-button-hover)] " +
+                  (selected ? "text-[var(--reader-accent)]" : "text-[var(--reader-button-text)]")
+                }
+              >
+                <span>{option.label}</span>
+                <span
+                  aria-hidden
+                  className="h-5 w-5 rounded-full border border-[var(--reader-border)]"
+                  style={{
+                    background:
+                      option.id === "dark"
+                        ? "linear-gradient(135deg, #0f0f0d 50%, #eee8dc 50%)"
+                        : "linear-gradient(135deg, #f4efe6 50%, #252018 50%)",
+                  }}
+                />
+              </button>
+            );
+          })}
+          {currentSize && (
+            <div className="border-t border-[var(--reader-border)] px-3 py-2 text-xs text-[var(--reader-faint)]">
+              Narrator text: {currentSize.fontSize}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -748,8 +992,8 @@ function HeaderIconButton({
     "inline-flex h-11 w-11 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60";
   const stateClass =
     tone === "amber"
-      ? "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
-      : "text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200";
+      ? "bg-[var(--reader-accent-soft)] text-[var(--reader-accent)] hover:bg-[var(--reader-button-hover)]"
+      : "text-[var(--reader-muted)] hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)]";
   return (
     <button
       type="button"
@@ -936,7 +1180,7 @@ function CostFooter({ cost }: { cost: TurnCost }) {
   // Wraps cleanly at narrow widths; on wider viewports the same flex layout
   // keeps it on a single line. No viewport-specific clipping.
   return (
-    <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums text-neutral-500">
+    <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums text-[var(--reader-faint)]">
       <span title={agentBreakdown(cost)}>text ~{formatUsd(textCost)}</span>
       {cost.tts && (
         <span title={`${fmt(cost.tts.chars)} chars synthesized`}>
@@ -999,4 +1243,3 @@ function parseTimestamp(value: string): Date | null {
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 }
-

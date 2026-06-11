@@ -75,7 +75,7 @@ export function CreateWorldForm() {
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+          className="min-h-11 rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
         >
           {pending ? 'Creating…' : 'Create world'}
         </button>
@@ -96,10 +96,10 @@ type FieldProps = {
 function Field(props: FieldProps) {
   const isTextarea = props.as === 'textarea'
   const baseInput =
-    'w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-[15px] text-neutral-100 placeholder:text-neutral-500 transition focus:border-neutral-600 focus:bg-neutral-900 focus:outline-none'
+    'w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-base text-neutral-100 placeholder:text-neutral-500 transition focus:border-neutral-600 focus:bg-neutral-900 focus:outline-none'
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.14em] text-neutral-400">
+      <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.1em] text-neutral-400">
         {props.label}
         {props.required && <span className="ml-1 text-amber-500/80">*</span>}
       </span>
@@ -122,7 +122,7 @@ function Field(props: FieldProps) {
           className={baseInput}
         />
       )}
-      {props.hint && <p className="mt-1.5 text-[11px] text-neutral-500">{props.hint}</p>}
+      {props.hint && <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">{props.hint}</p>}
     </label>
   )
 }
