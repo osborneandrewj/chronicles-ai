@@ -4,12 +4,14 @@
 
 The agent system consists of seven specialized AI agents. Runtime story flow is coordinated by the Story Conductor, while pre-play world creation is handled by the World Seeder, Wiki Compiler, and World Linter. Each agent has a single responsibility, a specific model tier, a defined input/output contract, and a versioned system prompt.
 
+Two model tiers are used, and **the model IDs (and per-model pricing) live in exactly one place: `packages/server/src/infrastructure/llm/model-registry.ts` and `pricing.ts`** — never as literals in `domain/` or `application/` (enforced by dependency-cruiser). The creative tier is **xAI Grok (`grok-4.3`, `NARRATOR_MODEL`)**, used by the Narrator and World Seeder; the structured-extraction tier is **Anthropic Haiku (`claude-haiku-4-5-20251001`, `HAIKU_MODEL`)**, used by the Wiki Compiler, World Linter, Story Conductor, Archivist, and Character Actor. (Where the diagrams and tables below say "Sonnet," read "Grok `grok-4.3`"; a `claude-sonnet-4-6` entry is retained in `pricing.ts` only for legacy cost math.)
+
 ```
           Pre-play world creation
 
    ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
    │ WORLD SEEDER      │──▶│ WIKI COMPILER    │──▶│ WORLD LINTER      │
-   │ Model: Sonnet     │   │ Model: Haiku      │   │ Model: Haiku      │
+   │ Model: Grok        │   │ Model: Haiku      │   │ Model: Haiku      │
    │ Phase: 2          │   │ Phase: 2          │   │ Phase: 2          │
    └──────────────────┘   └──────────────────┘   └──────────────────┘
 
@@ -19,7 +21,7 @@ The agent system consists of seven specialized AI agents. Runtime story flow is 
                     │    STORY CONDUCTOR      │
                     │    (Supervisor)          │
                     │                          │
-                    │    Model: Claude Haiku   │
+                    │    Model: Haiku          │
                     │    Phase: 4              │
                     └─────┬──────┬──────┬─────┘
                           │      │      │
@@ -28,7 +30,7 @@ The agent system consists of seven specialized AI agents. Runtime story flow is 
    ┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐
    │  NARRATOR AGENT   │ │ CHARACTER    │ │  ARCHIVIST AGENT  │
    │                    │ │ ACTOR AGENT  │ │                    │
-   │  Model: Sonnet     │ │ Model: Sonnet│ │  Model: Haiku      │
+   │  Model: Grok       │ │ Model: Grok  │ │  Model: Haiku      │
    │  Output: Prose     │ │ Output: Prose│ │  Output: Structured │
    │  Phase: 1          │ │ Phase: 4     │ │  Phase: 3           │
    └──────────────────┘ └──────────────┘ └──────────────────┘
@@ -36,15 +38,30 @@ The agent system consists of seven specialized AI agents. Runtime story flow is 
 
 ### Agent Model Assignment Rationale
 
+Model IDs come from `infrastructure/llm/model-registry.ts`: `NARRATOR_MODEL = 'grok-4.3'` (xAI Grok) and `HAIKU_MODEL = 'claude-haiku-4-5-20251001'` (Anthropic Haiku).
+
 | Agent | Model | Why |
 |-------|-------|-----|
-| Narrator | Claude Sonnet 4 | Creative writing demands high-quality output. Sonnet balances quality and cost. |
-| World Seeder | Claude Sonnet 4 | Seeding needs creative synthesis, structured setting design, and tasteful open loops. |
-| Wiki Compiler | Claude Haiku | Compiling sources into wiki/timeline candidates is structured extraction and normalization. |
-| World Linter | Claude Haiku | Contradiction and duplicate detection is mechanical and should be conservative. |
-| Character Actor | Claude Sonnet 4 | NPC dialogue requires natural language and personality consistency. |
-| Story Conductor | Claude Haiku | Decision-making (proceed/wait/branch) is a classification task, not creative. Speed matters. |
-| Archivist | Claude Haiku | Structured extraction (JSON from prose) is mechanical. Haiku is fast and cheap. |
+| Narrator | Grok (`grok-4.3`) | Creative writing demands high-quality output. Grok balances quality and cost. |
+| World Seeder | Grok (`grok-4.3`) | Seeding needs creative synthesis, structured setting design, and tasteful open loops. |
+| Wiki Compiler | Haiku (`claude-haiku-4-5-20251001`) | Compiling sources into wiki/timeline candidates is structured extraction and normalization. |
+| World Linter | Haiku (`claude-haiku-4-5-20251001`) | Contradiction and duplicate detection is mechanical and should be conservative. |
+| Character Actor | Grok (`grok-4.3`) | NPC dialogue requires natural language and personality consistency. |
+| Story Conductor | Haiku (`claude-haiku-4-5-20251001`) | Decision-making (proceed/wait/branch) is a classification task, not creative. Speed matters. |
+| Archivist | Haiku (`claude-haiku-4-5-20251001`) | Structured extraction (JSON from prose) is mechanical. Haiku is fast and cheap. |
+
+### Where an agent's responsibilities live post-refactor
+
+After the onion/hexagonal refactor (branch `onion-arch-refactor`), an "agent" is no longer a single god module. Its responsibilities are split across the layers under `packages/server/src/`:
+
+- **Prompt-building, inference (the LLM call), output parsing, and persistence are adapter concerns.** They live in `infrastructure/` (the LLM/narrator/TTS adapters and the repositories) and in the driving adapters (`app/` routes + `server/render/`). The narrator's inference path in particular flows through a `NarratorPort` whose adapter is `infrastructure/narrator/narrate-turn.ts` (Grok narration stream); TTS goes through the `SpeechSynthesizer` port (`infrastructure/tts/xai-speech-synthesizer.ts`).
+- **The deterministic decision logic each agent used to embed is now a set of PURE domain services** under `domain/services/`, run by the use cases in `application/use-cases/` (e.g. `advance-turn`, `apply-correction`, `synthesize-narration`) — never inside an adapter. Today these are: `action-classifier-rules` (Conductor/classifier stance + input_mode), `name-resolution` and `character-dedup` (Archivist alias/merge resolution), `npc-promotion` (NPC agenda gating), `patch-sanitizer` (validating untrusted Archivist output at the boundary), `scene-transition` (sticky-scene / scene-open-on-move), `reverie-flare` and `occupancy-sim` (Living World substrate), `story-signal`, `turn-numbering` (per-world turn #s), `world-clock` (time/deadline math), `narrator-guidance` (deterministic guidance fed into the narrator prompt), and `memorable-fact-provenance` (`[t:N]` provenance).
+- **Repositories are dumb CRUD** behind ports in `domain/ports/`. Any rule that *decides* something (name resolution, alias merge, freshest-field-wins) is one of the pure services above, run by the use case before flat rows reach a repository.
+- **Untrusted input crosses the boundary once.** Player text and LLM output are validated/sanitized at the adapter→domain edge (e.g. `patch-sanitizer`), then trusted inward. Request/response shapes are the shared Zod schemas in `@chronicles/contracts`.
+
+The agent rosters, contracts, and prompts in the rest of this document are unchanged by the refactor — only their *physical home* moved. The prompt templates still live in `prompts/*.md`, loaded at runtime.
+
+> **Preview-branch caveat.** This layering is real and merged on `onion-arch-refactor`, but the branch may be discarded; the planned `apps/web` client split did **not** happen (the client still lives inside `packages/server`), and the MongoDB adapter set exists but is not cut over (default store is SQLite via raw `better-sqlite3`).
 
 ## 2. Agent 1: Narrator
 
@@ -55,7 +72,7 @@ Generates immersive narrative prose in response to player actions. The Narrator 
 Introduced in **Phase 1** (MVP). Active in all subsequent phases.
 
 ### Model
-Claude Sonnet 4 via `@ai-sdk/anthropic`
+Grok `grok-4.3` (`NARRATOR_MODEL`), called through the `NarratorPort` adapter `infrastructure/narrator/narrate-turn.ts`. The model ID lives in `infrastructure/llm/model-registry.ts`, never inline here.
 
 ### Input Contract
 
@@ -284,7 +301,7 @@ The Seeder creates depth and pressure, not a completed plot. It must leave the c
 Introduced in **Phase 2**.
 
 ### Model
-Claude Sonnet 4 via `@ai-sdk/anthropic`
+Grok `grok-4.3` (`NARRATOR_MODEL` — the creative tier also used by the Narrator). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -432,7 +449,7 @@ This is the Karpathy-style wiki step: raw sources remain untouched while the com
 Introduced in **Phase 2**.
 
 ### Model
-Claude Haiku via `@ai-sdk/anthropic`
+Anthropic Haiku `claude-haiku-4-5-20251001` (`HAIKU_MODEL`). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -500,7 +517,7 @@ Reviews compiled world knowledge for duplicate pages, contradictions, stale fact
 Introduced in **Phase 2**.
 
 ### Model
-Claude Haiku via `@ai-sdk/anthropic`
+Anthropic Haiku `claude-haiku-4-5-20251001` (`HAIKU_MODEL`). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -596,7 +613,7 @@ Extracts structured data from narrative text. After the Narrator generates a res
 Introduced in **Phase 3**. Active in all subsequent phases. In Phase 2, the Wiki Compiler uses the same structured extraction shape for pre-play sources.
 
 ### Model
-Claude Haiku via `@ai-sdk/anthropic`
+Anthropic Haiku `claude-haiku-4-5-20251001` (`HAIKU_MODEL`). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -826,7 +843,7 @@ The supervisor agent. Evaluates the current story state and decides what should 
 Introduced in **Phase 4**. In Phases 1-3, the conductor logic is hardcoded (always proceed with narration).
 
 ### Model
-Claude Haiku via `@ai-sdk/anthropic`
+Anthropic Haiku `claude-haiku-4-5-20251001` (`HAIKU_MODEL`). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -1163,7 +1180,7 @@ Generates dialogue and actions for NPCs and AI-proxied player characters. Each N
 Introduced in **Phase 4**. In Phases 1-3, the Narrator handles NPC portrayal inline.
 
 ### Model
-Claude Sonnet 4 via `@ai-sdk/anthropic`
+Grok `grok-4.3` (`NARRATOR_MODEL` — the creative tier). Model ID lives in `infrastructure/llm/model-registry.ts`.
 
 ### Input Contract
 
@@ -1274,7 +1291,7 @@ Save player turn to DB
 Assemble context (system prompt + world + scene + character + recent turns)
   │
   ▼
-Narrator Agent (streamText, Claude Sonnet)
+Narrator Agent (streamText, Grok grok-4.3 via NarratorPort)
   │
   ▼ (streaming to client)
   │
@@ -1291,7 +1308,7 @@ User Seed
 Persist user seed as world_sources
   │
   ▼
-World Seeder (generateObject, Claude Sonnet)
+World Seeder (generateObject, Grok grok-4.3)
   │
   ▼
 Persist seed packet as world_sources
@@ -1303,13 +1320,13 @@ Optional simulated expeditions
 Persist expedition logs as world_sources
   │
   ▼
-Wiki Compiler (generateObject, Claude Haiku)
+Wiki Compiler (generateObject, Haiku claude-haiku-4-5-20251001)
   │
   ▼
 Persist soft-canon wiki pages, timeline events, relationships, threads, memory chunks
   │
   ▼
-World Linter (generateObject, Claude Haiku)
+World Linter (generateObject, Haiku claude-haiku-4-5-20251001)
   │
   ▼
 Review queue for accept/reject/canon status changes
@@ -1336,12 +1353,14 @@ Narrator Agent (streamText) ─────────────▶ Client (s
 Save narrator turn to DB
   │
   ▼ (async, non-blocking)
-Archivist Agent (generateObject, Claude Haiku)
+Archivist Agent (generateObject, Haiku claude-haiku-4-5-20251001)
   │
   ▼
 Persist wiki updates, timeline events, relationships, threads
-Embed new memory chunks (Voyage AI → pgvector)
+Embed new memory chunks → (Phase-2 embedding slot; UNBUILT — see note)
 ```
+
+> **Post-refactor note on memory/vector search.** The original Voyage AI → pgvector embedding pipeline is **not built**. The datastore is now SQLite (live, raw `better-sqlite3`) with a full Mongo + Mongoose adapter ready behind `PERSISTENCE=mongo` but not cut over — Postgres/Drizzle/pgvector are superseded as the target. In both adapter sets, vector retrieval is a no-op: `MemoryRepository.searchSimilar()` returns `[]`. The "retrieve memories (vector search)" steps below therefore degrade to recent-turns context only until the embedding slot is implemented.
 
 ### Phase 4: Full Orchestra
 
@@ -1355,14 +1374,14 @@ Save player turn to DB
 Retrieve memories
   │
   ▼
-Story Conductor (generateObject, Claude Haiku)
+Story Conductor (generateObject, Haiku claude-haiku-4-5-20251001)
   │
   ├──▶ "proceed" ──────────────────────────────────┐
   │                                                  ▼
   ├──▶ "scene_transition" ──▶ Create new scene ──▶ Narrator (scene opening)
   │                                                  │
   ├──▶ "npc_interlude" ──▶ Character Actor ──┐      │
-  │                           (Claude Sonnet) │      │
+  │                           (Grok grok-4.3) │      │
   │                                           ▼      ▼
   │                                     Save NPC turn
   │                                           │
@@ -1383,6 +1402,8 @@ Story Conductor (generateObject, Claude Haiku)
 ```
 
 ## 10. Cost Estimation
+
+> The dollar figures below are pre-refactor order-of-magnitude estimates, not current invoices. Two labels are stale: **"Sonnet" rows are now Grok `grok-4.3`** (creative tier; rates in `infrastructure/llm/pricing.ts`), and **"Voyage embedding" rows are not yet incurred** — the embedding/vector-search slot is unbuilt (`MemoryRepository.searchSimilar()` returns `[]`). TTS is char-billed separately (`costForTts` in `pricing.ts`). Live token usage is recorded per call via the usage repository and surfaced through the `SummarizeUsage` use case.
 
 ### Per-Turn Cost (Phase 1)
 

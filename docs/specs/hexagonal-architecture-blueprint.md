@@ -1,22 +1,37 @@
 # Chronicles AI — System Design Blueprint (Hexagonal Architecture)
 
-> **What this document is.** A re-architecture blueprint for Chronicles AI, organized around
+> **What this document is.** The architecture blueprint for Chronicles AI, organized around
 > **hexagonal architecture (ports & adapters)** and **separation of concerns**. It describes the
 > domain, the boundaries, and the seams precisely enough to **rebuild the system from scratch**
-> with clean dependency direction — instead of the current "god endpoint + raw-SQL-everywhere"
-> shape.
+> with clean dependency direction — and, as of the `onion-arch-refactor` branch, it now also
+> describes the *realized* layout rather than only the target.
 >
-> It is written against the *actual* shipped system (SQLite, Grok-4.3 narrator + Haiku helpers,
-> a 594-line `/api/chat` route, no repository layer) and the *documented* target
-> (Postgres + pgvector, Sonnet, Voyage embeddings, an 8K context assembler). Where those two
-> disagree, this blueprint takes the documented intent as the goal and the shipped code as the
-> thing being refactored away from.
+> **Status (branch `onion-arch-refactor`, 2026-06-08).** The "onion / hexagonal" refactor this
+> document prescribed is **largely complete and merged on this branch**: the layers in §4 are
+> physically realized under `packages/server/src/`, the god `/api/chat` route is carved into
+> `AdvanceTurn` + `NarratorPort`/`NarrationStream` + a `BackgroundTasks` port + a SIGTERM drain,
+> model IDs/pricing live in `infrastructure/llm/`, `composition/container.ts` is the sole adapter
+> constructor, and the CI boundary rules (§6.6) are live. The migration tracker in §10 marks what
+> is done and what remains.
+>
+> **This is a PREVIEW branch ("may be discarded").** The architecture below is real and merged on
+> the branch, but two things are deliberately **not** done yet: (a) the MongoDB production cutover
+> (the Mongoose adapter set + backfill scripts exist, but the live/default store is still SQLite;
+> cutover is a manual gate), and (b) deletion of the SQLite adapter (waits for a Mongo soak). Also:
+> the planned `apps/web` client split did **not** happen — the React client still lives inside
+> `packages/server`; the root `workspaces` glob lists `apps/*` but `apps/` is empty.
+>
+> The original target stack (Postgres + pgvector + Drizzle + Voyage embeddings + Sonnet narrator)
+> is **superseded**: the live store is **SQLite (raw `better-sqlite3`)** with a full **Mongo +
+> Mongoose** adapter ready behind a `PERSISTENCE` flag; the narrator is **Grok-4.3**; vector
+> retrieval is a no-op slot (Phase 2, unbuilt). Where this doc once said "the shipped 594-line
+> route" or "the documented Postgres target," it has been reconciled to that reality.
 >
 > **How to read it.** §1–§3 establish the domain and the principles. §4 is the core: the layered
 > structure with concrete port interfaces. §5 re-frames the turn pipeline as a clean use case.
 > §6 covers cross-cutting concerns. §7–§8 cover persistence and the agent system as swappable
-> adapters. §9 gives a concrete directory layout. §10 is the incremental migration path from
-> today's code. §11 catalogs the coupling smells this design exists to kill.
+> adapters. §9 gives a concrete directory layout. §10 is the migration tracker (now mostly done).
+> §11 catalogs the coupling smells this design existed to kill.
 
 ---
 
@@ -68,11 +83,12 @@ Everything downstream — schemas, prompts, model choice, context budgets — de
 
 ## 2. Why Hexagonal Architecture Here
 
-The current system fails along predictable axes (catalogued in §11): one HTTP route orchestrates
-~11 concerns and makes 5 LLM calls; every module imports `db.ts` and writes raw SQL; LLM calls,
-prompt assembly, Zod parsing, and DB mutations live together in single files. This makes the
-system **hard to test in isolation, impossible to swap providers, and fragile under partial
-failure**.
+The *pre-refactor* system failed along predictable axes (catalogued in §11): one HTTP route
+orchestrated ~11 concerns and made 5 LLM calls; every module imported `db.ts` and wrote raw SQL;
+LLM calls, prompt assembly, Zod parsing, and DB mutations lived together in single files. That made
+the system **hard to test in isolation, impossible to swap providers, and fragile under partial
+failure**. On the `onion-arch-refactor` branch those violations are resolved (§10); §11 now reads
+as the review rubric that keeps them from coming back.
 
 Hexagonal architecture (a.k.a. **ports & adapters**) fixes exactly this by enforcing one rule:
 
@@ -105,19 +121,23 @@ Hexagonal architecture (a.k.a. **ports & adapters**) fixes exactly this by enfor
                                                          │  ports implemented by
                                                          ▼
         ┌─────────────────────────────────── DRIVEN (outbound) ADAPTERS ────────────────────────────┐
-        │  SqlitePort / PostgresPort (repositories) · AnthropicLLM · XaiLLM · VoyageEmbeddings ·      │
-        │  NominatimGeocoder · XaiTtsAdapter · SystemClock · PinoLogger                               │
+        │  SQLite repos (live) / Mongo repos (ready) · XaiNarrator · Haiku agents · XaiTts ·          │
+        │  SystemClock · ConsoleLogger · ProcessBackgroundTasks   (model IDs + pricing live here)     │
         └────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The payoff, concretely:
+The payoff, concretely (and now realized on this branch):
 
-- **Swap SQLite → Postgres+pgvector** by writing one new adapter. The documented migration becomes
-  a config change, not a rewrite.
-- **Swap Grok → Sonnet** (or run them side by side) by writing one new `LlmPort` adapter. Model IDs
-  stop being scattered string literals.
+- **Swap the datastore by writing one new adapter.** Demonstrated: a full **Mongo + Mongoose**
+  adapter set sits beside the SQLite one (`infrastructure/persistence/{sqlite,mongo}/`), both
+  satisfying the same ports, selected by the `PERSISTENCE` env var in `composition/container.ts`.
+  Nothing above `infrastructure/` knows which store is live. (Postgres+pgvector was the old target;
+  it is superseded — see §7.)
+- **Swap the LLM provider by writing one new adapter.** Model IDs and pricing now live in exactly
+  one place (`infrastructure/llm/model-registry.ts` + `pricing.ts`); they are no longer scattered
+  string literals, and CI forbids them in `domain/`/`application/`.
 - **Test the turn pipeline with zero LLM calls and zero DB** by injecting fakes for the ports.
-- **Partial failures become explicit**: the application layer decides what fails open (Archivist)
+- **Partial failures are explicit**: the application layer decides what fails open (Archivist)
   vs. what fails closed (Narrator), instead of silent `.catch()` calls.
 
 ### 2.1 Separation of concerns is the whole point — hexagonal is just the scaffolding
@@ -132,14 +152,15 @@ and absolute:
 
 When two concerns are fused in one function, three things break at once: a change along one axis
 silently risks the other, the pair cannot be tested or swapped independently, and a failure in one
-corrupts the other. Every violation this codebase shipped is the *same* mistake — two concerns
-sharing a home:
+corrupts the other. Every violation this codebase *once* shipped was the *same* mistake — two
+concerns sharing a home. The refactor split each of these into its own module (§10); the table
+below is preserved as the cautionary record of what the layering rules exist to prevent:
 
-| Fused in the code today | The concerns that got tangled | What the fusion costs |
+| Fused in the pre-refactor code | The concerns that got tangled | What the fusion cost |
 |---|---|---|
 | `api/chat/route.ts` | HTTP transport + turn orchestration + 5 LLM calls + DB writes + process/SIGTERM lifecycle | Can't exercise a turn without HTTP + a real DB + live keys; one streaming bug can drop persistence. |
 | `archivist.ts` | prompt building + inference + parsing + domain sanitization + SQL writes | The valuable rules (sticky scene, alias merge) are trapped behind both an LLM and a database. |
-| `db.ts` + every caller | the persistence mechanism + each caller's domain logic | The schema leaks everywhere; SQLite→Postgres touches the whole app; scripts bypass invariants. |
+| `db.ts` + every caller | the persistence mechanism + each caller's domain logic | The schema leaked everywhere; swapping the store touched the whole app; scripts bypassed invariants. |
 | `world-state.ts` | DB reads + narrator-prompt rendering | "What does the narrator see?" can only be answered by reading two unrelated halves together. |
 | `cost-cap.ts` | budget policy + the storage schema | The budget rule can't change without touching persistence. |
 
@@ -229,10 +250,11 @@ be pure so they're trivially testable):
 
 #### Domain services (pure functions / pure classes)
 
-These already exist in the codebase as pure-ish logic but are entangled with I/O. Extract them as
-**pure** services — this is most of the testability win:
+These were once pure-ish logic entangled with I/O; the refactor extracted them as **pure** services
+under `packages/server/src/domain/services/` — this was most of the testability win. The mapping
+below names each realized service and the pre-refactor `lib/` file it was carved out of:
 
-| Domain service | Responsibility | Currently in |
+| Domain service (now in `domain/services/`) | Responsibility | Carved out of |
 |---|---|---|
 | `ContextAssembler` | Take state + recent turns + retrieved memories + budget → ordered `ContextBundle`; drop P8→P3 by priority; throw `ContextOverflowError` if pinned sections (system prompt, authoritative state, player action) exceed budget. | scattered across `prompt.ts`, `world-state.ts`, `narrator-guidance.ts` |
 | `ReverieFlare` | Score reveries by tag-overlap × intensity → top-K flares. Pure. | `reveries.ts` (`computeReverieFlares`, `canMintReverie`) |
@@ -244,14 +266,27 @@ These already exist in the codebase as pure-ish logic but are entangled with I/O
 | `WorldClock` | Time-band math, deadline advancement. | `world-time.ts`, `daily-loop.ts` |
 | `PatchSanitizer` | Normalize an `ArchivistPatch` against existing state (resolve places, merge aliases, detect name reveals, enforce sticky scene). | inside `archivist.ts` (entangled with LLM + DB) |
 
-> **Note the move:** today `archivist.ts` mixes (1) prompt assembly, (2) the LLM call, (3) parsing,
-> (4) sanitization, and (5) DB writes. In this design those become, respectively: a prompt template,
-> an `Archivist` port call, schema validation at the boundary, the pure `PatchSanitizer` domain
-> service, and a `applyPatch` step in the use case that calls repositories. Five concerns, five homes.
+> **The realized set is larger than this illustrative table.** `domain/services/` also holds
+> `name-resolution`, `narrator-guidance`, `scene-transition`, `story-signal`, and `turn-numbering`
+> — additional pure decisions carved out of the same god files. All are deterministic and
+> unit-tested with no mocks.
+
+> **The move is done:** the old `archivist.ts` mixed (1) prompt assembly, (2) the LLM call, (3)
+> parsing, (4) sanitization, and (5) DB writes. Those are now, respectively: a prompt template, a
+> structured-agent port call, Zod validation at the boundary, the pure `patch-sanitizer` domain
+> service, and an apply step in `AdvanceTurn` that calls repositories. Five concerns, five homes.
 
 #### Ports defined by the domain/application
 
 Ports are **TypeScript interfaces** colocated with the layer that needs them. Group them by role.
+
+> **Realized:** `domain/ports/` holds **20 interfaces** (with an `index.ts` barrel). The 13
+> repository ports — world, turn, character, place, scene, dossier, reverie, npc-intent, occupancy,
+> tts-cache, correction, usage, memory — plus `clock`, `logger`, `narrator`, `speech-synthesizer`,
+> `background-tasks`, and `unit-of-work`. **Every repository method is async** (returns a `Promise`);
+> the SQLite adapters wrap their synchronous `better-sqlite3` calls in `Promise.resolve(...)` to
+> satisfy the same shape the Mongo adapters need. The signatures below are illustrative shorthand;
+> the realized names sometimes differ (see the `TurnRepository` note).
 
 **Outbound (driven) ports — the domain's needs of the outside world:**
 
@@ -265,12 +300,16 @@ export interface WorldRepository {
   setStatus(id: WorldId, status: World['status']): Promise<void>;
 }
 
+// APPEND-ONLY by construction. Realized method names (turn-repository.ts):
+//   insert · recentTurns · turnsBefore · latestUserTurnId · mergeMetadata · incTtsChars.
+// There is deliberately NO general update / setMetadata / delete — only append + metadata-merge.
 export interface TurnRepository {
-  append(turn: NewTurn): Promise<Turn>;          // the ONLY write; no update/delete
-  recent(worldId: WorldId, limit: number): Promise<Turn[]>;
-  before(worldId: WorldId, cursor: TurnId, limit: number): Promise<Turn[]>;
-  latestPlayerAndNarrator(worldId: WorldId): Promise<{ player?: Turn; narrator?: Turn }>;
-  attachMetadata(id: TurnId, patch: Partial<TurnMetadata>): Promise<void>; // usage stamping only
+  insert(turn: NewTurn): Promise<Turn>;                       // the ONLY write
+  recentTurns(worldId: WorldId, limit: number): Promise<Turn[]>;
+  turnsBefore(worldId: WorldId, beforeId: TurnId, limit: number): Promise<Turn[]>;
+  latestUserTurnId(worldId: WorldId): Promise<TurnId | null>;
+  mergeMetadata(id: TurnId, patch: Partial<TurnMetadata>): Promise<void>; // usage stamping only
+  incTtsChars(worldId: WorldId, turnId: TurnId, chars: number): Promise<void>;
 }
 
 export interface CharacterRepository { /* get/list/upsertByName/merge/appendFact/move */ }
@@ -293,14 +332,15 @@ export interface Narrator {                       // CREATIVE, streaming
 export interface StructuredAgent<I, O> {          // FACTUAL, structured output
   run(input: I): Promise<{ output: O; usage: TokenUsage }>;
 }
-export interface EmbeddingProvider { embed(texts: string[]): Promise<number[][]>; }
-export interface Geocoder          { resolve(placeName: string, region?: string): Promise<GeoPoint | null>; }
-export interface SpeechSynthesizer { synthesize(text: string, voice: VoiceId): Promise<AudioStream>; }
+export interface EmbeddingProvider { embed(texts: string[]): Promise<number[][]>; } // Phase-2 slot, not yet a port
+export interface Geocoder          { resolve(placeName: string, region?: string): Promise<GeoPoint | null>; } // Phase-2 slot
+export interface SpeechSynthesizer { synthesize(text: string, voice: VoiceId): Promise<AudioStream>; } // realized
 
 // ── Plumbing ─────────────────────────────────────────────────────────────
-export interface Clock  { now(): Timestamp; }     // never read the wall clock in the domain
-export interface Logger { /* structured, secret-redacting */ }
-export interface PromptRegistry { load(name: PromptName): PromptTemplate; } // prompts/*.md
+export interface Clock  { now(): Timestamp; }     // realized; never read the wall clock in the domain
+export interface Logger { /* structured, secret-redacting */ }                       // realized
+export interface BackgroundTasks { /* register/drain post-stream work; SIGTERM owner */ } // realized (§5.0)
+// (Prompt templates are loaded at runtime; a dedicated PromptRegistry port is not yet broken out.)
 ```
 
 > **Repositories stay dumb — this is rule 7 made concrete.** The interfaces above are deliberately
@@ -314,16 +354,22 @@ export interface PromptRegistry { load(name: PromptName): PromptTemplate; } // p
 > inside a repository, which is how that logic would silently become untestable and storage-locked
 > again.
 
-**Inbound (driving) ports — the use cases the outside world is allowed to call** (see §5):
-`AdvanceTurn`, `ReplayTurn`, `CreateWorld`, `ApplyCorrection`, `LoadHistory`, `InspectWorld`,
-`SummarizeUsage`, `SynthesizeNarration`.
+**Inbound (driving) ports — the use cases the outside world is allowed to call** (see §5). The
+realized set under `application/use-cases/` is: `AdvanceTurn`, `ApplyCorrection`, `InspectWorld`,
+`ListCorrections`, `LoadHistory`, `RecordTtsUsage`, `SummarizeUsage`, `SynthesizeNarration`. (Replay
+is handled inside `AdvanceTurn` as an idempotency guard, not a separate use case; world creation /
+seeding still flows through Server Actions and has not yet been promoted to a standalone use case.)
 
 ### 4.2 Application layer (use cases)
 
 A use case is a class with injected ports and a single public method. It contains the **orchestration
 script and the transaction boundaries** — and nothing technology-specific. The crown jewel is
-`AdvanceTurn` (§5). The wiring happens in a **composition root** (`src/composition/container.ts`)
-that constructs adapters and injects them — the only place where concrete classes meet.
+`AdvanceTurn` (§5). The wiring happens in a **composition root**
+(`packages/server/src/composition/container.ts`, `server-only`) that constructs adapters and injects
+them — the only place where concrete classes meet. It selects the store by the `PERSISTENCE` env var
+(default `'sqlite'` via a synchronous `getContainer()`; `'mongo'` via an async `initContainer()` at
+boot that dynamically imports the Mongoose adapters, so the SQLite path never loads `mongoose`) and
+exposes a typed `Container` of all ports.
 
 ```ts
 // application/advance-turn.ts
@@ -345,47 +391,57 @@ export class AdvanceTurn {
 
 ### 4.3 Adapters
 
-**Driving (inbound) adapters** translate the outside world into use-case calls and own *no* logic:
+**Driving (inbound) adapters** translate the outside world into use-case calls and own *no* logic.
+All now live under `packages/server/src/`, and request/response shapes are the shared
+`@chronicles/contracts` Zod schemas:
 
-- `src/app/api/chat/route.ts` → parse request, call `AdvanceTurn.execute()`, pipe the stream out.
-  (Today: 594 lines doing 11 things. Target: ~30 lines.)
-- `src/app/api/turns/route.ts` → `LoadHistory`.
-- `src/app/api/world-state/route.ts` → `InspectWorld`.
-- `src/app/api/world-correction/route.ts` → `ApplyCorrection`.
-- `src/app/api/usage/route.ts` → `SummarizeUsage`.
-- `src/app/api/tts/route.ts` → `SynthesizeNarration`.
-- `src/app/worlds/**/actions.ts` (Server Actions) → `CreateWorld`, archive/unarchive.
-- `scripts/*.mjs` (copy-world, merge-characters, seed-*, backfill) → call the *same* use cases /
-  repositories, not bespoke SQL. (Today they reach straight into the DB — they should become thin
-  CLIs over the application layer, which is how you guarantee a script can't corrupt invariants the
-  app enforces.)
+- `app/api/chat/route.ts` → parse request, call `AdvanceTurn`, pipe the stream out. (The old
+  ~593-line god route is gone; this is now a thin adapter.)
+- `app/api/turns/route.ts` → `LoadHistory`.
+- `app/api/world-state/route.ts` → `InspectWorld`.
+- `app/api/world-correction/route.ts` → `ApplyCorrection`.
+- `app/api/world-corrections/route.ts` → `ListCorrections`.
+- `app/api/usage/route.ts` → `SummarizeUsage`.
+- `app/api/tts/route.ts` → `SynthesizeNarration`; `app/api/tts/record/route.ts` → `RecordTtsUsage`.
+- `app/worlds/**/actions.ts` (Server Actions) → world creation, archive/unarchive (not yet promoted
+  to standalone use cases — see §4.1).
+- `scripts/*.mjs` (copy-world, merge-characters, seed-*, backfill) → should call the *same* use
+  cases / repositories rather than bespoke SQL. (Re-pointing all scripts at the application layer is
+  the one remaining loose end of step 7 — see §10.)
 
-**Driven (outbound) adapters** implement the ports:
+**Driven (outbound) adapters** implement the ports (all under `infrastructure/`):
 
-- `infrastructure/persistence/sqlite/*` — one repository class per port, each owning its prepared
-  statements. A single `SqliteUnitOfWork` wraps multi-step writes in `BEGIN IMMEDIATE` (see the
-  project's hard-won rule about partial commits). **A future `infrastructure/persistence/postgres/*`
-  is a drop-in sibling.**
-- `infrastructure/llm/anthropic.ts`, `infrastructure/llm/xai.ts` — implement `Narrator` and
-  `StructuredAgent`. All model IDs and pricing live here, behind the port.
-- `infrastructure/embeddings/voyage.ts`, `infrastructure/geocode/nominatim.ts`,
-  `infrastructure/tts/xai.ts`, `infrastructure/clock/system.ts`, `infrastructure/log/pino.ts`.
+- `infrastructure/persistence/sqlite/*` — 14 `*.sqlite.ts` repository classes (one per port) +
+  `unit-of-work.sqlite.ts`, each owning its prepared statements; the unit of work wraps multi-step
+  writes in `BEGIN IMMEDIATE` (the project's hard-won rule about partial commits). **The sibling
+  `infrastructure/persistence/mongo/*` is the realized drop-in** (Mongoose connection, context,
+  unit-of-work, `build-mongo-repositories`, `models/index.ts` as the only mongoose-import home, and
+  `repositories/*.mongo.ts` + mappers + test-support).
+- `infrastructure/llm/model-registry.ts` + `pricing.ts` — the **single** source of model IDs and
+  pricing. The narrator-stream adapter is `infrastructure/narrator/narrate-turn.ts` (implements the
+  `Narrator` port); the structured-extraction agents call Haiku via the same registry.
+- `infrastructure/tts/xai-speech-synthesizer.ts` (`SpeechSynthesizer`),
+  `infrastructure/clock/system-clock.ts` (`Clock`), `infrastructure/logging/console-logger.ts`
+  (`Logger`), `infrastructure/background/process-background-tasks.ts` (`BackgroundTasks`, SIGTERM
+  drain). A geocoder and an embeddings adapter are Phase-2 slots, not yet realized.
 
 ---
 
 ## 5. The Turn Pipeline as a Use Case (the heart of the system)
 
-Today this is a 594-line route handler. Re-framed, it is one orchestration script that reads like
-prose, delegates every decision to a domain service or a port, and makes its failure modes explicit.
+This was once a ~593-line route handler. It is now `AdvanceTurn`: one orchestration script that
+reads like prose, delegates every decision to a domain service or a port, and makes its failure
+modes explicit.
 
 ### 5.0 Who owns the stream and the work that trails it (the seam the old route got wrong)
 
-The single hardest coupling in `api/chat/route.ts` is *not* the step list — it is that the response
-**stream**, the **post-stream persistence**, and the **process-shutdown drain** are all entangled in
-one handler, via the AI SDK's `onFinish` callback and a module-scoped `process.once('SIGTERM', …)`
-listener that awaits in-flight archivist promises. That is three concerns (transport, persistence,
-runtime lifecycle) in one closure. Separating turn *logic* from turn *transport* means giving that
-lifecycle an explicit owner. Make it a value the use case returns, not a callback the framework owns:
+The single hardest coupling in the old `api/chat/route.ts` was *not* the step list — it was that the
+response **stream**, the **post-stream persistence**, and the **process-shutdown drain** were all
+entangled in one handler, via the AI SDK's `onFinish` callback and a module-scoped
+`process.once('SIGTERM', …)` listener that awaited in-flight archivist promises. That is three
+concerns (transport, persistence, runtime lifecycle) in one closure. Separating turn *logic* from
+turn *transport* meant giving that lifecycle an explicit owner — a value the use case returns, not a
+callback the framework owns. This is now realized:
 
 ```ts
 export interface NarrationStream {
@@ -400,10 +456,10 @@ export interface NarrationStream {
   *inside the use case*, testable with fake ports, not inside a streaming callback that needs a live
   model to exercise.
 - **Background work is owned by the application layer, not the web framework.** A small
-  `BackgroundTasks` port (`register(p: Promise<unknown>): void`, `drain(): Promise<void>`) tracks the
-  in-flight post-stream promises; the **composition root** is the one place that wires its `drain()`
+  `BackgroundTasks` port (realized as `infrastructure/background/process-background-tasks.ts`) tracks
+  the in-flight post-stream promises; the **composition root** is the one place that wires its drain
   to a single `SIGTERM` handler. The use case never imports `process`; the route never reaches into
-  archivist internals. (Today both do.)
+  archivist internals. (Both did before the refactor.)
 - The inbound adapter's only job: pipe `chunks`, and — if the host must guarantee durability before
   exit — register `completion` with `BackgroundTasks`. One concern each.
 
@@ -457,8 +513,8 @@ AdvanceTurn.execute(cmd):
   swallows-and-logs) instead of scattered `.catch(() => {})`.
 - **Transactions are explicit** (`uow.run`) at each write, honoring the `BEGIN IMMEDIATE` rule, so
   a mid-patch failure can't partial-commit.
-- **Provider/model choice is invisible here.** Swapping Grok→Sonnet or SQLite→Postgres changes a
-  single adapter, never this file.
+- **Provider/model and store choice are invisible here.** Swapping the narrator model or flipping
+  SQLite→Mongo (via `PERSISTENCE`) changes a single adapter / the composition root, never this file.
 - **Idempotency and meta-commands are guards at the top**, not interleaved with LLM logic.
 
 ---
@@ -484,8 +540,8 @@ It must be **one pure function** the rest of the system cannot bypass:
 
 Rule: truncate from the bottom (P8→P3) until under budget; if P1+P2+P9 alone exceed the budget,
 **throw `ContextOverflowError`** — never silently truncate a pinned section. Inputs in, bundle out,
-deterministic, no I/O → trivially unit-tested. (Today this logic is smeared across three files and
-hard to reason about.)
+deterministic, no I/O → trivially unit-tested. (Pre-refactor this logic was smeared across three
+files and hard to reason about; it now lives in pure domain services.)
 
 **Assembly and rendering are two concerns — keep them apart (rule 8).** `ContextAssembler` returns a
 *structured* `ContextBundle` — ordered, budget-checked sections — and stops there. Turning that
@@ -527,9 +583,21 @@ Domain errors (`ContextOverflowError`, `BudgetExceeded`, `WorldNotFound`, `Inval
 defined in the domain and mapped to transport concerns (HTTP status, UI message) **only in the
 inbound adapter**. The domain never throws an HTTP 502.
 
+### 6.6 Boundary enforcement in CI (realized)
+
+The layering rules above are no longer just prose — they are machine-checked. `.dependency-cruiser.cjs`
+(with `tsconfig.depcruise.json`) defines **11 named rules**: `domain-points-inward`,
+`domain-no-io-or-framework`, `app-imports-domain-only`, `infrastructure-only-via-composition`,
+`mongoose-only-in-mongo-adapter`, `better-sqlite3-only-in-sqlite-adapter`,
+`model-registry-not-in-domain-or-app`, `client-no-server-layers`, `client-no-native-or-server-sdk`,
+`contracts-pure`, and `no-circular`. They are backed by a `server-only` import on every
+infra/repo/composition module and by grep guards for the classic regressions. `npm run depcruise`
+runs as a `pretest` step, so a cross-layer import fails the build. (This is the realized form of the
+self-enforcement demanded in §10.)
+
 ---
 
-## 7. Persistence Design (storage-agnostic, then SQLite vs. Postgres)
+## 7. Persistence Design (storage-agnostic, then SQLite vs. Mongo)
 
 The domain knows **aggregates and repositories**, not tables. The schema below is the canonical
 model; each storage adapter maps it to its own physical form.
@@ -552,41 +620,55 @@ World (root)
  └── WorldCorrection (player correction → archivist reply)
 ```
 
-**Two adapters, one port set:**
+**Two adapters, one port set** (both realized; Postgres+pgvector+Drizzle is **superseded** as the
+target — the second store is **MongoDB + Mongoose**):
 
-| Concern | SQLite adapter (today) | Postgres adapter (target) |
+| Concern | SQLite adapter (**live / default**) | Mongo adapter (**ready, behind `PERSISTENCE=mongo`**) |
 |---|---|---|
-| Driver | `better-sqlite3`, synchronous | `postgres` (postgres-js), async — **never `pg`** |
-| IDs | autoincrement integer | UUID |
-| JSON columns | `TEXT` + `JSON.parse` | `JSONB` |
-| Vector search | none (skip P7) / brute-force | `pgvector`, HNSW index, cosine |
-| Transactions | `BEGIN IMMEDIATE` (avoid partial commits) | standard `BEGIN`/serializable where needed |
-| Migrations | hand-rolled `migrations.ts` | Drizzle `db:generate` + `db:migrate` |
+| Driver | `better-sqlite3`, synchronous (wrapped in `Promise.resolve`) | Mongoose, async; replica-set fail-fast at boot |
+| IDs / ordering | autoincrement integer | a `counters` collection with atomic `findOneAndUpdate $inc` gives every collection a monotone **integer** id + turn seq — ordering **never** depends on `ObjectId` |
+| Shape | 1 table per aggregate; JSON columns as `TEXT` + `JSON.parse` | 15 top-level collections + 2 embedded subdocs |
+| Constraints | SQL `CHECK` (importance 1–5, intensity 0–1); `lower(name)` uniqueness | mongoose enums + min/max; normalized `nameKey`/`titleKey` unique indexes per `worldId` |
+| Provenance | `[t:N]` tags preserved | `[t:N]` tags preserved |
+| Vector search | no-op `MemoryRepository.searchSimilar()` → `[]` (P7 slot) | no-op `searchSimilar()` → `[]` (P7 slot) |
+| Transactions | `BEGIN IMMEDIATE` (avoid partial commits) | `UnitOfWork` = `session.withTransaction` |
+| Migrations | hand-rolled, run on boot | schema is the Mongoose models; no separate migration step |
 
-Because the application layer only sees `TurnRepository`, `MemoryRepository`, etc., the documented
-SQLite→Postgres migration is "implement the sibling adapter folder + flip the composition root,"
-not "rewrite the app." Vector retrieval (P7) degrades gracefully: the SQLite adapter returns an
-empty similarity set and the `ContextAssembler` simply has nothing to place in P7.
+Because the application layer only sees `TurnRepository`, `MemoryRepository`, etc., the store swap is
+"implement the sibling adapter folder + flip the composition root via the `PERSISTENCE` env var,"
+not "rewrite the app" — and that sibling now exists. **Caveat (preview branch):** the Mongo cutover
+in production has *not* run; the live/default store remains SQLite, and the SQLite adapter is not
+deleted (it waits for a Mongo soak — see §10). Vector retrieval (P7) degrades gracefully in **both**
+adapters: `searchSimilar()` returns an empty set and the `ContextAssembler` simply has nothing to
+place in P7 (the embedding slot is Phase-2, unbuilt).
 
 ---
 
 ## 8. The Agent System as Swappable Adapters
 
-Every agent is a port (`Narrator` or `StructuredAgent<I,O>`); its prompt is a template; its model is
-an adapter detail. The roster, with the creative/factual split and current build status:
+Every agent is a port (`Narrator` or a structured-extraction agent); its prompt is a template; its
+model is an adapter detail. All model IDs live in `infrastructure/llm/model-registry.ts`:
+`NARRATOR_MODEL = 'grok-4.3'` (the narrator/seeder) and `HAIKU_MODEL =
+'claude-haiku-4-5-20251001'` (the structured-extraction agents). The roster, with the
+creative/factual split and current build status:
 
-| Agent | Port | Half | Model (today → target) | Schema | Status |
+| Agent | Port | Half | Model | Schema | Status |
 |---|---|---|---|---|---|
-| **Narrator** | `Narrator` | Creative | Grok-4.3 → Sonnet 4 | none (prose) | ✅ built |
-| **Classifier** | `StructuredAgent` | Factual | Haiku 4.5 | `Classification` | ✅ built (heuristic-first) |
-| **NPC Agent** | `StructuredAgent` | Creative-ish | Haiku 4.5 | `NpcPlan` | ✅ built |
-| **Intent Reconciler** | `StructuredAgent` | Factual | Haiku 4.5 | `PerIntentResult[]` | ✅ built |
-| **Archivist** | `StructuredAgent` | Factual | Claude (`generateObject`) | `ArchivistPatch` | ✅ built |
-| **World Seeder** | `StructuredAgent` | Creative | → Sonnet | `WorldSeedPacket` | ◻ designed |
-| **Wiki Compiler** | `StructuredAgent` | Factual | → Haiku | `CompiledKnowledge` | ◻ designed |
-| **World Linter** | `StructuredAgent` | Factual | → Haiku | `WorldLintReport` | ◻ designed |
-| **Character Actor** | `StructuredAgent` | Creative | → Sonnet | dialogue/action | ◻ designed |
-| **Story Conductor** | `StructuredAgent` | Factual | → Haiku | `ConductorDecision` | ◻ stub (`"proceed"`) |
+| **Narrator** | `Narrator` | Creative | `grok-4.3` | none (prose) | ✅ built |
+| **Classifier** | structured | Factual | Haiku | `Classification` | ✅ built (heuristic-first) |
+| **NPC Agent** | structured | Creative-ish | Haiku | `NpcPlan` | ✅ built |
+| **Intent Reconciler** | structured | Factual | Haiku | `PerIntentResult[]` | ✅ built |
+| **Archivist** | structured | Factual | Haiku | `ArchivistPatch` | ✅ built |
+| **Region Extractor** | structured | Factual | Haiku | region data | ✅ built |
+| **World Generator / Seeder** | structured | Creative | Grok / Haiku | `WorldSeedPacket` | ✅ built |
+| **Wiki Compiler** | structured | Factual | → Haiku | `CompiledKnowledge` | ◻ designed |
+| **World Linter** | structured | Factual | → Haiku | `WorldLintReport` | ◻ designed |
+| **Character Actor** | structured | Creative | → Grok | dialogue/action | ◻ designed |
+| **Story Conductor** | structured | Factual | → Haiku | `ConductorDecision` | ◻ stub (`"proceed"`) |
+
+> The narrator-stream adapter is `infrastructure/narrator/narrate-turn.ts`. The Sonnet narrator from
+> the old target is superseded by Grok-4.3; `pricing.ts` still carries a `claude-sonnet-4-6` entry
+> for cost math on any residual Sonnet calls.
 
 The **Conductor** and **Living World** are *intentional no-op stubs* in early phases — the inbound
 shape of `AdvanceTurn` already accounts for them (steps 4 and the optional living-world advance), so
@@ -599,127 +681,152 @@ ports — they have no external dependency and must stay deterministic and unit-
 
 ---
 
-## 9. Proposed Directory Layout
+## 9. Directory Layout (realized)
+
+The project is an **npm-workspaces monorepo** (root `package.json` → `"workspaces":
+["packages/*","apps/*"]`, with `tsconfig.base.json` shared and `tsconfig.depcruise.json` for the
+linter). All runtime code lives in **`packages/server`**; `apps/` is empty (the `apps/web` client
+split was planned but **not** done — the React client still ships inside `packages/server`).
 
 ```
-src/
-├── domain/                         # PURE. no next/ai/better-sqlite3/fetch imports.
-│   ├── world/        { world.ts, settings.ts }
-│   ├── turn/         { turn.ts, metadata.ts }
-│   ├── scene/        { scene.ts, tactical-state.ts }
-│   ├── place/        { place.ts }
-│   ├── character/    { character.ts, identity.ts, presentation.ts, reverie.ts, npc-agenda.ts }
-│   ├── dossier/      { thread.ts, clue.ts, objective.ts, resource.ts, timeline.ts }
-│   ├── context/      { authoritative-state.ts, context-bundle.ts, token-budget.ts }
-│   ├── services/     # pure domain services
-│   │   { context-assembler.ts, reverie-flare.ts, occupancy-sim.ts, npc-promotion.ts,
-│   │     action-classifier-rules.ts, patch-sanitizer.ts, character-dedup.ts,
-│   │     memorable-facts.ts, world-clock.ts }
-│   ├── errors.ts                   # ContextOverflowError, BudgetExceeded, WorldNotFound…
-│   └── ports/        # interfaces ONLY
-│       { repositories.ts, llm.ts, embeddings.ts, geocoder.ts, tts.ts, clock.ts,
-│         logger.ts, prompt-registry.ts, unit-of-work.ts }
+packages/
+├── contracts/                      # @chronicles/contracts — dependency-light, type:module, deps: zod only
+│   └── src/  { chat.ts, corrections.ts, cost.ts, history.ts, world-state.ts, index.ts,
+│              pure/sentence-splitter.ts }   # ONE pure util re-export, shared by server TTS + client
 │
-├── application/                    # use cases. orchestration + transactions. no SQL/SDK/framework.
-│   { advance-turn.ts, replay-turn.ts, create-world.ts, seed-world.ts, apply-correction.ts,
-│     load-history.ts, inspect-world.ts, summarize-usage.ts, synthesize-narration.ts,
-│     cost-policy.ts, meta-command-handler.ts }
-│
-├── infrastructure/                 # driven adapters. implement ports.
-│   ├── persistence/sqlite/   { *-repository.ts, unit-of-work.ts, migrations.ts, prepared.ts }
-│   ├── persistence/postgres/ { … sibling, target … }
-│   ├── llm/                  { anthropic.ts, xai.ts, model-registry.ts, pricing.ts }
-│   ├── embeddings/voyage.ts
-│   ├── geocode/nominatim.ts
-│   ├── tts/xai.ts
-│   ├── clock/system.ts
-│   └── log/pino.ts
-│
-├── composition/                    # the ONLY place adapters meet use cases
-│   { container.ts }                # build adapters from env, inject into use cases
-│
-├── app/                            # Next.js — driving adapters ONLY (thin)
-│   ├── api/{chat,turns,usage,world-state,world-correction,tts}/route.ts
-│   ├── worlds/{new,[worldId]/play}/…  + actions.ts (Server Actions → use cases)
-│   └── page.tsx / layout.tsx
-│
-├── components/                     # React — presentation only; read via query ports
-│   { Chat.tsx, WorldInspector.tsx, … }
-│
-└── prompts/  (repo root)           # git-diffable templates, loaded via PromptRegistry
-    { narrator-system.md, archivist-system.md, archivist-correction.md, npc-agent-system.md, … }
+└── server/                         # @chronicles/server — the Next.js 15 App Router app
+    └── src/
+    ├── domain/                     # PURE. no next/ai/@ai-sdk/better-sqlite3/fs/fetch/clock imports.
+    │   ├── entities/   { character, correction, npc-intent, occupancy, reverie, story,
+    │   │                 tts-cache, turn, usage, world, index }   # row TYPE defs moved here off lib/db
+    │   ├── services/   # pure domain services
+    │   │   { action-classifier-rules, character-dedup, memorable-fact-provenance, name-resolution,
+    │   │     narrator-guidance, npc-promotion, occupancy-sim, patch-sanitizer, reverie-flare,
+    │   │     scene-transition, story-signal, turn-numbering, world-clock }
+    │   └── ports/      # 20 interfaces ONLY (+ index barrel)
+    │       { world, turn, character, place, scene, dossier, reverie, npc-intent, occupancy,
+    │         tts-cache, correction, usage, memory  (repositories) ;
+    │         clock, logger, narrator, speech-synthesizer, background-tasks, unit-of-work }
+    │
+    ├── application/use-cases/       # orchestration + transactions. no SQL/SDK/framework.
+    │   { advance-turn, apply-correction, inspect-world, list-corrections, load-history,
+    │     record-tts-usage, summarize-usage, synthesize-narration }
+    │
+    ├── infrastructure/             # driven adapters. implement ports. ALL model IDs/pricing here.
+    │   ├── persistence/sqlite/  { 14× *.sqlite.ts repos, unit-of-work.sqlite.ts }   # live/default
+    │   ├── persistence/mongo/   { connection, mongo-context, mongo-unit-of-work,
+    │   │                          build-mongo-repositories, models/index.ts (only mongoose home),
+    │   │                          repositories/*.mongo.ts + mappers, test-support }  # ready, flagged
+    │   ├── llm/        { model-registry.ts, pricing.ts }   # SINGLE source of model IDs + pricing
+    │   ├── narrator/   { narrate-turn.ts }                 # NarratorPort → grok narration stream
+    │   ├── tts/        { xai-speech-synthesizer.ts }
+    │   ├── clock/      { system-clock.ts }
+    │   ├── logging/    { console-logger.ts }
+    │   └── background/ { process-background-tasks.ts }     # BackgroundTasks port; SIGTERM drain
+    │
+    ├── composition/   { container.ts }   # the ONLY place adapters meet use cases; server-only;
+    │                                     #   selects store by PERSISTENCE env
+    │
+    ├── app/                        # Next.js — driving adapters ONLY (thin)
+    │   ├── api/{chat,turns,usage,world-state,world-correction,world-corrections,tts,tts/record}/route.ts
+    │   ├── worlds/…  + actions.ts (Server Actions)
+    │   └── page.tsx / layout.tsx
+    │
+    ├── components/                 # React — presentation only; reads via DTOs, never SQL
+    ├── server/render/  { state-block.ts }   # server-side narrator-markdown renderer (driving adapter)
+    └── (prompts/  — git-diffable templates, loaded at runtime)
 
-scripts/   # thin CLIs over application/ + repositories — never bespoke SQL
-tests/     # mirror src/: domain/ (pure, fast, no mocks) · application/ (fakes for ports) · infra/ (real adapters)
+(root)  .dependency-cruiser.cjs · docker-compose.yml (Mongo experimentation, NOT Postgres)
 ```
 
-The dependency rule is checkable with a lint boundary: `domain/` may import only from `domain/`;
-`application/` may import `domain/`; `infrastructure/` and `app/` may import `domain/` +
-`application/`; nothing imports `app/` or `infrastructure/` except `composition/`.
+The dependency rule is no longer just a convention — it is enforced in CI (§6.6): `domain/` may
+import only from `domain/`; `application/` may import `domain/`; `infrastructure/` and `app/` may
+import `domain/` + `application/`; nothing imports `app/` or `infrastructure/` except `composition/`.
+The client may not import any server layer or native/SDK module; `contracts` stays pure.
 
 ---
 
-## 10. Migration Path From Today's Code
+## 10. Migration Tracker (largely complete on `onion-arch-refactor`)
 
-The point of this blueprint is to be *recreatable*, but you can also walk the current code toward it
-incrementally without a big-bang rewrite. Suggested order (each step independently shippable).
+This was the incremental path from the pre-refactor code. On the `onion-arch-refactor` branch the
+structural cleanup (the equivalent of original steps 1–7) is **done and merged**, the boundary is
+**self-enforcing in CI**, and the second-store capability is **built but not cut over**. Status is
+tracked below against the project's internal phase labels (P0–P7).
 
-> **Steps 1–7 are pure separation-of-concerns refactors: they change *where* code lives, not what the
-> product does, and must ship behind a green test suite with zero behavior change.** Steps 8–9 add
-> *capability* (Postgres/pgvector, the stubbed agents) and are deliberately **not** part of fixing the
-> coupling — keep them separate so the architecture cleanup is never held hostage to a feature
-> rewrite. If you only ever do steps 1–5, you have already eliminated every violation in §11.
+> **The separation-of-concerns refactors changed *where* code lives, not what the product does, and
+> shipped behind a green test suite (Vitest) with zero behavior change.** The capability work
+> (second store, stubbed agents) was kept separate so the architecture cleanup was never held hostage
+> to a feature rewrite. Every violation in §11 is eliminated.
 
-1. **Introduce the domain folder & extract pure services first** (no behavior change). Move
-   `computeReverieFlares`, occupancy PRNG, classifier rules, `PatchSanitizer`, memorable-fact
-   provenance, world-clock math into `domain/services/` and unit-test them in isolation. This is
-   pure refactor with the biggest immediate testability payoff.
-2. **Define ports + wrap `db.ts` in repositories.** Keep `db.ts` as the SQLite adapter's internals;
-   expose `TurnRepository` etc. Add a `SqliteUnitOfWork` enforcing `BEGIN IMMEDIATE`. Route callers
-   through repositories.
-3. **Extract the `ContextAssembler`** out of `prompt.ts`/`world-state.ts`/`narrator-guidance.ts`
-   into one pure service with the budget table from §6.1, and put a test around overflow behavior.
-4. **Wrap LLM calls in `Narrator`/`StructuredAgent` adapters.** Centralize model IDs and pricing in
-   `infrastructure/llm/`. Now Grok↔Sonnet is a config flip.
-5. **Carve `AdvanceTurn` out of `/api/chat/route.ts`.** Move the 11-step orchestration into the use
-   case; reduce the route to parse→call→pipe. Make fail-open/fail-closed explicit per §5.1.
-6. **Repeat for the other routes/actions** (`CreateWorld`, `ApplyCorrection`, `LoadHistory`,
-   `InspectWorld`, `SummarizeUsage`).
-7. **Re-point scripts at the application layer.** `merge-characters`, `copy-world`, seeders, and
-   backfills call use cases/repositories, not raw SQL.
-8. **Stand up the Postgres adapter as a sibling** and the Voyage embedding adapter; flip the
-   composition root behind an env flag. Vector retrieval (P7) lights up with no pipeline change.
-9. **Turn on the stubbed agents** (Conductor, Seeder, Compiler, Linter, Actor, Living World) one at
-   a time — each is a new adapter slotting into an interface the pipeline already exposes.
+**Done (merged on this branch):**
 
-**Make the boundary self-enforcing, or it will erode.** A directory layout alone does not keep
-concerns apart — the next hurried change re-tangles them. Lock the dependency rule from §9 into CI
-with an `import/no-restricted-paths` or `dependency-cruiser` check that **fails the build** when:
-`domain/` imports `infrastructure/`, `app/`, `ai`, `better-sqlite3`, `next`, `fetch`, or a wall-clock;
-`application/` imports a concrete adapter instead of a port; or anything but `composition/` imports
-`infrastructure/`. Pair it with the test split from §9 — pure domain tests that use **no** mocks, and
-application tests that run the use case against **fake ports**. Add one guard test that greps for the
-classic regressions (a `merge`/name-resolution branch under `infrastructure/`, a model-ID string
-literal outside `infrastructure/llm/`, prompt markdown outside the renderer). **Separation of concerns
-that a machine doesn't check is a comment, not an invariant** — and comments rot.
+1. **✅ Domain folder + pure services extracted** (P1). `reverie-flare`, occupancy PRNG
+   (`occupancy-sim`), classifier rules, `patch-sanitizer`, `memorable-fact-provenance`, `world-clock`,
+   `name-resolution`, `scene-transition`, `story-signal`, `turn-numbering`, `narrator-guidance` all
+   live in `domain/services/`, unit-tested in isolation. Row TYPE defs moved to `domain/entities/`.
+2. **✅ Ports defined + persistence behind repositories** (P2). 20 ports in `domain/ports/`; the old
+   `db.ts` is replaced by 14 `*.sqlite.ts` repositories + a `unit-of-work.sqlite.ts` enforcing
+   `BEGIN IMMEDIATE`. All repo methods are async.
+3. **✅ Context assembly + narrator guidance** extracted to pure domain services with the §6.1 budget
+   discipline.
+4. **✅ LLM calls behind adapters** (P4). Model IDs + pricing centralized in `infrastructure/llm/`;
+   the narrator-stream adapter is `infrastructure/narrator/narrate-turn.ts`. Provider/model choice is
+   a single-adapter change.
+5. **✅ `AdvanceTurn` carved out of `/api/chat/route.ts`** (P5). The ~593-line god route is gone; the
+   route is parse→call→pipe with `NarratorPort`/`NarrationStream`, a `BackgroundTasks` port, and a
+   SIGTERM drain. Fail-open/fail-closed is explicit per §5.1.
+6. **✅ Other routes/actions converted** (P5–P6): `ApplyCorrection`, `ListCorrections`, `LoadHistory`,
+   `InspectWorld`, `SummarizeUsage`, `SynthesizeNarration`, `RecordTtsUsage`. Cost/badge/profile
+   derivation moved **server-side via DTOs** (P6) — the client receives derived values, not raw rows.
+   Shared request/response shapes live in `@chronicles/contracts`.
+7. **✅ CI boundary enforcement stood up** (P7-tooling). `.dependency-cruiser.cjs` with 11 named rules
+   + `server-only` imports + grep guards; `npm run depcruise` runs as `pretest` (§6.6).
+8. **✅ Second-store adapter built** (P3, code). A full **Mongo + Mongoose** adapter set satisfies the
+   same ports behind `PERSISTENCE=mongo`; both stores pass their suites (`npm test` for SQLite,
+   `npm run test:mongo` against a real `MongoMemoryReplSet`).
+
+**Remaining (deliberately not done on this preview branch):**
+
+- ◻ **P3 — Mongo production cutover.** The adapter and backfill scripts exist; the live/default store
+  is still SQLite. Cutover is a **manual gate** (data backfill + soak), not yet executed.
+- ◻ **P7 — delete the SQLite adapter.** Waits for a Mongo soak in production; until then both adapter
+  sets are retained side by side.
+- ◻ **`apps/web` client split.** Planned but not done — the React client still lives inside
+  `packages/server`; `apps/` is empty. The `workspaces` glob already lists `apps/*` for when it lands.
+- ◻ **Re-point all `scripts/*.mjs` at the application layer** (the tail of step 7) and **turn on the
+  stubbed agents** (Conductor, Wiki Compiler, World Linter, Character Actor, Living World) — each a
+  new adapter slotting into an interface the pipeline already exposes.
+
+**The boundary is self-enforcing, as this section demanded.** A directory layout alone does not keep
+concerns apart — the next hurried change re-tangles them. The dependency rule from §9 is locked into
+CI via `dependency-cruiser` checks that **fail the build** when: `domain/` imports `infrastructure/`,
+`app/`, `ai`, `better-sqlite3`, `next`, `fetch`, or a wall-clock; `application/` imports a concrete
+adapter instead of a port; anything but `composition/` imports `infrastructure/`; `mongoose` appears
+outside the Mongo adapter; `better-sqlite3` outside the SQLite adapter; or a model-ID literal appears
+in `domain/`/`application/`. It is paired with the test split from §9 — pure domain tests with **no**
+mocks, application tests against **fake ports** — and grep guards for the classic regressions.
+**Separation of concerns that a machine doesn't check is a comment, not an invariant** — and comments
+rot.
 
 ---
 
-## 11. Coupling Smells This Design Exists To Kill
+## 11. Coupling Smells This Design Existed To Kill
 
-A checklist of what the current code does and what the target forbids — useful as a review rubric:
+A checklist of what the **pre-refactor** code did and what the rules forbid — now a review rubric to
+keep the resolved violations from returning. All but the last two are eliminated on this branch
+(✅); the remaining two are known gaps tracked in §10.
 
-| Smell (today) | Where | Target rule |
+| Smell (pre-refactor) | Where it lived | Rule / status |
 |---|---|---|
-| **God endpoint** — one route does retry, budget, classify, NPC tick, occupancy, narrate, reconcile, archive, apply, dedup (594 lines, 5 LLM calls). | `app/api/chat/route.ts` | Route is a thin adapter; orchestration lives in `AdvanceTurn` (§5). |
-| **Raw SQL everywhere** — every module imports `db.ts`; type-cast `.get() as Turn`. | `lib/db.ts` + all callers | Repositories behind ports; domain never sees SQL. |
-| **Mixed-concern modules** — `archivist.ts` does prompt + LLM + parse + sanitize + DB write. | `lib/archivist.ts` | Five concerns → five homes (template, port, boundary validation, `PatchSanitizer`, use-case apply). |
-| **Context assembly smeared** across three files; hard to reason about what the narrator sees. | `prompt.ts`, `world-state.ts`, `narrator-guidance.ts` | One pure `ContextAssembler` with the budget table. |
-| **Silent `.catch(() => {})`** swallows failures with no taxonomy. | several routes | Explicit fail-open (post-stream) vs fail-closed (pre-stream); domain error types. |
-| **No transaction boundaries** — multi-step writes can partial-commit. | world creation, patch apply | `UnitOfWork` with `BEGIN IMMEDIATE`; one TX per logical write. |
-| **Model IDs as scattered string literals**; provider lock-in. | `chat/route.ts:51`, various `lib/*` | All model IDs + pricing behind LLM adapters. |
-| **Players can author outcomes** ("I kill the king" accepted). | MVP narrator path | Player text = intent; Conductor/Classifier resolve; narrator describes resolved outcome. |
-| **Scripts reach straight into the DB**, bypassing invariants. | `scripts/*.mjs` | Scripts are thin CLIs over the application layer. |
+| **God endpoint** — one route did retry, budget, classify, NPC tick, occupancy, narrate, reconcile, archive, apply, dedup (~593 lines, 5 LLM calls). | `app/api/chat/route.ts` | ✅ Route is a thin adapter; orchestration lives in `AdvanceTurn` (§5). |
+| **Raw SQL everywhere** — every module imported `db.ts`; type-cast `.get() as Turn`. | `lib/db.ts` + all callers | ✅ Repositories behind ports; domain never sees SQL. |
+| **Mixed-concern modules** — `archivist.ts` did prompt + LLM + parse + sanitize + DB write. | `lib/archivist.ts` | ✅ Five concerns → five homes (template, port, boundary validation, `patch-sanitizer`, use-case apply). |
+| **Context assembly smeared** across three files; hard to reason about what the narrator saw. | `prompt.ts`, `world-state.ts`, `narrator-guidance.ts` | ✅ Pure domain services with the §6.1 budget table. |
+| **Silent `.catch(() => {})`** swallowing failures with no taxonomy. | several routes | ✅ Explicit fail-open (post-stream) vs fail-closed (pre-stream); domain error types. |
+| **No transaction boundaries** — multi-step writes could partial-commit. | world creation, patch apply | ✅ `UnitOfWork` (`BEGIN IMMEDIATE` in SQLite; `session.withTransaction` in Mongo). |
+| **Model IDs as scattered string literals**; provider lock-in. | seven agent modules + two narrator call sites | ✅ All model IDs + pricing in `infrastructure/llm/`; CI forbids them in domain/app. |
+| **Players can author outcomes** ("I kill the king" accepted). | MVP narrator path | ◻ Still open — Conductor/Classifier resolution is a stub (§8). |
+| **Scripts reach straight into the DB**, bypassing invariants. | `scripts/*.mjs` | ◻ Still open — re-pointing scripts at the application layer is the tail of step 7 (§10). |
 
 ---
 

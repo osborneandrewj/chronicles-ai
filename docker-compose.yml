@@ -1,0 +1,24 @@
+services:
+  mongo:
+    image: mongo:8
+    container_name: chronicles-mongo
+    restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - chronicles_mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: >
+        mongosh --quiet --eval '
+          try { rs.status().ok }
+          catch (e) {
+            rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "localhost:27017" }] }).ok
+           }'
+      interval: 5s
+      timeout: 30s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  chronicles_mongo_data:

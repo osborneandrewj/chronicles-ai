@@ -6,6 +6,8 @@
 
 Every LLM call is stateless. The memory architecture is infrastructure that selects, retrieves, and injects relevant context into each agent's prompt. The quality of the story is directly determined by the quality of the memory system.
 
+> **Onion-architecture note (branch `onion-arch-refactor`).** Memory persistence is reached only through a domain port, `MemoryRepository` (`packages/server/src/domain/ports/memory-repository.ts`). Use cases and domain services talk to that interface; they never touch SQL or an embedding SDK. Two infrastructure adapters satisfy the same port — `infrastructure/persistence/sqlite/memory-repository.sqlite.ts` (the live/default store) and `infrastructure/persistence/mongo/repositories/memory-repository.mongo.ts` (ready behind `PERSISTENCE=mongo`, not yet cut over). The port today exposes a single method, `searchSimilar(worldId, embedding, k)`, which is the **Phase-2 vector slot and a deliberate no-op**: both adapters return `[]` because no embeddings provider is wired (no Voyage usage, no `memory_chunks` rows yet). The context assembler already tolerates an empty retrieval, so memory degrades gracefully until embeddings land. The rest of this doc describes the **target** memory design; where it names Postgres/pgvector/Drizzle as the store, read "SQLite (live) + Mongo (ready, behind `PERSISTENCE` flag)" per the system-architecture rebuild.
+
 ## 2. Memory Types
 
 ### 2.1 Episodic Memory (What Happened)
@@ -149,7 +151,7 @@ Seeded knowledge is retrieved directly during play. Canon status is included in 
 
 ### 3.3 Phase 3: Semantic Retrieval
 
-Adds vector similarity search for long-term memory.
+Adds vector similarity search for long-term memory. The queries below are illustrative of the **target** retrieval shape; in the onion layout each is a method on a repository port (recent turns via `TurnRepository`, similarity hits via `MemoryRepository.searchSimilar`), and the SQL/`<=>` operator shown is one possible adapter implementation, not a literal that may appear in domain or application code.
 
 ```
 Player submits action
@@ -246,10 +248,12 @@ The conductor's decision informs what context to prioritize.
 ## 4. Embedding Strategy
 
 ### Model
-**Voyage AI `voyage-3-lite`** (Phase 2+)
+**Voyage AI `voyage-3-lite`** (Phase 2+, **not yet wired** — see the onion note in §1)
 - 1024 dimensions
 - Good balance of quality and cost
 - Upgrade path to `voyage-3` if retrieval quality needs improvement
+
+When built, the embeddings provider is an infrastructure adapter (its API key and model ID live in `infrastructure/`, never in domain/application). Until then `MemoryRepository.searchSimilar` is a no-op returning `[]` in both the SQLite and Mongo adapters.
 
 ### What Gets Embedded
 
@@ -264,46 +268,32 @@ The conductor's decision informs what context to prioritize.
 
 ### Embedding Pipeline
 
+This pipeline is **Phase-2 / unbuilt**. When it lands, the embedding call lives in an embeddings adapter (an `EmbeddingsPort`) and the read goes through the existing `MemoryRepository.searchSimilar` port — neither the use case nor any domain service issues SQL or talks to Voyage directly.
+
 ```typescript
-// Pseudocode for the embedding pipeline
+// Pseudocode for the embedding pipeline (Phase 2, behind ports)
 
-async function embedAndStore(content: string, worldId: string, type: string) {
-  // 1. Call Voyage AI
-  const embedding = await voyageClient.embed({
-    input: content,
-    model: "voyage-3-lite",
-  })
-
-  // 2. Store in memory_chunks
-  await db.insert(memoryChunks).values({
+// Write path: an embeddings adapter computes the vector; a memory repository persists it.
+async function embedAndStore(content: string, worldId: number, type: string) {
+  const embedding = await embeddings.embed(content)         // EmbeddingsPort adapter (Voyage)
+  await memoryRepository.insertChunk({                       // MemoryRepository adapter (SQLite/Mongo)
     worldId,
-    content,
+    text: content,
     chunkType: type,
-    embedding: embedding.data[0].embedding,
+    embedding,
   })
 }
 
-async function queryMemories(action: string, worldId: string, limit: number) {
-  // 1. Embed the query
-  const queryEmbedding = await voyageClient.embed({
-    input: action,
-    model: "voyage-3-lite",
-  })
-
-  // 2. Vector similarity search
-  const results = await db
-    .select({
-      content: memoryChunks.content,
-      similarity: sql`1 - (${memoryChunks.embedding} <=> ${queryEmbedding})`,
-    })
-    .from(memoryChunks)
-    .where(eq(memoryChunks.worldId, worldId))
-    .orderBy(sql`${memoryChunks.embedding} <=> ${queryEmbedding}`)
-    .limit(limit)
-
-  return results
+// Read path: today this resolves to the port's no-op (returns []).
+async function queryMemories(action: string, worldId: number, k: number) {
+  const queryEmbedding = await embeddings.embed(action)     // embed at query time, never stored
+  // searchSimilar ranks chunks by cosine similarity and returns the top-k.
+  // Live impl is a no-op stub returning [] until embeddings are wired.
+  return memoryRepository.searchSimilar(worldId, queryEmbedding, k)
 }
 ```
+
+The chosen store decides how `searchSimilar` is implemented behind the port: a SQLite vector extension, Mongo Atlas `$vectorSearch`, or a sidecar like Qdrant. Nothing above `infrastructure/` knows which.
 
 ### Chunking Strategy
 
@@ -351,7 +341,7 @@ The block is assembled from structured state first and recent extracted facts se
 
 ```typescript
 interface TokenBudget {
-  total: number              // 8000 for Sonnet, 4000 for Haiku
+  total: number              // 8000 for the narrator (Grok), 4000 for Haiku agents
   systemPrompt: number       // reserved, ~500
   authoritativeState: number  // reserved, ~300-600 depending on tactical state
   worldContext: number        // reserved, ~300
@@ -452,7 +442,7 @@ For Phase 3+, consider using `@anthropic-ai/tokenizer` for precise counts, but o
 
 ### Relevance Scoring
 
-In Phase 3+, retrieved content has a relevance score (cosine similarity from pgvector). The context assembler uses this to prioritize:
+In Phase 3+, retrieved content has a relevance score (cosine similarity returned by `MemoryRepository.searchSimilar`, regardless of the backing vector store). The context assembler uses this to prioritize:
 
 ```
 Score > 0.85: Highly relevant — always include if budget allows
@@ -486,6 +476,8 @@ Archivist extracts structured data
   ├──▶ NPC agenda updates created or adjusted when live play establishes independent NPC plans
   └──▶ Memory summaries embedded and stored as memory_chunks (episodic memory, compressed)
 ```
+
+**Fact provenance (`[t:N]`).** When the Archivist records a durable memorable fact, the fact is stamped with the turn it came from using a `[t:N]` provenance tag. Stamping and stripping that tag is **pure logic** and lives in the domain service `memorable-fact-provenance` (`packages/server/src/domain/services/memorable-fact-provenance.ts`, exporting `appendFactWithProvenance` / `stripFactProvenance`) — not in a repository or an LLM-adapter. The use case runs the service, then hands the already-stamped flat value to a repository; the Mongo adapter preserves the `[t:N]` tag verbatim.
 
 ### Compaction (Future)
 

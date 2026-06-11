@@ -2,7 +2,9 @@
 
 ## 1. Overview
 
-All persistent state lives in a single PostgreSQL 17 instance with the pgvector extension. The schema is organized into three tiers, introduced across implementation phases:
+> **Datastore status (onion-arch-refactor branch, 2026-06-08).** The original target — a single PostgreSQL 17 instance with the pgvector extension and Drizzle ORM — is **superseded**. The live/default store is now **SQLite via raw `better-sqlite3`** (no Drizzle, no Postgres), with migrations applied on boot. A full **MongoDB + Mongoose** adapter has been built behind the `PERSISTENCE=mongo` flag but is **not yet cut over** (`PERSISTENCE` defaults to `sqlite`; the production Mongo cutover and backfill are a deferred manual gate). Both adapter sets implement the **same repository ports** (`packages/server/src/domain/ports/`), so nothing above `infrastructure/` knows which store is live. The SQL schema below is kept as the **logical source of truth** — it still describes the entities, columns, constraints, and indexes faithfully — with **Mongo mapping notes** added per section (see §1.1). Read the SQL/`SQLTYPE`s as logical types: in SQLite they map to its affinities (`TEXT`/`INTEGER`/`REAL`, JSON stored as `TEXT`); in Mongo to BSON documents.
+
+All persistent state lives in one logical schema, organized into three tiers, introduced across implementation phases:
 
 - **Core Tables (Phase 1)** — worlds, characters, scenes, turns
 - **Seeding + Knowledge Tables (Phase 2-3)** — world_sources, wiki_pages, timeline_events, relationships, story_threads, memory_chunks
@@ -12,10 +14,23 @@ All persistent state lives in a single PostgreSQL 17 instance with the pgvector 
 Design principles:
 - UUIDs for all primary keys (safe for distributed systems, prevents enumeration)
 - `created_at` / `updated_at` timestamps on mutable tables
-- Turns are append-only (no `updated_at`)
+- Turns are append-only (no `updated_at`); the `TurnRepository` port is append-only by construction (insert / recentTurns / turnsBefore / mergeMetadata — no general update)
 - JSONB columns for flexible/evolving data
 - Denormalize where it eliminates expensive joins on hot paths
 - Foreign keys with CASCADE deletes (world deletion cleans up everything)
+
+### 1.1 MongoDB mapping (PERSISTENCE=mongo)
+
+The Mongo adapter (`packages/server/src/infrastructure/persistence/mongo/`) maps this logical schema onto Mongoose models. The mapping rules below are general; individual sections add table-specific notes:
+
+- **Shape.** 15 top-level collections plus 2 embedded subdocuments (a small structure is embedded in its parent document rather than given its own collection).
+- **Monotone integer ids and turn sequence.** A dedicated `counters` collection with an atomic `findOneAndUpdate` `$inc` issues every collection a monotone **integer** `id` and the per-scene/per-world turn sequence. Ordering **never** depends on Mongo's `ObjectId` — it depends on these integer counters, preserving the same ordering guarantees the SQL `turn_number` / sequential ids provide.
+- **CHECK constraints → enums and ranges.** SQL `CHECK` / enumerated status fields become Mongoose `enum`s. Numeric ranges (e.g. importance `1..5`, intensity `0..1`) become `min`/`max` validators.
+- **Case-insensitive uniqueness.** SQL `lower(name)` / `lower(title)` unique indexes become a normalized `nameKey` / `titleKey` field carrying a **unique index scoped per `worldId`**.
+- **Provenance.** `[t:N]` provenance markers in extracted facts are preserved verbatim.
+- **Transactions.** The Mongo `UnitOfWork` wraps work in `session.withTransaction`, with a **replica-set fail-fast at boot** (transactions require a replica set). The SQLite `UnitOfWork` uses an immediate transaction.
+
+The SQLite adapter (`packages/server/src/infrastructure/persistence/sqlite/`) holds the 14 `*.sqlite.ts` repositories plus `unit-of-work.sqlite.ts`; its repo methods are `async` (sync `better-sqlite3` calls wrapped in `Promise.resolve`) to satisfy the shared async ports.
 
 ## 2. Entity Relationship Diagram
 
@@ -316,7 +331,7 @@ CREATE UNIQUE INDEX idx_turns_scene_number ON turns(scene_id, turn_number);
 **`metadata` JSONB structure**:
 ```json
 {
-  "model": "claude-sonnet-4-20250514",
+  "model": "grok-4.3",
   "prompt_tokens": 2847,
   "completion_tokens": 312,
   "total_tokens": 3159,
@@ -421,7 +436,7 @@ CREATE INDEX idx_wiki_embedding ON wiki_pages
 
 **`confidence`**: `low`, `medium`, `high`. Confidence expresses extraction certainty, not narrative truth. A `rumor` can have high confidence if the source clearly states that people believe it.
 
-**`embedding`**: 1024-dimensional Voyage AI vector for semantic search. The HNSW index enables fast approximate nearest neighbor queries.
+**`embedding`**: 1024-dimensional Voyage AI vector for semantic search. The HNSW index (a pgvector feature) was part of the superseded Postgres target. **Current reality:** embedding/vector search is an unbuilt **Phase-2 slot** — `MemoryRepository.searchSimilar()` is a no-op returning `[]` in both the SQLite and Mongo adapters, and neither store populates the embedding column. The 1024-dim shape and HNSW parameters below are retained as the intended design for when embeddings land.
 
 **Unique title per world**: The `lower(title)` unique index prevents duplicate wiki entries (case-insensitive).
 
@@ -723,11 +738,13 @@ CREATE INDEX idx_notifications_user_unread ON notifications(user_id, read)
 
 ## 7. Migration Strategy
 
+> **Mechanism note (current branch).** Drizzle Kit is gone along with Postgres — there is no `db:generate` / `db:migrate` / `db:studio`. The live SQLite store applies its migrations **on boot** via raw `better-sqlite3`. The phase plan and immutability discipline below remain the intended logical sequence; treat the `NNNN_description.sql` naming as the logical migration units, not Drizzle-generated artifacts. Under `PERSISTENCE=mongo`, schema is shaped by the Mongoose models (`packages/server/src/infrastructure/persistence/mongo/models/index.ts`) and indexes are declared on those models rather than via SQL DDL.
+
 ### Principles
 - One migration per logical change
-- All migrations must be reversible (include down/rollback SQL)
+- Prefer reversible migrations where the store supports them
 - Never modify a deployed migration — create a new one
-- Name format: `NNNN_description.sql` (Drizzle Kit generates these)
+- Name format: `NNNN_description.sql` (logical migration unit)
 - Test migrations against production-like data before deploying
 
 ### Phase Migration Plan
@@ -809,7 +826,7 @@ LIMIT 1;
 -- Uses idx_scenes_world_id
 ```
 
-**Semantic memory retrieval** (Phase 3+):
+**Semantic memory retrieval** (Phase 3+) — the `<=>` cosine operator below is pgvector syntax from the superseded target; on the live stores this is the unbuilt Phase-2 slot (`MemoryRepository.searchSimilar()` returns `[]`):
 ```sql
 SELECT id, content, chunk_type, 1 - (embedding <=> $1) AS similarity
 FROM memory_chunks
@@ -908,4 +925,4 @@ For a single-player world with ~100 turns per session:
 - `timeline_events`: ~5-10 per session → ~10KB/session
 - `npc_agendas`: ~3-20 rows per world, updated in place → negligible storage
 
-A heavy-use world with 1000 turns would accumulate ~1MB of turn data, ~500KB of wiki, ~200KB of memory chunks. Well within single-instance Postgres capacity.
+A heavy-use world with 1000 turns would accumulate ~1MB of turn data, ~500KB of wiki, ~200KB of memory chunks. Well within the capacity of the live single-file SQLite store (or a single Mongo instance once cut over).

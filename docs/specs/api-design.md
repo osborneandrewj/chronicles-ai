@@ -1,78 +1,133 @@
 # API Design
 
+> **Status (onion-arch-refactor, 2026-06-08).** This branch carved the old 593-line
+> `api/chat` god endpoint into thin inbound adapters over named application use cases.
+> Every HTTP route now parses input, calls one use case, and pipes the result — owning
+> no pipeline logic. The route→use-case mapping and shared contract schemas below are the
+> shipped reality. **Preview-branch caveats:** the planned `apps/web` client split did
+> **not** happen (the client still lives inside `packages/server`), Mongo persistence is
+> wired but not cut over (`PERSISTENCE=sqlite` is live), and the Server-Action sections
+> further down (§3) remain the *aspirational* CRUD design — most of those functions are
+> not yet implemented as `"use server"` actions.
+
 ## 1. Overview
 
 The API uses two patterns:
 
-- **Server Actions** — for all CRUD operations triggered by the UI (creating worlds, updating characters, browsing wiki). These are direct function calls from React components, not HTTP endpoints.
-- **Route Handlers** — for the streaming narrator endpoint and any future webhooks/external integrations.
+- **Route Handlers (`packages/server/src/app/api/*/route.ts`)** — the shipped surface. Each
+  is a thin inbound adapter: it validates the request with a shared
+  `@chronicles/contracts` Zod schema, calls exactly one application use case, maps any
+  domain error to an HTTP status **at the edge**, and pipes the result. No business logic
+  lives in a route.
+- **Server Actions** — the intended pattern for UI-triggered CRUD (creating worlds, editing
+  characters, browsing wiki). Largely still aspirational on this branch; see §3.
 
-There is no REST API layer. Server Actions replace the traditional REST/tRPC pattern for a solo-developer Next.js project.
+There is no REST API layer in the resource-oriented sense. Routes are command/query adapters
+over use cases, not CRUD-over-tables.
+
+### Route → use-case mapping
+
+| Route | Use case | Purpose |
+|-------|----------|---------|
+| `POST /api/chat?worldId=N` | `advanceTurn` | Run a turn; stream narration (see §2.1) |
+| `POST /api/tts` | `synthesizeNarration` | Synthesize narrator speech |
+| `POST /api/tts/record` | `recordTtsUsage` | Record TTS character usage |
+| `GET /api/turns` | `loadHistory` | Load a world's turn history |
+| `GET /api/usage` | `summarizeUsage` | Token/cost usage summary |
+| `GET /api/world-state` | `inspectWorld` | Authoritative world state (inspector) |
+| `POST /api/world-correction` | `applyCorrection` | Apply a player world-state correction |
+| `GET /api/world-corrections` | `listCorrections` | List prior corrections |
+
+Use cases live in `packages/server/src/application/use-cases/`; they import `domain/` only and
+never touch SQL, an SDK, or a framework. Concrete adapters are constructed once in
+`packages/server/src/composition/container.ts` and handed to the route via `getContainer()`.
 
 ## 2. Route Handlers
 
-### 2.1 `POST /api/story/stream`
+### 2.1 `POST /api/chat?worldId=N`
 
-The core endpoint. Accepts a player action and returns a streamed narrator response via Server-Sent Events.
+The core endpoint (`packages/server/src/app/api/chat/route.ts`). Accepts the running
+chat-message list, runs a turn, and streams the narrator response as a Vercel AI SDK UI
+message stream. The route is a thin adapter over the `advanceTurn` use case — it owns no
+pipeline logic.
 
-**Request**:
+**Request**: `worldId` is a positive-integer query param. The body is the shared
+`@chronicles/contracts` chat shape — an AI-SDK `messages[]` array (each message a `{ role,
+parts[] }`), validated at the edge:
+
 ```typescript
 {
-  worldId: string       // UUID
-  sceneId: string       // UUID
-  characterId: string   // UUID of the player character
-  action: string        // Player's text input (1-2000 chars)
+  messages: Array<{
+    id?: string
+    role: string
+    parts: Array<{ type: string; text?: string }>
+  }>
 }
 ```
 
-**Response**: SSE stream (Vercel AI SDK UI message stream format)
+The route extracts the latest user message's text into `playerText` and passes the whole
+list to the use case.
 
-The stream emits:
-- Text delta tokens as they generate
-- Usage metadata on completion
-- Error events if the stream fails
+**Response**: an AI SDK UI message stream (`createUIMessageStreamResponse`). `advanceTurn`
+returns one of two result kinds, and the route renders accordingly:
+- **`canned`** — a meta-command reply or a replay of an existing turn; emitted as a single
+  `text-start`/`text-delta`/`text-end` sequence.
+- **`stream`** — live narration. The narrator adapter returns a `NarrationStream
+  { chunks, completion }`; the route pipes `chunks` verbatim, then appends a
+  `data-turn-metadata` part carrying the persisted `dbTurnId` once `completion` resolves.
+  Because the adapter settles `completion` only after the source stream drains
+  (post-`onFinish`), the metadata part is guaranteed to land **last** — the ordering the
+  client depends on. This append is done by the `appendDbTurnId` helper.
 
-**Flow**:
-1. Validate request body with Zod
-2. Verify world/scene/character exist and are active
-3. Determine next `turn_number` for the scene
-4. Insert `player_action` turn into DB
-5. Assemble context (retrieval + formatting)
-6. Call `streamText()` with Claude Sonnet
-7. Stream response to client
-8. `onFinish`: Insert `narrator_response` turn with usage metadata
+**Narration path** — the route holds no narrator logic:
+- The narrator is reached through the `NarratorPort` adapter
+  (`packages/server/src/infrastructure/narrator/narrate-turn.ts`), injected into the use case
+  as `buildNarration`.
+- Post-turn work (e.g. the archivist pass) is registered on the **`BackgroundTasks`** port.
+  Its adapter (`packages/server/src/infrastructure/background/process-background-tasks.ts`)
+  tracks in-flight promises and installs a single `process.once('SIGTERM')` **drain** that
+  awaits outstanding work before exit — turning "fire-and-pray" into bounded-loss
+  best-effort.
 
-**Error Responses**:
+**Error Responses** — domain errors are mapped to HTTP **only here**, at the edge:
 | Status | Condition |
 |--------|-----------|
-| 400 | Invalid request body (Zod validation) |
-| 404 | World, scene, or character not found |
-| 409 | Scene is not active |
-| 429 | Rate limit exceeded (>30 turns/minute) |
-| 500 | LLM call failure |
+| 400 | Missing/invalid `worldId`, invalid JSON, schema-invalid body, or `EmptyPlayerActionError` |
+| 404 | `WorldNotFoundError` (world unknown — checked before body parse, re-checked in the use case) |
+| 429 | `BudgetExceededError` — daily token cap reached (JSON body: `error`, `message`, `used`, `limit`) |
+| 500 | Unhandled failure (re-thrown) |
 
-**Rate Limiting**: Simple in-memory counter per world ID. 30 turns per minute. Resets every 60 seconds. No Redis needed for single-user MVP.
+**Cost cap**: a daily token limit is enforced (`isOverDailyLimit` / `todaysTokens` /
+`dailyTokenLimit`, injected into the use case); over-limit surfaces as `BudgetExceededError`
+→ HTTP 429. There is no per-minute rate limiter on this branch.
 
-### 2.2 `POST /api/voice/token` (Phase 6)
+### 2.2 Other route handlers
 
-Returns a temporary token for the TTS service. Deferred.
+The remaining routes are the same thin-adapter shape — parse with a `@chronicles/contracts`
+schema, call one use case, map domain errors to status at the edge:
 
-### 2.3 `GET /api/health`
+- `POST /api/tts` → `synthesizeNarration`
+- `POST /api/tts/record` → `recordTtsUsage`
+- `GET /api/turns` → `loadHistory`
+- `GET /api/usage` → `summarizeUsage`
+- `GET /api/world-state` → `inspectWorld`
+- `POST /api/world-correction` → `applyCorrection` (404 `WorldNotFoundError`, 502
+  `CorrectionExtractFailed`, 500 `CorrectionApplyFailed`)
+- `GET /api/world-corrections` → `listCorrections`
 
-Simple health check for deployment monitoring.
-
-**Response**:
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-05-03T00:00:00Z",
-  "database": "connected"
-}
-```
+There is no `/api/health` or `/api/voice/token` route on this branch.
 
 ## 3. Server Actions
 
-Server Actions are `"use server"` async functions called directly from React components. They handle validation, database operations, and revalidation.
+> **Aspirational on this branch.** The shipped surface is the Route Handlers in §2. The
+> Server Actions below describe the intended UI-triggered CRUD design; most are not yet
+> implemented as `"use server"` actions, and the `src/lib/actions/*` paths predate the
+> monorepo move — runtime code now lives under `packages/server/src/`. When these land,
+> each action follows the same discipline as a route: validate with a contract schema,
+> call a use case, keep deciding logic in pure domain services (name resolution, dedup,
+> scene-transition), never inline SQL or SDK calls.
+
+Server Actions are `"use server"` async functions called directly from React components. They handle validation, then delegate to an application use case for database operations and revalidation.
 
 ### 3.1 World Actions
 
@@ -322,9 +377,12 @@ Narrator, World Seeder, Wiki Compiler, World Linter, Archivist, Conductor, and A
 
 Player input is always treated as an in-story action. It must never be interpolated into system prompts as instructions, loaded as a prompt template, or used to select files. The narrator prompt should explicitly ignore out-of-character commands from player text.
 
-### Rate Limiting
+### Cost cap / rate limiting
 
-Phase 1 uses an in-memory per-world limiter because the app is single-process local-first. Phase 5+ must replace or supplement it with authenticated per-user and per-world limits that work across deployment instances.
+This branch enforces a **daily token cost cap** (`isOverDailyLimit` / `todaysTokens` /
+`dailyTokenLimit`), surfaced as `BudgetExceededError` → HTTP 429 at the `/api/chat` edge.
+There is no per-minute request limiter. Phase 5+ must add authenticated per-user and
+per-world limits that work across deployment instances.
 
 ## 7. Data Streaming Protocol
 
@@ -379,7 +437,7 @@ return createUIMessageStreamResponse({ stream })
 ```typescript
 // Client side
 const { messages, sendMessage } = useChat({
-  api: '/api/story/stream',
+  api: '/api/chat?worldId=' + worldId,
   onData(dataPart) {
     if (dataPart.type === 'data-turn-metadata') {
       // Update local UI with persisted turn ID and usage.
@@ -390,13 +448,27 @@ const { messages, sendMessage } = useChat({
 
 This allows the client to display token usage, link to the persisted turn, or trigger UI updates after the stream completes.
 
-## 8. Endpoint Summary by Phase
+> **Derived values are server-side (P6).** Cost, badge, and profile values are computed
+> server-side and returned as DTOs through `@chronicles/contracts` — the client receives
+> derived values, not raw rows, and never re-derives cost from token counts itself.
 
-### Phase 1
+## 8. Endpoint Summary
+
+### Shipped route handlers (this branch)
+| Path | Use case | Purpose |
+|------|----------|---------|
+| `POST /api/chat?worldId=N` | `advanceTurn` | Narrator streaming |
+| `POST /api/tts` | `synthesizeNarration` | Synthesize narrator speech |
+| `POST /api/tts/record` | `recordTtsUsage` | Record TTS character usage |
+| `GET /api/turns` | `loadHistory` | Turn history |
+| `GET /api/usage` | `summarizeUsage` | Token/cost usage summary |
+| `GET /api/world-state` | `inspectWorld` | Authoritative state (inspector) |
+| `POST /api/world-correction` | `applyCorrection` | Apply a world-state correction |
+| `GET /api/world-corrections` | `listCorrections` | List prior corrections |
+
+### Phase 1 (aspirational Server Actions)
 | Type | Path/Function | Purpose |
 |------|--------------|---------|
-| Route Handler | `POST /api/story/stream` | Narrator streaming |
-| Route Handler | `GET /api/health` | Health check |
 | Server Action | `createWorld()` | Create world + scene + character |
 | Server Action | `listWorlds()` | List all worlds |
 | Server Action | `getWorld()` | World details |

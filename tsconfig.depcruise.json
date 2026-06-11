@@ -1,0 +1,12 @@
+{
+  "// note": "Minimal tsconfig consumed ONLY by dependency-cruiser (.dependency-cruiser.cjs) to resolve the @/* and @chronicles/* path aliases. It carries no `include` globs so cruiser's TS resolver does not try to enumerate a project. The real type-check uses packages/server/tsconfig.json.",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["packages/server/src/*"],
+      "@chronicles/contracts": ["packages/contracts/src/index.ts"],
+      "@chronicles/contracts/*": ["packages/contracts/src/*"]
+    }
+  }
+}

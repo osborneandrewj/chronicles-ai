@@ -1,5 +1,17 @@
 # System Architecture
 
+> **Status (branch `onion-arch-refactor`, 2026-06-08).** This document describes the
+> post-refactor reality: an npm-workspaces monorepo whose runtime code is organized as
+> a **hexagonal / onion architecture** (domain → application → infrastructure, wired in a
+> composition root). The architecture below is real and merged on the branch, but it is a
+> **preview branch that may be discarded**, and two things are deliberately not done yet:
+> (a) the MongoDB production cutover (adapter code + backfill scripts exist; flipping
+> `PERSISTENCE=mongo` in production is a manual gate), and (b) deletion of the SQLite
+> adapter (waits for a Mongo soak). The planned `apps/web` client split also has **not**
+> happened — the client still lives inside `packages/server`; the root `workspaces` glob
+> lists `apps/*`, but `apps/` is empty. Where this doc still says "Postgres/Drizzle/pgvector"
+> in a corner, read it as the *superseded* target.
+
 ## 1. System Overview
 
 Chronicles AI is an AI-powered interactive novel engine built on a multi-agent architecture. The system accepts player input (text), orchestrates multiple specialized AI agents to generate narrative responses, and persists all world state to a structured database. The architecture is designed to scale from single-player local development to asynchronous multiplayer with shared persistent worlds.
@@ -14,7 +26,7 @@ Chronicles AI is an AI-powered interactive novel engine built on a multi-agent a
 │  │   display)    │  │              │  │                   │  │
 │  └───────┬──────┘  └──────┬───────┘  └───────────────────┘  │
 │         │                 │                                   │
-│         │    SSE Stream   │   POST /api/story/stream          │
+│         │   Token Stream  │   POST /api/chat                  │
 └─────────┼─────────────────┼──────────────────────────────────┘
           │                 │
           ▼                 ▼
@@ -40,7 +52,7 @@ Chronicles AI is an AI-powered interactive novel engine built on a multi-agent a
 │  │  ┌─────────────┐  ┌────────────┐  ┌──────────────┐  │   │
 │  │  │  Narrator    │  │  Character │  │   Archivist  │  │   │
 │  │  │  Agent       │  │  Actor     │  │   Agent      │  │   │
-│  │  │  (Sonnet)    │  │  (Sonnet)  │  │   (Haiku)    │  │   │
+│  │  │  (Grok 4.3)  │  │  (Grok)    │  │   (Haiku)    │  │   │
 │  │  └──────────────┘  └────────────┘  └──────────────┘  │   │
 │  │         ▲                                             │   │
 │  │         │          ┌────────────┐                     │   │
@@ -63,27 +75,95 @@ Chronicles AI is an AI-powered interactive novel engine built on a multi-agent a
                   │
                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    DATA LAYER                                │
+│              DATA LAYER (behind repository ports)            │
 │                                                              │
 │  ┌──────────────────────┐    ┌───────────────────────────┐  │
-│  │  PostgreSQL           │    │  pgvector                  │  │
+│  │  SQLite (LIVE)        │    │  MongoDB (READY, gated)    │  │
+│  │  better-sqlite3, raw  │    │  Mongoose, PERSISTENCE=    │  │
+│  │  migrations on boot   │    │  mongo (not cut over)      │  │
 │  │                       │    │                            │  │
-│  │  worlds               │    │  memory_chunks.embedding   │  │
-│  │  characters           │    │  wiki_pages.embedding      │  │
-│  │  scenes               │    │                            │  │
-│  │  turns                │    │  Cosine similarity search  │  │
-│  │  world_sources        │    │  HNSW index               │  │
-│  │  wiki_pages           │    │  HNSW index               │  │
-│  │  timeline_events      │    │                            │  │
-│  │  relationships        │    └───────────────────────────┘  │
-│  │  story_threads        │                                   │
-│  │  npc_agendas          │                                   │
-│  │  memory_chunks        │    ┌───────────────────────────┐  │
-│  │  notifications        │    │  Voyage AI (External)      │  │
-│  └──────────────────────┘    │  Embedding generation      │  │
-│                               └───────────────────────────┘  │
+│  │  worlds               │    │  same logical schema:      │  │
+│  │  characters           │    │  15 collections + 2        │  │
+│  │  places / scenes      │    │  embedded subdocs          │  │
+│  │  turns (append-only)  │    │  counters → monotone int   │  │
+│  │  dossiers / reveries  │    │  ids + turn seq            │  │
+│  │  occupancy / intents  │    │  (ordering never on        │  │
+│  │  corrections / usage  │    │  ObjectId)                 │  │
+│  │  tts_cache / memory   │    └───────────────────────────┘  │
+│  └──────────────────────┘                                   │
+│   Both adapter sets satisfy the SAME ports; nothing above   │
+│   infrastructure/ knows which store is live.                │
+│                                                              │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Voyage AI (External) — Phase-2 embedding slot,        │  │
+│  │  unbuilt. MemoryRepository.searchSimilar() → [] today. │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 1.1 Repository Topology & Layering
+
+The runtime is an **npm-workspaces monorepo**. The root `package.json` declares
+`"workspaces": ["packages/*", "apps/*"]`, is `private`, carries `dependency-cruiser` as
+its one root devDependency, and proxies every script to the server workspace
+(`npm -w @chronicles/server run <x>`). A shared `tsconfig.base.json` (plus a
+`tsconfig.depcruise.json` for the boundary linter) lives at the root.
+
+Two published packages exist (`apps/*` is empty — the client split has not happened):
+
+- **`packages/server` → `@chronicles/server`** — the Next.js 15 App Router application and
+  **all runtime code**. Its `src/` is laid out as onion layers (below).
+- **`packages/contracts` → `@chronicles/contracts`** — dependency-light shared Zod schemas
+  (`chat`, `corrections`, `cost`, `history`, `world-state`) plus one pure util re-export
+  (`./pure/sentence-splitter`, shared by the server TTS path and the client). `type: module`,
+  depends on `zod` only.
+
+Inside `packages/server/src/`, the **dependencies-point-inward** rule is physically realized:
+
+- **`domain/`** — pure. Imports nothing outward (no `next`, `ai`, `@ai-sdk/*`,
+  `better-sqlite3`, `fs`, `fetch`, or a wall-clock). Three sub-trees:
+  - `domain/entities/` — entities and row TYPE definitions (`character`, `correction`,
+    `npc-intent`, `occupancy`, `reverie`, `story`, `tts-cache`, `turn`, `usage`, `world`).
+    The row types that used to live in `@/lib/db` moved here.
+  - `domain/ports/` — 20 interfaces (+ index barrel). 13 repository ports (`world`, `turn`,
+    `character`, `place`, `scene`, `dossier`, `reverie`, `npc-intent`, `occupancy`,
+    `tts-cache`, `correction`, `usage`, `memory`) plus `clock`, `logger`, `narrator`,
+    `speech-synthesizer`, `background-tasks`, and `unit-of-work`. **All repository methods are
+    async** (return `Promise`); the SQLite adapters wrap synchronous calls in
+    `Promise.resolve`. `TurnRepository` is **append-only** —
+    `insert` / `recentTurns` / `turnsBefore` / `latestUserTurnId` plus `mergeMetadata` and
+    `incTtsChars`; there is no general `update`/`setMetadata`.
+  - `domain/services/` — the pure logic carved out of the old god files:
+    `action-classifier-rules`, `character-dedup`, `memorable-fact-provenance`,
+    `name-resolution`, `narrator-guidance`, `npc-promotion`, `occupancy-sim`,
+    `patch-sanitizer`, `reverie-flare`, `scene-transition`, `story-signal`,
+    `turn-numbering`, `world-clock`.
+- **`application/use-cases/`** — orchestration only (imports `domain/`, never SQL/SDK/
+  framework): `advance-turn`, `apply-correction`, `inspect-world`, `list-corrections`,
+  `load-history`, `record-tts-usage`, `summarize-usage`, `synthesize-narration`.
+- **`infrastructure/`** — driven adapters implementing the ports. **All model IDs and pricing
+  live here** (`infrastructure/llm/model-registry.ts` + `pricing.ts`).
+  - `persistence/sqlite/` — 13 `*.sqlite.ts` repositories + `unit-of-work.sqlite.ts`
+    (raw `better-sqlite3`).
+  - `persistence/mongo/` — the Mongoose adapter set (`connection`, `mongo-context`,
+    `mongo-unit-of-work`, `build-mongo-repositories`, `models/` [the only mongoose-import
+    home], `repositories/*.mongo.ts` + mappers, test-support).
+  - `narrator/narrate-turn.ts` (NarratorPort → Grok narration stream),
+    `tts/xai-speech-synthesizer.ts` (SpeechSynthesizer port), `clock/system-clock.ts`,
+    `logging/console-logger.ts`, `background/process-background-tasks.ts` (BackgroundTasks
+    port; SIGTERM drain).
+- **`composition/container.ts`** — the **only** module that constructs concrete adapters
+  (the dependency-injection root). It selects the store by the `PERSISTENCE` env var
+  (default `sqlite`, a synchronous `getContainer()`; `mongo` is an async `initContainer()` at
+  boot via dynamic import, so the SQLite path never loads mongoose) and exposes a typed
+  `Container` of all ports. `server-only`.
+- **`app/` (+ `pages/`), `components/`, `server/render/`** — driving adapters: Next.js
+  routes/pages, React, and the server-side narrator-markdown renderer
+  (`server/render/state-block.ts`).
+
+The legacy `src/lib/` still exists mid-migration and is being drained; new logic goes in a
+domain service or use case, and new persistence goes behind a repository port. These
+boundaries are enforced in CI (see §6).
 
 ## 2. Core Components
 
@@ -92,7 +172,7 @@ Chronicles AI is an AI-powered interactive novel engine built on a multi-agent a
 The browser-based client is a Next.js App Router application serving as a Progressive Web App. It communicates with the server through two channels:
 
 - **Server Actions** — for all CRUD mutations (creating worlds, updating characters, browsing wiki). These are direct RPC calls that bypass traditional REST routing.
-- **SSE Stream** — for narrator responses. A single Route Handler at `/api/story/stream` accepts player actions and returns a Server-Sent Events stream of narrator tokens.
+- **Streaming route** — for narrator responses. A single Route Handler at `POST /api/chat` accepts player actions and returns a stream of narrator tokens. It is now a thin adapter over the `AdvanceTurn` use case (see §2.3), not the old god endpoint. Request/response shapes are the shared `@chronicles/contracts` Zod schemas. Cost/badge/profile values are derived **server-side** and sent to the client as DTOs — the client never receives raw rows.
 
 The client renders three primary views:
 1. **Story Feed** — scrolling narrative display showing the full turn history with live streaming of new narrator responses
@@ -101,7 +181,20 @@ The client renders three primary views:
 
 ### 2.2 Server Layer
 
-The Next.js server handles routing, authentication (Phase 5), and orchestrates the story flow pipeline. It is NOT a thin API layer — it contains the core business logic for agent orchestration, memory retrieval, and world state management.
+The Next.js server handles routing, authentication (Phase 5), and orchestrates the story flow pipeline. The route handlers themselves are thin — the core business logic for agent orchestration, memory retrieval, and world-state management lives in the `application/` use cases and `domain/` services, not in the routes. Each route parses input, calls a use case, and pipes the result, owning no logic; domain errors (`WorldNotFound`, `ContextOverflowError`, …) are mapped to HTTP **only** in the route. The current route → use-case mapping:
+
+| Route | Use case |
+|-------|----------|
+| `POST /api/chat` | `AdvanceTurn` (streaming; NarratorPort + NarrationStream, BackgroundTasks port for post-turn work, SIGTERM drain, an append-db-turn-id helper) |
+| `/api/tts` | `SynthesizeNarration` |
+| `/api/tts/record` | `RecordTtsUsage` |
+| `/api/turns` | `LoadHistory` |
+| `/api/usage` | `SummarizeUsage` |
+| `/api/world-state` | `InspectWorld` |
+| `/api/world-correction` | `ApplyCorrection` |
+| `/api/world-corrections` | `ListCorrections` |
+
+The old 593-line `src/app/api/chat/route.ts` god endpoint is gone; its responsibilities are now split across the use case, the NarratorPort adapter, and the BackgroundTasks adapter.
 
 Key design principle: **Server Components for data fetching, Client Components for interactivity.** Pages that display world lists or wiki content are Server Components (fast, zero JS). The story play page wraps its interactive elements (feed, input) in Client Components.
 
@@ -229,13 +322,20 @@ Seven specialized agents, each with a distinct role and model tier:
 
 | Agent | Model | Role | Phase |
 |-------|-------|------|-------|
-| **Narrator** | Claude Sonnet 4 | Generates story prose, controls pacing/tone | 1 |
-| **World Seeder** | Claude Sonnet 4 | Generates seed packet, locations, factions, NPCs, mysteries, first scene | 2 |
-| **Wiki Compiler** | Claude Haiku | Compiles source documents into wiki/timeline/thread candidates | 2 |
-| **World Linter** | Claude Haiku | Flags contradictions, duplicates, missing provenance, timeline conflicts | 2 |
-| **Archivist** | Claude Haiku | Structured data extraction from narrative text during live play | 3 |
-| **Story Conductor** | Claude Haiku | Turn management, scene transitions, orchestration decisions | 4 |
-| **Character Actor** | Claude Sonnet 4 | Plays NPCs and proxy-controlled humans | 4 |
+| **Narrator** | Grok 4.3 (`grok-4.3`) | Generates story prose, controls pacing/tone | 1 |
+| **World Seeder** | Grok 4.3 (`grok-4.3`) | Generates seed packet, locations, factions, NPCs, mysteries, first scene | 2 |
+| **Wiki Compiler** | Haiku (`claude-haiku-4-5-20251001`) | Compiles source documents into wiki/timeline/thread candidates | 2 |
+| **World Linter** | Haiku (`claude-haiku-4-5-20251001`) | Flags contradictions, duplicates, missing provenance, timeline conflicts | 2 |
+| **Archivist** | Haiku (`claude-haiku-4-5-20251001`) | Structured data extraction from narrative text during live play | 3 |
+| **Story Conductor** | Haiku (`claude-haiku-4-5-20251001`) | Turn management, scene transitions, orchestration decisions | 4 |
+| **Character Actor** | Grok 4.3 (`grok-4.3`) | Plays NPCs and proxy-controlled humans | 4 |
+
+The two model IDs are the single source of truth in `infrastructure/llm/model-registry.ts`
+(`NARRATOR_MODEL = 'grok-4.3'`, `HAIKU_MODEL = 'claude-haiku-4-5-20251001'`); the
+structured-extraction agents on Haiku are the archivist, classifier, intent-reconciler,
+npc-agent, region-extractor, and world-generator. Pricing (including a retained
+`claude-sonnet-4-6` entry for cost math) lives beside it in `pricing.ts`. These literals
+must not appear in `domain/` or `application/` (enforced by dependency-cruiser, §6).
 
 Agents communicate through the pipeline, not directly with each other. The Conductor is the runtime supervisor — it decides which agents run and in what order during play. In the MVP, the pipeline is hardcoded (narrator only); the Conductor adds dynamic decision-making in Phase 4.
 
@@ -300,13 +400,32 @@ See [Memory Architecture](memory-architecture.md) for the full retrieval pipelin
 
 ### 2.6 Data Layer
 
-All persistent state lives in a single PostgreSQL instance with the pgvector extension.
+All persistent state lives behind the repository ports — nothing above `infrastructure/`
+knows which store is live. There are two interchangeable adapter sets satisfying the same
+ports:
 
-- **Relational tables** store structured world state (worlds, characters, scenes, turns, sources, wiki, timeline, relationships, threads)
-- **Vector columns** on `memory_chunks` and `wiki_pages` enable semantic similarity search via pgvector's HNSW indexes
-- **Drizzle ORM** provides type-safe access with plain SQL migrations
+- **SQLite (live / default)** — raw `better-sqlite3`, no ORM, migrations run on boot. This is
+  the store every command and test uses by default.
+- **MongoDB (ready, behind `PERSISTENCE=mongo`, not cut over)** — a full Mongoose adapter
+  set. It models the same logical schema as 15 top-level collections + 2 embedded subdocs:
+  CHECK constraints become mongoose enums; numeric ranges (importance 1..5, intensity 0..1)
+  become min/max validators; `lower(name)` uniqueness becomes normalized `nameKey`/`titleKey`
+  unique indexes per `worldId`; and a dedicated `counters` collection with atomic
+  `findOneAndUpdate $inc` gives every collection a monotone **integer** id plus the turn
+  sequence — **ordering never depends on `ObjectId`**. `[t:N]` provenance is preserved. The
+  `UnitOfWork` is `session.withTransaction`, with replica-set fail-fast at boot.
 
-No separate vector database. No Redis. No message queue. One database, one ORM, one source of truth. Operational simplicity for a solo developer.
+Semantic vector search is the **Phase-2 embedding slot and is unbuilt**: in both adapters
+`MemoryRepository.searchSimilar()` is a no-op returning `[]`. (The retrieval narrative below
+describes the intended Phase-3+ behavior, not what runs today.)
+
+No separate vector database. No Redis. No message queue. One live datastore behind ports.
+Operational simplicity for a solo developer.
+
+> **Superseded.** Earlier drafts targeted PostgreSQL 17 + pgvector + Drizzle ORM. That target
+> is superseded by the SQLite-live / Mongo-ready arrangement above; the Mongo production
+> cutover and the eventual deletion of the SQLite adapter remain manual gates on this preview
+> branch.
 
 See [Database Design](database-design.md) for the full schema.
 
@@ -316,45 +435,65 @@ See [Database Design](database-design.md) for the full schema.
 
 ```
 ┌──────────────────────────────────────────┐
-│  Docker Compose                          │
+│  Host Machine                            │
 │                                          │
-│  ┌────────────────────────────────────┐  │
-│  │  pgvector/pgvector:pg17            │  │
-│  │  Port 5432                         │  │
-│  │  Volume: pgdata                    │  │
-│  └────────────────────────────────────┘  │
+│  Next.js Dev Server (npm run dev,        │
+│    proxied to @chronicles/server)        │
+│  Port 3000                               │
+│                                          │
+│  Datastore: SQLite file (better-sqlite3, │
+│    migrations on boot) — no container    │
+│  API calls to: api.x.ai (Grok)           │
+│                api.anthropic.com (Haiku)  │
+│  Embeddings: api.voyageai.com (Phase 2+) │
 └──────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────┐
-│  Host Machine                            │
-│                                          │
-│  Next.js Dev Server (npm run dev)        │
-│  Port 3000                               │
-│                                          │
-│  Connects to: localhost:5432             │
-│  API calls to: api.anthropic.com         │
-│  Embedding calls to: api.voyageai.com    │
+│  Docker Compose (optional)               │
+│   docker-compose.yml at the repo root —  │
+│   a MongoDB replica set for PERSISTENCE= │
+│   mongo experimentation ONLY (NOT        │
+│   Postgres).                             │
 └──────────────────────────────────────────┘
 ```
 
-One Docker container (Postgres), one local process (Next.js). The dev server runs on the host (not in Docker) for fast HMR.
+By default there is no container at all: SQLite is an on-disk file and the dev server runs on
+the host for fast HMR. Docker Compose is only for exercising the Mongo adapter.
 
 ### 3.2 Production (Phase 6)
 
 ```
 ┌─────────────────────┐     ┌──────────────────────┐
-│  Vercel / Railway    │     │  Supabase / Managed   │
-│                      │     │  PostgreSQL            │
-│  Next.js App         │────▶│                        │
-│  (Server + Client)   │     │  pgvector enabled      │
-│                      │     │  Connection pooling     │
+│  Railway             │     │  Datastore            │
+│                      │     │                        │
+│  Next.js App         │────▶│  SQLite file on a      │
+│  (@chronicles/server)│     │  Railway volume        │
+│                      │     │  (migrates on boot).   │
+│                      │     │  Mongo cutover is a    │
+│                      │     │  manual gate.          │
 └──────────┬───────────┘     └──────────────────────┘
            │
-           ├──▶ api.anthropic.com (Claude Sonnet/Haiku)
-           └──▶ api.voyageai.com (Voyage embeddings)
+           ├──▶ api.x.ai (Grok — narrator/seeder/actor)
+           ├──▶ api.anthropic.com (Haiku — extraction agents)
+           └──▶ api.voyageai.com (Voyage embeddings, Phase 2+)
 ```
 
-The production topology is deliberately simple: one deployment target, one database, two external API dependencies.
+The production topology is deliberately simple: one deployment target, one live datastore,
+the LLM/embedding API dependencies. Flipping production to `PERSISTENCE=mongo` (with the
+backfill scripts) and then retiring the SQLite adapter are explicit, deferred gates on this
+preview branch.
+
+### 3.3 Boundary Enforcement (CI)
+
+The onion boundaries are not just convention — they fail CI. A root
+`.dependency-cruiser.cjs` declares 11 named rules: `domain-points-inward`,
+`domain-no-io-or-framework`, `app-imports-domain-only`, `infrastructure-only-via-composition`,
+`mongoose-only-in-mongo-adapter`, `better-sqlite3-only-in-sqlite-adapter`,
+`model-registry-not-in-domain-or-app`, `client-no-server-layers`,
+`client-no-native-or-server-sdk`, `contracts-pure`, and `no-circular`. Every
+infrastructure / repository / composition module additionally carries a `server-only` import,
+and a set of grep guards backstops the cruiser. `npm run depcruise` runs as a `pretest` step,
+so the layering is checked on every test run.
 
 ## 4. Key Design Principles
 
@@ -395,10 +534,16 @@ Each phase adds capability without restructuring previous work. Phase 1's contex
 | Decision | Choice | Alternatives Considered | Why |
 |----------|--------|------------------------|-----|
 | Framework | Next.js 15 App Router | Remix, SvelteKit, plain Express | Best SSR + streaming + PWA story. Server Components reduce client JS. |
-| LLM SDK | Vercel AI SDK | Raw Anthropic SDK, LangChain | `useChat()` + `streamText()` + `generateObject()`. Open source, MIT. |
-| Database | PostgreSQL + pgvector | Postgres + Pinecone, MongoDB, SQLite | One DB for relational + vector. Minimal operational overhead. |
-| ORM | Drizzle | Prisma, Kysely, raw SQL | Lightweight, type-safe, first-class pgvector, plain SQL migrations. |
+| Repo layout | npm-workspaces monorepo (`@chronicles/server`, `@chronicles/contracts`) | single app, Nx/Turborepo | Shared Zod contracts + a place for an eventual client split, with the onion layers physically realized under `packages/server/src`. |
+| Architecture | Hexagonal / onion (domain → application → infrastructure, composition root) | layered MVC, framework-coupled | Pure, testable domain; swappable adapters (SQLite ↔ Mongo); boundaries enforced by dependency-cruiser. |
+| LLM SDK | Vercel AI SDK (`@ai-sdk/*`) | Raw provider SDKs, LangChain | `streamText()` + `generateObject()`. Open source, MIT. |
+| Narrator/seeder/actor model | Grok 4.3 (`grok-4.3`, xAI) | Claude Sonnet, GPT | Creative prose tier; IDs centralized in `infrastructure/llm`. |
+| Extraction-agent model | Haiku (`claude-haiku-4-5-20251001`) | Sonnet, GPT-mini | Cheap, fast structured extraction for archivist/classifier/etc. |
+| Database (live) | SQLite via raw `better-sqlite3` | Postgres+pgvector, Drizzle | Zero-ops single-file store; migrations on boot. Postgres/pgvector/Drizzle target was superseded. |
+| Database (ready) | MongoDB + Mongoose (behind `PERSISTENCE=mongo`) | stay on SQLite | Same ports; counters give monotone int ids so ordering never depends on `ObjectId`. Cutover is a manual gate. |
 | Styling | Tailwind + shadcn/ui | CSS Modules, Styled Components, MUI | Fast iteration. Own the component code. No runtime CSS-in-JS. |
-| Validation | Zod | Yup, io-ts, ArkType | AI SDK integration for `generateObject()`. Drizzle inference. Ecosystem standard. |
+| Validation | Zod | Yup, io-ts, ArkType | AI SDK integration for `generateObject()`; the shared `@chronicles/contracts` schemas. |
 | Auth | NextAuth.js (Phase 5) | Clerk, Supabase Auth, custom | Self-hosted, flexible providers, no vendor lock-in. |
-| Embeddings | Voyage AI (Phase 2) | OpenAI, Cohere, local models | Anthropic-recommended. Shared embedding spaces. Cost-effective. |
+| Embeddings | Voyage AI (Phase 2+) | OpenAI, Cohere, local models | Anthropic-recommended. Slot exists; `searchSimilar()` is a no-op today. |
+| Boundary linter | dependency-cruiser (11 rules) + `server-only` + grep guards | ESLint `no-restricted-paths`, convention only | Fails CI when a layer is crossed; runs as `pretest`. |
+| Tests | Vitest (`npm test`, ~361 pass + 1 skip; `npm run test:mongo` on a real `MongoMemoryReplSet`) | Jest, node:test | Fast, ESM-native; SQLite suite by default, Mongo suite opt-in. |

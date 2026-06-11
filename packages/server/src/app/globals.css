@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-serif), Georgia, "Times New Roman", serif;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    overflow-x: hidden;
+  }
+
+  /* Subtle scrollbar styling for the dark theme */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(38 38 38);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(64 64 64);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
+
+/* Soft cursor pulse for the streaming indicator */
+@keyframes chronicles-cursor {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0.15; }
+}
+
+.chronicles-cursor {
+  display: inline-block;
+  width: 0.45rem;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: currentColor;
+  animation: chronicles-cursor 1.1s steps(1, end) infinite;
+}
+
+/* Indeterminate "preparing audio" bar: a highlight sweeps across the track
+   while TTS is being prepared (no Content-Length, so no true percentage). */
+@keyframes chronicles-audio-sweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(330%); }
+}
+
+.chronicles-audio-sweep {
+  animation: chronicles-audio-sweep 1.2s ease-in-out infinite;
+}
+
+.reader-bg {
+  background-color: var(--reader-bg);
+}
+
+.reader-bg-translucent {
+  background-color: color-mix(in srgb, var(--reader-bg) 90%, transparent);
+}
+
+.reader-panel {
+  background-color: var(--reader-panel);
+}
+
+.reader-panel-strong {
+  background-color: var(--reader-panel-strong);
+}
+
+.reader-field {
+  background-color: var(--reader-field);
+}
+
+.reader-field-focus:focus-within {
+  background-color: var(--reader-field-focus);
+}
+
+.reader-border {
+  border-color: var(--reader-border);
+}
+
+.reader-accent-border {
+  border-color: var(--reader-accent);
+}
+
+.reader-text {
+  color: var(--reader-text);
+}
+
+.reader-muted {
+  color: var(--reader-muted);
+}
+
+.reader-faint {
+  color: var(--reader-faint);
+}
+
+.reader-button-text {
+  color: var(--reader-button-text);
+}
+
+.reader-accent {
+  color: var(--reader-accent);
+}
+
+.reader-accent-bg {
+  background-color: var(--reader-accent);
+}
+
+.reader-accent-contrast {
+  color: var(--reader-bg);
+}
+
+.reader-accent-soft-bg {
+  background-color: var(--reader-accent-soft);
+}
+
+.reader-disabled-bg:disabled {
+  background-color: var(--reader-panel-strong);
+}
+
+.reader-disabled-text:disabled {
+  color: var(--reader-faint);
+}
+
+.reader-hover:hover {
+  background-color: var(--reader-button-hover);
+  color: var(--reader-text);
+}
+
+.reader-hover-accent:hover {
+  background-color: var(--reader-button-hover);
+  color: var(--reader-accent);
+}
+
+.reader-placeholder::placeholder {
+  color: var(--reader-faint);
+}
