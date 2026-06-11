@@ -105,6 +105,19 @@ export function formatStateBlock(
       // gap-fill) → behavior cue (what they've noticed about the protagonist).
       // Each is omitted when null to keep state-block tokens bounded.
       if (c.is_player !== 1) {
+        // Salient objects this NPC physically carries (authoritative). Pinned so
+        // the narrator honours who holds a tracked weapon/key/evidence and does
+        // not invent the NPC reaching for something they don't have. Capped at 2.
+        const npcHeld = state.dossier.resources.filter(
+          (r) => r.held_by_character_id === c.id && r.salient === 1,
+        )
+        if (npcHeld.length > 0) {
+          const items = npcHeld
+            .slice(0, 2)
+            .map((r) => r.name)
+            .join(', ')
+          lines.push(`  - carries (authoritative): ${items}`)
+        }
         if (c.personal_goals) {
           const goals = c.personal_goals.split('\n').filter((s) => s.trim().length > 0)
           if (goals.length === 1) {
@@ -177,6 +190,26 @@ export function formatStateBlock(
             lines.push(`  - behavior cue: ${limit(line, 160)}`)
           }
         }
+      }
+    }
+  }
+
+  // Items resting in the current place — dropped, stored, or left behind. The
+  // authoritative "what's on the floor / in the locker / on the desk here"
+  // ledger, distinct from the protagonist's CARRIED list: objects with no holder
+  // whose location is the current place. Salient-first so load-bearing objects
+  // lead; capped at 6 to keep state-block tokens bounded.
+  if (state.currentPlace) {
+    const place = state.currentPlace
+    const here = state.dossier.resources
+      .filter((r) => r.location_place_id === place.id && r.held_by_character_id === null)
+      .sort((a, b) => b.salient - a.salient)
+      .slice(0, 6)
+    if (here.length > 0) {
+      lines.push('', '### ITEMS HERE (authoritative — these objects are in this location)')
+      for (const r of here) {
+        const detail = [r.kind, r.status].filter(Boolean).join(', ')
+        lines.push(`- ${r.name}${detail ? ` — ${detail}` : ''}`)
       }
     }
   }

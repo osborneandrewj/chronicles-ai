@@ -28,6 +28,7 @@ import {
 import {
   appendFactWithProvenance,
 } from '@/domain/services/memorable-fact-provenance'
+import { resolvePossession } from '@/domain/services/inventory-resolution'
 import { normalizeTransitPlacesInPatch } from '@/domain/services/patch-sanitizer'
 import { decideSceneTransition } from '@/domain/services/scene-transition'
 
@@ -389,10 +390,23 @@ export async function applyArchivistPatch(
     const ownerId = patch.owner_name
       ? (await resolveCharacter(patch.owner_name))?.id ?? null
       : null
-    const heldById = await resolveHolderId(patch.held_by_name)
-    const locationPlaceId = patch.location_name
-      ? (await resolvePlace(patch.location_name))?.id ?? null
-      : null
+    // Resolve possession names → ids, then let the pure service decide the
+    // column writes (set / clear / unchanged) and enforce mutual exclusion: an
+    // object is either held by a character OR resting at a place, never both.
+    const heldById =
+      typeof patch.held_by_name === 'string' && patch.held_by_name.trim()
+        ? await resolveHolderId(patch.held_by_name)
+        : null
+    const locationId =
+      typeof patch.location_name === 'string' && patch.location_name.trim()
+        ? (await resolvePlace(patch.location_name))?.id ?? null
+        : null
+    const possession = resolvePossession({
+      heldByName: patch.held_by_name,
+      locationName: patch.location_name,
+      heldById,
+      locationId,
+    })
     const existing = await dossierWriter.resourceByName(worldId, patch.name)
     if (existing) {
       await dossierWriter.updateResource({
@@ -401,8 +415,10 @@ export async function applyArchivistPatch(
         kind: patch.kind ?? null,
         status: patch.status ?? null,
         detail: patch.detail ?? null,
-        held_by_character_id: heldById,
-        location_place_id: locationPlaceId,
+        held_by_character_id: possession.held_by_character_id,
+        clear_held_by: possession.clear_held_by,
+        location_place_id: possession.location_place_id,
+        clear_location: possession.clear_location,
         salient: patch.salient ?? null,
       })
       return
@@ -414,8 +430,10 @@ export async function applyArchivistPatch(
       kind: patch.kind ?? null,
       status: patch.status ?? null,
       detail: patch.detail ?? null,
-      held_by_character_id: heldById,
-      location_place_id: locationPlaceId,
+      // On insert there is no prior value to preserve; clear and unchanged both
+      // mean "no id". The resolved values already reflect mutual exclusion.
+      held_by_character_id: possession.held_by_character_id,
+      location_place_id: possession.location_place_id,
       salient: patch.salient ?? false,
       source_turn_id: narratorTurnId,
     })

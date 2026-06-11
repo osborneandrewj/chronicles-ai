@@ -88,6 +88,15 @@ describe('placesMatch', () => {
     expect(placesMatch('33rd Street house, Spokane', '33rd Street house', undefined)).toBe(true)
   })
 
+  it('keeps sibling "City - District" names distinct (no dash-head collapse)', () => {
+    // Regression: canonicalPlaceKey once kept only the part before " - ", so
+    // every "Thebes - X" district collapsed onto the first one created. The
+    // player could never leave it and co-located NPCs stayed "local" forever.
+    expect(placesMatch('Thebes - canal path', 'Thebes - outer path', undefined)).toBe(false)
+    expect(placesMatch('Thebes - market square', 'Thebes - outer path', undefined)).toBe(false)
+    expect(placesMatch('Thebes - western acacia grove', 'Thebes - outer path', undefined)).toBe(false)
+  })
+
   it('maps a generic room key onto the current residential place', () => {
     const house: PlaceRow = {
       id: 7,

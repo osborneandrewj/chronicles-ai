@@ -141,19 +141,25 @@ const updateStoryResourceStmt = db.prepare<
     string | null,
     string | null,
     string | null,
+    number,
     number | null,
+    number,
     number | null,
     number | null,
     number,
   ]
 >(
+  // held_by / location use CASE rather than COALESCE so the columns can be
+  // *cleared* to NULL (object dropped/stored/lost): a leading 1 flag forces NULL,
+  // otherwise COALESCE preserves-or-sets as before. The flag is bound as 1/0
+  // (better-sqlite3 does not accept JS booleans).
   `UPDATE story_resources SET
      owner_character_id   = COALESCE(?, owner_character_id),
      kind                 = COALESCE(?, kind),
      status               = COALESCE(?, status),
      detail               = COALESCE(?, detail),
-     held_by_character_id = COALESCE(?, held_by_character_id),
-     location_place_id    = COALESCE(?, location_place_id),
+     held_by_character_id = CASE WHEN ? THEN NULL ELSE COALESCE(?, held_by_character_id) END,
+     location_place_id    = CASE WHEN ? THEN NULL ELSE COALESCE(?, location_place_id) END,
      salient              = COALESCE(?, salient),
      updated_at           = datetime('now')
    WHERE id = ?`,
@@ -284,7 +290,9 @@ export class SqliteDossierWriter implements DossierWriter {
       input.kind,
       input.status,
       input.detail,
+      input.clear_held_by ? 1 : 0,
       input.held_by_character_id,
+      input.clear_location ? 1 : 0,
       input.location_place_id,
       input.salient === null || input.salient === undefined ? null : input.salient ? 1 : 0,
       input.id,

@@ -176,6 +176,45 @@ describe('story dossier state', () => {
     expect(block).toContain('pacing: mood tense; pace medium; focus action')
   })
 
+  it('moves a dropped object out of the protagonist hands and into the room (drop-bug fix + ITEMS HERE)', async () => {
+    const { worldId, turnId } = seedWorld()
+    // The protagonist picks up a tracked key.
+    await applyArchivistPatch(worldId, turnId, {
+      story_resources: [{ name: 'brass key', held_by_name: 'protagonist', salient: true }],
+    })
+    const carriedBlock = formatStateBlock(getNarratorWorldState(worldId))
+    expect(carriedBlock).toContain('CARRIED / TRACKED OBJECTS')
+    expect(carriedBlock).toContain('brass key')
+
+    // They drop it where they stand. held_by_name:null clears the holder (the
+    // COALESCE-only path silently no-op'd this — the live bug); location_name
+    // places it in the room.
+    await applyArchivistPatch(worldId, turnId, {
+      story_resources: [
+        { name: 'brass key', held_by_name: null, location_name: 'Wheat field near a spire' },
+      ],
+    })
+    const droppedBlock = formatStateBlock(getNarratorWorldState(worldId))
+    expect(droppedBlock).toContain('### ITEMS HERE')
+    expect(droppedBlock).toMatch(/### ITEMS HERE[^]*brass key/)
+    // No longer carried.
+    const carriedSection = droppedBlock.split('CARRIED / TRACKED OBJECTS')[1] ?? ''
+    expect(carriedSection).not.toContain('brass key')
+  })
+
+  it('renders a salient object a present NPC carries as authoritative', async () => {
+    const { worldId, turnId } = seedWorld()
+    await applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Torres', description: 'A wary courier.', current_place_name: 'Wheat field near a spire' },
+      ],
+      story_resources: [{ name: 'sealed dossier', held_by_name: 'Torres', salient: true }],
+    })
+
+    const block = formatStateBlock(getNarratorWorldState(worldId))
+    expect(block).toContain('carries (authoritative): sealed dossier')
+  })
+
   it('renders NPC observations as behavior cues instead of prose-ready observations', async () => {
     const { worldId, turnId } = seedWorld()
     await applyArchivistPatch(worldId, turnId, {

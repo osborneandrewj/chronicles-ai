@@ -266,8 +266,12 @@ export class MongoDossierWriter implements DossierWriter {
     if (input.kind != null) set.kind = input.kind
     if (input.status != null) set.status = input.status
     if (input.detail != null) set.detail = input.detail
-    if (input.held_by_character_id != null) set.heldByCharacterId = input.held_by_character_id
-    if (input.location_place_id != null) set.locationPlaceId = input.location_place_id
+    // Possession columns: a clear flag forces NULL (drop/store/lose); otherwise
+    // omit-when-null reproduces the SQLite COALESCE preserve-or-set semantics.
+    if (input.clear_held_by) set.heldByCharacterId = null
+    else if (input.held_by_character_id != null) set.heldByCharacterId = input.held_by_character_id
+    if (input.clear_location) set.locationPlaceId = null
+    else if (input.location_place_id != null) set.locationPlaceId = input.location_place_id
     if (input.salient != null) set.salient = input.salient
     await this.ctx.models.StoryResource.updateOne(
       { id: input.id },

@@ -122,7 +122,12 @@ export type InsertStoryResourceInput = {
 }
 
 // UPDATE args are COALESCE'd: a null/undefined field leaves the column
-// unchanged; a value overwrites it.
+// unchanged; a value overwrites it. The possession columns are the exception —
+// `held_by_character_id` / `location_place_id` need a way to be *cleared* to NULL
+// (an object dropped, stored, or lost), which COALESCE alone cannot express. The
+// `clear_*` flags force the column to NULL; otherwise the value is COALESCE'd as
+// before. The use case computes these via `resolvePossession` (mutual exclusion:
+// held and located are never both set).
 export type UpdateStoryResourceInput = {
   id: number
   owner_character_id: number | null
@@ -130,7 +135,9 @@ export type UpdateStoryResourceInput = {
   status: string | null
   detail: string | null
   held_by_character_id: number | null
+  clear_held_by: boolean
   location_place_id: number | null
+  clear_location: boolean
   salient: boolean | null
 }
 

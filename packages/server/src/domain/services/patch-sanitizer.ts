@@ -9,7 +9,8 @@
 // patch schemas remain with the LLM adapter; only the deciding logic moves.
 import type { ArchivistPatch } from '@/lib/archivist'
 import type { NarratorWorldState } from '@/lib/world-state'
-import { extractObjectAcquisition } from '@/domain/services/object-acquisition'
+import { playerPossesses } from '@/domain/services/inventory-resolution'
+import { extractItemMovements, extractObjectAcquisition } from '@/domain/services/object-acquisition'
 
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 
@@ -46,6 +47,28 @@ export function extractDeterministicPatch(
   const object = extractObjectAcquisition(playerText, narratorText)
   if (object) {
     patch.story_resources = [{ name: object, held_by_name: 'protagonist', salient: true }]
+  }
+
+  // Drops and gives. A player can only move an object the ledger says they hold
+  // (the playerPossesses gate), so a loose pattern match never fabricates a
+  // phantom move. Drop → the object rests at the protagonist's current place
+  // (mutual exclusion clears the holder in apply); give → the named recipient
+  // becomes the holder.
+  const movements = extractItemMovements(playerText, narratorText)
+  if (movements.length > 0) {
+    const resources = patch.story_resources ?? []
+    for (const move of movements) {
+      if (!playerPossesses(prior, move.object)) continue
+      if (move.type === 'drop') {
+        const here = prior.currentPlace?.name
+        resources.push(
+          here ? { name: move.object, location_name: here } : { name: move.object, held_by_name: null },
+        )
+      } else {
+        resources.push({ name: move.object, held_by_name: move.recipient })
+      }
+    }
+    if (resources.length > 0) patch.story_resources = resources
   }
 
   return Object.keys(patch).length > 0 ? patch : null
@@ -314,8 +337,14 @@ export function canonicalPlaceKey(value: string): string {
     .replace(/\b(?:not yet at|on the way to|headed to)\b/gi, '')
     .replace(/\ben route to\s+/gi, '')
   const commaHead = withoutRouteNoise.split(',')[0] ?? withoutRouteNoise
-  const dashHead = commaHead.split(/\s+[-–—]\s+/)[0] ?? commaHead
-  return normalize(dashHead).replace(/^(?:the|his|her|their|our)\s+/, '')
+  // No dash-head collapse: a " - " suffix is ambiguous between a sub-room
+  // ("33rd Street house - kitchen") and a distinct sibling district
+  // ("Thebes - canal path" vs "Thebes - outer path"). Collapsing on the head
+  // merged every "City - District" name onto the first district created, so the
+  // player could never actually leave it and co-located NPCs stayed "local"
+  // forever. Sub-room equivalence is decided by placesMatch (containsAsPhrase +
+  // PLACE_DETAIL_WORDS); the canonical key keeps the full distinguishing name.
+  return normalize(commaHead).replace(/^(?:the|his|her|their|our)\s+/, '')
 }
 
 export function normalize(value: string): string {

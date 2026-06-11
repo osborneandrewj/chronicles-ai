@@ -483,7 +483,9 @@ d('mongo turn pipeline (e2e)', () => {
       status: 'lost',
       detail: null,
       held_by_character_id: null,
+      clear_held_by: true, // a lost object has no holder — exercise the Mongo clear path
       location_place_id: null,
+      clear_location: false,
       salient: null,
     })
 
@@ -502,6 +504,7 @@ d('mongo turn pipeline (e2e)', () => {
     const resource = dossier.resources.find((r) => r.id === resId)
     expect(resource?.status).toBe('lost')
     expect(resource?.kind).toBe('tool') // COALESCE preserved
+    expect(resource?.held_by_character_id).toBeNull() // clear_held_by forced NULL
   })
 
   it('applies an ArchivistPatch through the use case against the MONGO ports (P4b)', async () => {

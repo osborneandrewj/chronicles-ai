@@ -180,14 +180,18 @@ const StoryResourcePatchSchema = z.object({
   owner_name: z.string().optional().describe('Known character who owns or carries it, if any.'),
   held_by_name: z
     .string()
+    .nullable()
     .optional()
     .describe(
-      'Who currently physically holds/carries this object right now (use "protagonist" for the player). Set this whenever possession changes hands — it is the authoritative possessor and overrides any prior holder.',
+      'Who currently physically holds/carries this object right now (use "protagonist" for the player). Set this whenever possession changes hands — it is the authoritative possessor and overrides any prior holder. Tri-state: omit to leave the holder unchanged; set explicitly to null when the object is dropped, stored, lost, or otherwise no longer carried by anyone (pair a drop/stash with `location_name`).',
     ),
   location_name: z
     .string()
+    .nullable()
     .optional()
-    .describe('Known place where the object currently rests when no one is holding it.'),
+    .describe(
+      'Known place where the object currently rests when no one is holding it. Setting this clears the holder (the object is now on the floor/locker/desk, not on a person). Tri-state: omit to leave unchanged; set explicitly to null when the object is picked back up or lost.',
+    ),
   salient: z
     .boolean()
     .optional()

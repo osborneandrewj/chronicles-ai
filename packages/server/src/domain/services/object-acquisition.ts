@@ -121,3 +121,98 @@ export function extractObjectAcquisition(
   }
   return null
 }
+
+// The other half of possession movement: a player dropping/stashing an object
+// (it leaves their hands and rests where they are) or handing one to a named
+// character (it changes holder). Mirrors extractObjectAcquisition — pure regex
+// over the player's text, with the same narrator-acceptance guard (the object's
+// head noun must appear in the narration) so an unhonoured move mints nothing.
+// The *who actually holds it now* and *do they have it to give* decisions live
+// in the patch-sanitizer pipeline (it has prior state); this only parses intent.
+export type ItemMovement =
+  | { type: 'drop'; object: string }
+  | { type: 'give'; object: string; recipient: string }
+
+const DROP_PATTERNS: RegExp[] = [
+  // "I drop / leave / stash / ditch / set down / put down / abandon [the|my|…]
+  // <object>" — a trailing location clause ("on the floor") is stripped by
+  // cleanObject; the placed location is the protagonist's current place, set by
+  // the caller, not parsed here.
+  /\b(?:i\s+)?(?:drop|drops|dropped|leave|leaves|left|stash|stashes|stashed|ditch|ditches|ditched|set\s+down|sets\s+down|put\s+down|puts\s+down|lay\s+down|abandon|abandons|abandoned)\s+(?:the\s+|a\s+|an\s+|my\s+|his\s+|her\s+|their\s+|its\s+)?([^.!?\n,;]{2,60})/i,
+]
+
+// "give / hand / pass / toss / offer / lend / return <the object> to <recipient>"
+const GIVE_OBJECT_FIRST =
+  /\b(?:i\s+)?(?:hand|hands|handed|give|gives|gave|pass|passes|passed|toss|tosses|tossed|offer|offers|offered|lend|lends|lent|return|returns|returned|deliver|delivers|delivered)\s+(?:over\s+|back\s+)?(?:the\s+|a\s+|an\s+|my\s+|his\s+|her\s+|their\s+|its\s+)([^.!?\n,;]{2,48}?)\s+to\s+([a-z][a-z'\-]+(?:\s+[a-z][a-z'\-]+)?)/i
+// "give / hand / … <recipient> <the object>" (no "to") — recipient first.
+const GIVE_RECIPIENT_FIRST =
+  /\b(?:i\s+)?(?:hand|hands|handed|give|gives|gave|pass|passes|passed|toss|tosses|tossed|offer|offers|offered|lend|lends|lent|return|returns|returned|deliver|delivers|delivered)\s+([a-z][a-z'\-]+(?:\s+[a-z][a-z'\-]+)?)\s+(?:the\s+|a\s+|an\s+|my\s+|his\s+|her\s+|their\s+|its\s+)([^.!?\n,;]{2,48})/i
+
+// First word of a recipient capture that means it is not actually a name (a
+// preposition/pronoun that belongs to a different sentence shape).
+const NON_RECIPIENT_HEADS = new Set([
+  'over',
+  'back',
+  'out',
+  'off',
+  'up',
+  'to',
+  'it',
+  'them',
+  'him',
+  'her',
+  'me',
+  'you',
+  'us',
+])
+
+function cleanRecipient(raw: string): string | null {
+  const value = normalizeWhitespace(raw).replace(/[^a-zA-Z'\- ]+$/g, '').trim()
+  if (!value) return null
+  const first = value.toLowerCase().split(' ')[0]
+  if (NON_RECIPIENT_HEADS.has(first)) return null
+  return value
+}
+
+// Narrator honoured this object move (its head noun shows up in the narration).
+function narratorHonours(object: string, narratorLower: string): boolean {
+  const head = headNoun(object)
+  if (head.length < 3 || NON_OBJECT_HEADS.has(head)) return false
+  return narratorLower.includes(head)
+}
+
+export function extractItemMovements(
+  playerText: string,
+  narratorText: string,
+): ItemMovement[] {
+  const narrator = narratorText.toLowerCase()
+  const movements: ItemMovement[] = []
+
+  // Gives first — "I drop the key" and "I hand Torres the key" share verbs only
+  // loosely, but a give is the more specific shape and should win when present.
+  for (const pattern of [GIVE_OBJECT_FIRST, GIVE_RECIPIENT_FIRST]) {
+    const match = playerText.match(pattern)
+    if (!match) continue
+    const objectFirst = pattern === GIVE_OBJECT_FIRST
+    const object = cleanObject(objectFirst ? match[1] : match[2])
+    const recipient = cleanRecipient(objectFirst ? match[2] : match[1])
+    if (!object || !recipient) continue
+    if (!narratorHonours(object, narrator)) continue
+    movements.push({ type: 'give', object, recipient })
+    break
+  }
+
+  if (movements.length === 0) {
+    for (const pattern of DROP_PATTERNS) {
+      const match = playerText.match(pattern)
+      if (!match?.[1]) continue
+      const object = cleanObject(match[1])
+      if (!object) continue
+      if (!narratorHonours(object, narrator)) continue
+      movements.push({ type: 'drop', object })
+      break
+    }
+  }
+
+  return movements
+}
