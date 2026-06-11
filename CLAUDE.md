@@ -107,16 +107,30 @@ All root scripts proxy to `@chronicles/server` via npm workspaces.
 - Optional tuning: `DAILY_TOKEN_LIMIT`, `TTS_VOICE`, `TTS_SPEED`, `MAP_ROUTE_PROVIDER`, `MAP_TOOL_USER_AGENT`
 - Phase 2+: `VOYAGE_API_KEY` (embeddings, unbuilt)
 
-## Release version bump
+## Release version bump & deploy
 
-The header at `packages/server/src/app/page.tsx:23` reads `pkg.version` from `packages/server/package.json` — that one number is the user's only at-a-glance trust signal for "what's running". Treat it as load-bearing. (In the monorepo the root, `@chronicles/server`, and `@chronicles/contracts` versions move together — currently `0.1.0`.)
+The header at `packages/server/src/app/page.tsx:23` reads `pkg.version` from `packages/server/package.json` — that one number is the user's only at-a-glance trust signal for "what's running". Treat it as load-bearing. (In the monorepo the root, `@chronicles/server`, and `@chronicles/contracts` versions move together — currently `0.2.4`.) Full playbook in `docs/RELEASING.md`; the binding rules:
 
-Whenever you bump the project version:
+**Versioning (0.x scheme, restarted at v0.1.0 on 2026-06-05).**
 
-1. **Bump on the release branch, not post-merge.** Same branch as the release PR, ideally as the first or last commit. Never on `main` after the merge — that creates a window where prod runs new code under the old version string.
+- **New feature → bump MINOR** (0.1.0 → 0.2.0 → … → 0.9.0 → **0.10.0** → 0.11.0). Minor keeps incrementing as a plain integer; it does NOT roll into 1.0.
+- **Bug fix → bump PATCH** (0.1.0 → 0.1.1 → 0.1.2).
+- **v1.0.0 is reserved** for a deliberate "first stable / public release" decision Andrew makes explicitly — never reached by auto-increment.
+
+**Branch / deploy model.**
+
+- `main` = integration / default branch. All `feat/*` and `fix/*` branches PR into `main`. **`main` is NOT auto-deployed.**
+- `production` = the dedicated deploy branch Railway watches. It holds only released code; Railway deploys on push to `production`.
+- **Release flow:** cut a `feat/<slug>` or `fix/<slug>` branch → **bump the version on that branch, before merge** (never post-merge) → merge to `main` → when ready to ship, **promote** by merging/fast-forwarding `main → production` and pushing `production`. Railway builds + deploys `production`.
+- **Hotfix:** branch from `production`, fix, bump PATCH, merge to BOTH `main` and `production`.
+- (Andrew repoints Railway's watched branch from `main` to `production` himself — one-time manual step; don't run railway commands for it.)
+
+**Every bump:**
+
+1. **Bump on the feature/release branch, not post-merge.** Ideally the first or last commit. Never on `main` after the merge — that creates a window where prod runs new code under the old version string.
 2. **Bump the workspace versions together.** `packages/server/package.json` (the version-of-record the header reads) plus the root and `@chronicles/contracts` `package.json`, *and* `package-lock.json` (the top-level `"version"` and the matching `"packages": { ... }` entries). Single commit. Don't rely on `npm install` to fix the lockfile after the fact.
-3. **Restart the dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev` and start it again, then visually confirm the header on `/` shows the new version. Same goes for Railway: a redeploy is required.
-4. **Update the milestone exit criteria.** Each milestone doc lists "`package.json` reads `vX.Y.Z` on the release branch" as an exit criterion — keep that pattern (see `docs/plans/_template-milestone.md`).
+3. **Restart the dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev` and start it again, then visually confirm the header on `/` shows the new version. After a `production` deploy, the Railway redeploy is required; confirm the header there too.
+4. **Update the milestone exit criteria.** Each milestone doc lists a version-bump-on-release-branch exit criterion (now paired with "promoted to `production` to deploy") — keep that pattern (see `docs/plans/_template-milestone.md`).
 
 If you ever see the header showing a different version than `package.json` on disk, the dev server is stale — restart it.
 
