@@ -17,6 +17,7 @@ import type {
   GeneratedEnsemble,
 } from '@/domain/ports/ensemble-generator'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
+import { ensureSeedTension } from '@/domain/services/seed-tension'
 
 // SeedBoundedWorld (starship P1) — pure orchestration that turns an authored
 // deck-plan template plus LLM-generated dressing into a bounded world: one
@@ -163,8 +164,12 @@ export async function seedBoundedWorld(
   // Relationships → character_relationships (role → character id). Edges whose
   // endpoints didn't resolve to generated crew are dropped (the adapter already
   // enforced the role-reference invariant; this is belt-and-suspenders).
+  // Guarantee at least one edge clears the off-screen beat threshold so a fresh,
+  // near-neutral crew can ever produce living-sim drama (P6). No-op when the
+  // generator already produced real tension.
+  const seededRelationships = ensureSeedTension(dressing.relationships)
   const relationshipEdges: RelationshipInput[] = []
-  for (const rel of dressing.relationships) {
+  for (const rel of seededRelationships) {
     const fromId = characterIdByRole.get(rel.fromRole)
     const toId = characterIdByRole.get(rel.toRole)
     if (fromId === undefined || toId === undefined) continue

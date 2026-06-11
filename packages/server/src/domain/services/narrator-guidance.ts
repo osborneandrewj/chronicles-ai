@@ -58,6 +58,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
 
   const momentum = pickMomentumCue(ctx)
   if (momentum) lines.push(momentum)
+  else {
+    // Engagement is the softer tier-1 push below the L2 intrusion threshold, so
+    // it only fires when the L2 momentum cue did not (mutually exclusive).
+    const engagement = pickEngagementCue(ctx)
+    if (engagement) lines.push(engagement)
+  }
 
   if (needsBranch(ctx)) {
     lines.push('Leave at least one branch the player can pursue.')
@@ -136,6 +142,11 @@ function countTrailingIdleMoves(ctx: GuidanceContext): number {
 }
 
 function pickMomentumCue(ctx: GuidanceContext): string | null {
+  // When the NPC agent already supplied planned moves, those ARE this turn's
+  // intrusion (the narrator MUST stage them) — don't also tell it to invent a
+  // separate "world acts" intrusion, which would collide with the "one intrusion
+  // only" cap and tempt it to drop a planned move.
+  if (ctx.plannedActionCount > 0) return null
   const idle = countTrailingIdleMoves(ctx)
   if (idle < MOMENTUM_IDLE_THRESHOLD) return null
   const threat = ctx.activeThreatTitles?.[0]
@@ -148,6 +159,27 @@ function pickMomentumCue(ctx: GuidanceContext): string | null {
     'element enters). Create a situation, not a forced choice; do not decide the protagonist’s ' +
     'actions or feelings; one intrusion only.' +
     pressure
+  )
+}
+
+// Tier-1 push, softer than the L2 "world acts" intrusion: on a single idle move
+// with a present NPC and no NPC action already planned this turn, license a
+// present character to take the initiative and press the protagonist directly.
+// Gated below MOMENTUM_IDLE_THRESHOLD so it never overlaps the L2 cue, on
+// plannedActionCount === 0 (a planned move already puts a character in motion),
+// and skipped on the opening beat (no prior turns) so an establishing turn is
+// not pre-empted.
+function pickEngagementCue(ctx: GuidanceContext): string | null {
+  if (ctx.presentNpcCount < 1) return null
+  if (ctx.plannedActionCount > 0) return null
+  if (ctx.recentTurns.length === 0) return null
+  const idle = countTrailingIdleMoves(ctx)
+  if (idle < 1 || idle >= MOMENTUM_IDLE_THRESHOLD) return null
+  return (
+    'The protagonist is hanging back — let a present character take the initiative: one of them ' +
+    'steps forward, addresses the protagonist directly, and presses for a response (a pointed ' +
+    'question, a demand, a held look that needs answering). Do not decide the protagonist’s reply ' +
+    'or feelings, and do not offer a menu of options.'
   )
 }
 

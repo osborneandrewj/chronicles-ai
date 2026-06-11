@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { isPlanEligible, missingPlannedActions } from '@/domain/services/npc-promotion'
 import { applyArchivistPatch } from '@/lib/archivist'
 import { getCharactersForWorld, insertTurn } from '@/lib/db'
 import {
@@ -178,5 +179,74 @@ describe('recordAppearancesAndAutoPromote', () => {
 
     tick([], 25)
     expect(character(worldId, 'Marcus').agency_level).toBe('npc')
+  })
+})
+
+describe('isPlanEligible (pure tick-eligibility rule)', () => {
+  it('always admits an agent-tier NPC regardless of presence/transience', () => {
+    for (const agency_level of ['local', 'nearby', 'distant', 'agent']) {
+      expect(
+        isPlanEligible({ agency_level, present_with_protagonist: false, is_transient_service: true }),
+      ).toBe(true)
+    }
+  })
+
+  it('admits a co-located, non-transient npc-tier NPC (the cold-open fix)', () => {
+    expect(
+      isPlanEligible({
+        agency_level: 'npc',
+        present_with_protagonist: true,
+        is_transient_service: false,
+      }),
+    ).toBe(true)
+  })
+
+  it('rejects a co-located transient service walk-on at npc tier', () => {
+    expect(
+      isPlanEligible({
+        agency_level: 'npc',
+        present_with_protagonist: true,
+        is_transient_service: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('rejects an npc-tier NPC that is not co-located with the protagonist', () => {
+    expect(
+      isPlanEligible({
+        agency_level: 'npc',
+        present_with_protagonist: false,
+        is_transient_service: false,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('missingPlannedActions (focused-planning-retry decision)', () => {
+  it('returns [] when every present NPC already has a plan', () => {
+    expect(
+      missingPlannedActions(['Marcus', 'Setnakht'], [
+        { npc_name: 'Marcus' },
+        { npc_name: 'Setnakht' },
+      ]),
+    ).toEqual([])
+  })
+
+  it('returns the unplanned present names (order preserved)', () => {
+    expect(
+      missingPlannedActions(['Marcus', 'Setnakht', 'Kyle'], [{ npc_name: 'Marcus' }]),
+    ).toEqual(['Setnakht', 'Kyle'])
+  })
+
+  it('matches case-insensitively', () => {
+    expect(missingPlannedActions(['Setnakht'], [{ npc_name: 'setnakht' }])).toEqual([])
+  })
+
+  it('returns all names when no plans were emitted (the bug case)', () => {
+    expect(missingPlannedActions(['Setnakht'], [])).toEqual(['Setnakht'])
+  })
+
+  it('returns [] when there are no present NPCs to plan for', () => {
+    expect(missingPlannedActions([], [{ npc_name: 'Marcus' }])).toEqual([])
   })
 })

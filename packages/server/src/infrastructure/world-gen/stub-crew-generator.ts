@@ -71,11 +71,14 @@ export class StubEnsembleGenerator implements EnsembleGenerator {
 
     const relationships: GeneratedRelationship[] = []
     for (let i = 0; i < crew.length - 1; i += 1) {
+      // Seed one tension edge (the first) so the offline/test seed path produces
+      // a beat-eligible crew, matching the live generator's guarantee (P6).
+      const isRival = i === 0
       relationships.push({
         fromRole: crew[i].role,
         toRole: crew[i + 1].role,
-        kind: 'ally',
-        valence: 0.4,
+        kind: isRival ? 'rival' : 'ally',
+        valence: isRival ? -0.4 : 0.4,
       })
     }
 

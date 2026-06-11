@@ -49,6 +49,19 @@ describe('narrator momentum ladder', () => {
     )
     expect(out).toContain('Ambush at the bend')
   })
+
+  it('stands down the L2 cue when planned NPC moves already exist (they are the intrusion)', () => {
+    const recentTurns = [
+      { role: 'user' as const, content: 'I look around' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+      { role: 'user' as const, content: 'I wait' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+    ]
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns, plannedActionCount: 2 }),
+    )
+    expect(out.toLowerCase()).not.toContain('world acts')
+  })
 })
 
 describe('formatNarratorTurnGuidance', () => {
@@ -386,5 +399,61 @@ describe('observation depth', () => {
       ctx({ stance: 'do', playerText: 'I charge the line', recentTurns: [] }),
     )
     expect(out.toLowerCase()).not.toContain('render the surroundings')
+  })
+})
+
+describe('tier-1 engagement cue (P5)', () => {
+  // A single trailing idle move: current move is low-agency, the prior player
+  // move was a driving move, so countTrailingIdleMoves stops at 1.
+  const oneIdle = [
+    { role: 'user' as const, content: 'I charge the line' },
+    { role: 'assistant' as const, content: 'It strikes home.' },
+  ]
+
+  it('fires on a single idle move with a present NPC and no planned action', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 1, plannedActionCount: 0 }),
+    )
+    expect(out.toLowerCase()).toContain('take the initiative')
+  })
+
+  it('does not fire when an NPC action is already planned', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: oneIdle, plannedActionCount: 1 }),
+    )
+    expect(out.toLowerCase()).not.toContain('take the initiative')
+  })
+
+  it('does not fire when no NPC is present', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 0 }),
+    )
+    expect(out.toLowerCase()).not.toContain('take the initiative')
+  })
+
+  it('does not fire on the opening beat (no prior turns)', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: [], presentNpcCount: 1, plannedActionCount: 0 }),
+    )
+    expect(out.toLowerCase()).not.toContain('take the initiative')
+  })
+
+  it('escalates to the L2 world-acts cue (not the engagement cue) at the idle threshold', () => {
+    const twoIdle = [
+      { role: 'user' as const, content: 'I look around' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+      { role: 'user' as const, content: 'I wait' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+    ]
+    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns: twoIdle }))
+    expect(out.toLowerCase()).toContain('world acts')
+    expect(out.toLowerCase()).not.toContain('take the initiative')
+  })
+
+  it('does not fire when the player is actively driving', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ stance: 'do', playerText: 'I charge the line', recentTurns: oneIdle }),
+    )
+    expect(out.toLowerCase()).not.toContain('take the initiative')
   })
 })

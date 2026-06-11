@@ -50,7 +50,9 @@ export type TickLivingWorldInput = {
 }
 
 const DEFAULT_COOLDOWN_TICKS = 2
-const DEFAULT_TENSION_THRESHOLD = 0.25
+// The |valence| a co-located group needs for the living tick to emit a beat.
+// Exported so the seed-tension floor can be asserted to clear it (P6).
+export const DEFAULT_TENSION_THRESHOLD = 0.25
 // Valence magnitude at which a group is treated as "high-stakes" (A8). Above
 // this threshold the living tick drops the per-group beat cooldown to 0 so an
 // LLM beat fires immediately, pushing off-scene NPCs into proactive action

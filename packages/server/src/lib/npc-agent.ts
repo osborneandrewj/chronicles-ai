@@ -11,6 +11,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
+import { isPlanEligible, isTransientServiceNpc, missingPlannedActions } from '@/domain/services/npc-promotion'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { tolerateNulls } from '@/lib/llm-schema'
@@ -194,23 +195,36 @@ const PlannedActionSchema = z.object({
 export type PlannedAction = z.infer<typeof PlannedActionSchema>
 
 export const NpcAgentPatchSchema = z.object({
-  npc_updates: z
-    .array(tolerateNulls(NpcUpdateSchema))
-    .optional()
-    .describe(
-      'NPCs whose persistent state changed (focus, activity, place, personal goals). ' +
-        'Reflects what happened in the prior narration. Empty/omitted on quiet turns.',
-    ),
+  // PRIMARY output, declared FIRST: Haiku reliably fills the easy descriptive
+  // array (npc_updates) and silently omits this one when it is buried second in
+  // a combined schema, leaving present NPCs purely reactive. Leading with it +
+  // the emphatic describe is the cheap lever; the focused planning retry in
+  // runNpcAgentTick is the reliability backstop.
   planned_actions: z
     .array(PlannedActionSchema)
     .optional()
     .describe(
-      "Plans for present agent NPCs to be staged by the narrator THIS turn. Every present agent NPC " +
-        'should have one — if you omit them, the narrator improvises and the NPC loses agency.',
+      'PRIMARY OUTPUT — emit FIRST. One concrete planned_action for EVERY present agent NPC this ' +
+        'turn (at least one present NPC must target the protagonist directly). If you omit a present ' +
+        'agent NPC, the narrator improvises and that NPC loses agency — never leave one without a plan.',
+    ),
+  npc_updates: z
+    .array(tolerateNulls(NpcUpdateSchema))
+    .optional()
+    .describe(
+      'Secondary. NPCs whose persistent state changed (focus, activity, place, personal goals). ' +
+        'Reflects what happened in the prior narration. Empty/omitted on quiet turns.',
     ),
 })
 
 export type NpcAgentPatch = z.infer<typeof NpcAgentPatchSchema>
+
+// Focused planning-only schema for the second pass: a minimal REQUIRED array is
+// what the model is actually forced to populate (vs an optional array in the big
+// combined patch). Used only when the first pass left a present NPC unplanned.
+const PlannedActionsOnlySchema = z.object({
+  planned_actions: z.array(PlannedActionSchema).min(1),
+})
 
 // Haiku occasionally serializes the whole patch wrong: instead of two arrays it
 // returns the object body crammed into a single stringified `npc_updates`
@@ -295,20 +309,38 @@ export async function runNpcAgentTick(
 } | null> {
   const { characters, npcIntents, places, reveries, worlds } = deps
 
-  const agents = await characters.agentNpcsForTick(worldId, tickTurnId)
-  if (agents.length === 0) return null
-
   const knownPlaces = await places.forWorld(worldId)
   const placesByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
 
   const allChars = await characters.forWorld(worldId)
   const playerChar = allChars.find((c) => c.is_player === 1) ?? null
+  const playerPlaceId = playerChar?.current_place_id ?? null
+
+  const agents = await characters.agentNpcsForTick(worldId, tickTurnId, playerPlaceId)
+  // The widened query admits co-located npc-tier rows for the cold-open fix;
+  // drop plan-INELIGIBLE candidates (transient service walk-ons). Agent-tier
+  // rows are always eligible — the eligibility decision is the pure domain rule.
+  const eligible = agents.filter((a) =>
+    isPlanEligible({
+      agency_level: a.agency_level,
+      present_with_protagonist: a.current_place_id !== null && a.current_place_id === playerPlaceId,
+      is_transient_service: isTransientServiceNpc({
+        name: a.name,
+        description: a.description,
+        active_goal: a.active_goal,
+        personal_goals: a.personal_goals,
+        current_focus: a.current_focus,
+      }),
+    }),
+  )
+  if (eligible.length === 0) return null
+
   const playerPlaceName =
-    playerChar?.current_place_id != null
-      ? knownPlaces.find((p) => p.id === playerChar.current_place_id)?.name ?? null
+    playerPlaceId != null
+      ? knownPlaces.find((p) => p.id === playerPlaceId)?.name ?? null
       : null
   const player = {
-    current_place_id: playerChar?.current_place_id ?? null,
+    current_place_id: playerPlaceId,
     current_place_name: playerPlaceName,
   }
 
@@ -324,11 +356,9 @@ export async function runNpcAgentTick(
 
   // Skip the LLM tick for off-scene, looped, stationary NPCs not mentioned in
   // the prior narration — their continuity comes from the deterministic loop
-  // line in the STATE block. The raw `agents` fetch stays intact (used below
-  // for last_agent_tick bookkeeping decisions); `tickable` is the subset we
-  // actually send to the model and update this turn.
-  const playerPlaceId = player.current_place_id
-  const tickable = agents.filter(
+  // line in the STATE block. `tickable` is the subset of plan-eligible NPCs we
+  // actually send to the model, update, and stamp last_agent_tick on this turn.
+  const tickable = eligible.filter(
     (a) =>
       !shouldSkipRoutineTick(
         {
@@ -438,6 +468,80 @@ export async function runNpcAgentTick(
     ],
   })
 
+  // Focused planning retry — guarantee a plan for every PRESENT agent NPC. Haiku
+  // routinely omits planned_actions from the combined patch, so any present NPC
+  // the first pass left unplanned only ever reacts. We re-ask with a minimal
+  // REQUIRED schema (min 1) for just the missing names. Bounded to one extra
+  // call, only when actually short; best-effort (its own failure keeps the
+  // first-pass plans). Merge UPSTREAM of the single insert loop so ids allocate
+  // through one code path (SQLite + Mongo parity).
+  let mergedUsage = usage
+  const presentNames = tickable
+    .filter((a) => a.current_place_id !== null && a.current_place_id === playerPlaceId)
+    .map((a) => a.name)
+  const planned = [...(object.planned_actions ?? [])]
+  const missing = missingPlannedActions(presentNames, planned)
+  if (missing.length > 0) {
+    try {
+      const { object: retry, usage: retryUsage } = await generateObject({
+        model: anthropic(NPC_AGENT_MODEL),
+        schema: PlannedActionsOnlySchema,
+        maxRetries: 1,
+        experimental_repairText: async ({ text }) => repairNpcAgentText(text),
+        messages: [
+          {
+            role: 'system',
+            content: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
+            providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
+          },
+          {
+            role: 'user',
+            content: [
+              `WORLD TIME: ${worldTime ?? '(unset)'}`,
+              `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
+              '',
+              'AGENT NPCs:',
+              JSON.stringify(npcContext, null, 2),
+              '',
+              'KNOWN PLACES (real-world facts are authoritative — do not contradict them):',
+              knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
+              '',
+              priorNarration
+                ? `PRIOR NARRATION (what just happened):\n${priorNarration}`
+                : 'PRIOR NARRATION: (none — this is the first turn)',
+              '',
+              `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
+              '',
+              `These PRESENT agent NPCs have NO plan yet and EACH must get one concrete present-tense ` +
+                `move this turn: ${missing.join(', ')}. At least one should target the protagonist ` +
+                `directly. Return ONLY planned_actions — no npc_updates.`,
+            ].join('\n'),
+          },
+        ],
+      })
+      mergedUsage = {
+        inputTokens: (usage.inputTokens ?? 0) + (retryUsage.inputTokens ?? 0),
+        outputTokens: (usage.outputTokens ?? 0) + (retryUsage.outputTokens ?? 0),
+        totalTokens: (usage.totalTokens ?? 0) + (retryUsage.totalTokens ?? 0),
+        cachedInputTokens: (usage.cachedInputTokens ?? 0) + (retryUsage.cachedInputTokens ?? 0),
+      }
+      planned.push(...(retry.planned_actions ?? []))
+    } catch (err) {
+      console.error('[npc agent planning retry failed]', err)
+      // Keep the first-pass plans — the tick must never fail on the retry.
+    }
+  }
+  // Dedup by npc_name (case-insensitive, keep first) so a double-covered NPC
+  // never produces two npc_intents rows, then feed the merged set to the single
+  // apply + insert path below.
+  const seenNpc = new Set<string>()
+  object.planned_actions = planned.filter((p) => {
+    const key = p.npc_name.toLowerCase()
+    if (seenNpc.has(key)) return false
+    seenNpc.add(key)
+    return true
+  })
+
   await applyNpcAgentPatch(deps, worldId, tickTurnId, object)
   for (const agent of tickable) {
     await characters.setLastAgentTick(tickTurnId, agent.id)
@@ -476,7 +580,7 @@ export async function runNpcAgentTick(
     plansOut.push({ ...plan, intent_id: intentId, character_id: agent.id })
   }
 
-  return { patch: object, plans: plansOut, usage }
+  return { patch: object, plans: plansOut, usage: mergedUsage }
 }
 
 // ---- Patch application ------------------------------------------------------
@@ -502,8 +606,11 @@ export async function applyNpcAgentPatch(
   await unitOfWork.run(async () => {
     for (const u of updates) {
       const existing = await characters.findAgentNpcByName(worldId, u.name)
-      // Silently drop updates targeting non-agent NPCs, missing NPCs, or the
-      // protagonist. This is a prompt-failure safety net, not data corruption.
+      // Silently drop updates targeting missing NPCs or the protagonist. This is
+      // a prompt-failure safety net, not data corruption. (findAgentNpcByName now
+      // resolves plain npc-tier rows too, so a co-located NPC the agent planned
+      // for can persist its own updates — P1; the guard against stray off-scene
+      // npc-tier writes is the agent's plan discipline, never a repository WHERE.)
       if (!existing) continue
 
       // Collect the per-field writes (each was its own UPDATE; the adapter

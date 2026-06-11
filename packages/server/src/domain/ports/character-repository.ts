@@ -198,21 +198,32 @@ export interface CharacterRepository {
     turnId: number,
   ): Promise<AppearancePromotionResult>
   /**
-   * The NPC agent's tick-eligibility read (agentNpcsStmt): agent-tier, non-player,
-   * non-dead NPCs whose tier-based cadence is due this turn (`tickTurnId` is the
-   * player-turn id the cadence arithmetic is measured against). Returns the joined
-   * `AgentNpcRow` shape (flat columns + the two resolved place names).
+   * The NPC agent's tick-candidate read (agentNpcsStmt): non-player, non-dead
+   * NPCs the agent may plan for this turn — agent-tier rows whose tier-based
+   * cadence is due (`tickTurnId` is the player-turn id the cadence arithmetic is
+   * measured against), PLUS plain `npc`-tier rows physically co-located with the
+   * player (`playerPlaceId`, or null when the player has no place). The query
+   * only widens the candidate set; the plan-ELIGIBILITY decision (drop transient
+   * walk-ons) is the pure `isPlanEligible` domain service the use case runs on
+   * these rows. Returns the joined `AgentNpcRow` shape (flat columns + the two
+   * resolved place names).
    */
-  agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]>
+  agentNpcsForTick(
+    worldId: number,
+    tickTurnId: number,
+    playerPlaceId: number | null,
+  ): Promise<AgentNpcRow[]>
   /**
    * Stamp last_agent_tick_turn_id (setLastAgentTickStmt) after an NPC is ticked —
    * the cadence bookkeeping the next `agentNpcsForTick` reads.
    */
   setLastAgentTick(turnId: number, characterId: number): Promise<void>
   /**
-   * Resolve an agent-tier NPC by exact (case-insensitive) name within a world
-   * (findAgentNpcByNameStmt) for the patch applier. Returns `{ id, recent_activity }`
-   * (the only columns the applier needs), or null for a missing/non-agent/player row.
+   * Resolve a plan-eligible NPC by exact (case-insensitive) name within a world
+   * (findAgentNpcByNameStmt) for the patch applier. Matches agent-tier rows AND
+   * plain `npc`-tier rows (so a newly-eligible co-located NPC's own updates write
+   * back). Returns `{ id, recent_activity }` (the only columns the applier needs),
+   * or null for a missing/dead/player row.
    */
   findAgentNpcByName(
     worldId: number,

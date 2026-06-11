@@ -20,7 +20,9 @@ import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import { packNarratorHistory } from '@/domain/services/history-packer'
 import { lucidityDelta, lucidityStage } from '@/domain/services/lucidity'
 import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
+import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
+import { hasRichStorySignal, shouldBootstrapThread } from '@/domain/services/story-signal'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -37,7 +39,6 @@ import { buildPlaceOccupancySnapshotVia, type PlaceOccupancy } from '@/lib/place
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { computeReverieFlares, getReveriesForCharacters } from '@/lib/reveries'
-import { hasRichStorySignal } from '@/lib/story-signal'
 import {
   collectSceneTags,
   formatSceneDigestForClassifier,
@@ -96,6 +97,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     reveries,
     scenes,
     sessions,
+    threadBootstrapper,
     timeline,
     timelineReader,
     timePassage,
@@ -142,7 +144,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const postPromotionState = await getNarratorWorldStateVia(stateDeps, worldId)
   const recentForAgents = await turns.recentTurns(worldId, 4)
   const { stance, input_mode } = classification
-  const shouldRunNpcAgent = shouldTickNpcAgent(stance, input_mode, postPromotionState)
+  const shouldRunNpcAgent = shouldTickNpcAgent({
+    stance,
+    inputMode: input_mode,
+    presentCharacters: postPromotionState.presentCharacters,
+  })
   const npcAgentDeps = { characters, npcIntents, places, reveries, unitOfWork, worlds }
   const npcAgentSettled = shouldRunNpcAgent
     ? await runNpcAgentTick(
@@ -525,6 +531,45 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             usage: archivistUsage,
             patch,
           })
+
+          // Thread-bootstrap fallback (C): Haiku reliably omits story_threads, so
+          // when a bootstrap was warranted and the world STILL has no active
+          // thread after the main patch, run the focused Grok bootstrapper and
+          // persist its thread(s) through the same applyArchivistPatch path.
+          if (bootstrapDossier) {
+            const after = await dossiers.forWorld(worldId)
+            const gate = shouldBootstrapThread({
+              bootstrapWarranted: true,
+              hasActiveThreadAfterApply: after.threads.some((t) => t.status === 'active'),
+            })
+            if (gate) {
+              const bootstrapResult = await threadBootstrapper.bootstrap({
+                premise: world.premise,
+                recentNarration: archivistRecent
+                  .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
+                  .join('\n\n'),
+                sceneTitle: priorState.currentScene?.title ?? null,
+                placeName: priorState.currentPlace?.name ?? null,
+              })
+              if (bootstrapResult.threads.length > 0) {
+                await applyArchivistPatch(worldId, narratorTurn.id, {
+                  story_threads: bootstrapResult.threads.map((t) => ({
+                    title: t.title,
+                    kind: t.kind,
+                    status: 'active' as const,
+                    summary: t.summary,
+                    stakes: t.stakes ?? undefined,
+                    relevance_tags: t.relevanceTags,
+                  })),
+                })
+                await turns.mergeMetadata(narratorTurn.id, 'thread_bootstrap', {
+                  model: NARRATOR_MODEL,
+                  threadCount: bootstrapResult.threads.length,
+                })
+              }
+            }
+          }
+
           runDupDetector(characters, worldId)
         })
         .catch(async (err) => {
@@ -620,18 +665,6 @@ function compactHistory(
           content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${turn.content}]`,
         }
       : { role: turn.role, content: turn.content },
-  )
-}
-
-function shouldTickNpcAgent(
-  stance: string,
-  inputMode: string,
-  state: { presentCharacters: Array<{ is_player: number; agency_level: string }> },
-): boolean {
-  if (inputMode !== 'in-character' || stance === 'meta' || stance === 'think') return false
-  if (stance === 'do' || stance === 'say') return true
-  return state.presentCharacters.some(
-    (c) => c.is_player !== 1 && (c.agency_level === 'local' || c.agency_level === 'nearby'),
   )
 }
 

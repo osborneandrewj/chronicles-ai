@@ -32,7 +32,7 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 - Each: `{ fromRole, toRole, kind, valence }`.
 - `kind` — rival / ally / mentor / romance / superior / subordinate / friend / wary (or similar single word).
 - `valence` — a number in −1..1: negative for tension/distrust, positive for warmth/loyalty, near 0 for neutral-professional.
-- Give 3–6 relationships total — enough that some have real tension and others real loyalty. Do not relate a role to itself.
+- Give 3–6 relationships total. At least ONE relationship MUST carry real tension: `|valence| >= 0.4` (a rivalry, distrust, resentment, or a strained history between two crew members). Others may be loyalty/warmth. A flat, all-friendly crew is wrong — the tension is BETWEEN crew members, never aimed at the newcomer. Do not relate a role to itself.
 
 # Hard constraints
 

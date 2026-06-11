@@ -59,7 +59,7 @@ Three fields on each NPC carry this:
 - **Plans use private cognition.** Let beliefs, reveries, relationship anchors, agenda, and tools shape the decision. A suspicious NPC may withhold an answer; a debt-bound NPC may warn the protagonist; a modern analyst with web access may look something up, while a mythic innkeeper cannot.
 - **Historical & setting fidelity:** When the world is a historical or pre-modern setting, every planned action and line of dialogue must be era-appropriate — period units, technology, ranks, and vocabulary only. Never have a character reference modern measurements (e.g. kilometers) or things the era lacks. When unsure, choose period-neutral phrasing.
 - **Plans interact with the player's intent.** Read the player's input — the NPC may respond to it, ignore it, escalate it, or do something else entirely. Make a judgment call that fits the NPC's psychology and goals.
-- **NPCs may refuse to engage.** A plan can be "stays at his desk, doesn't look up", "leaves the room without answering", "picks up his coat and walks out". Inaction is a decision.
+- **NPCs may refuse to engage.** A plan can be "stays at his desk, doesn't look up", "leaves the room without answering", "picks up his coat and walks out". Inaction is one NPC's decision — not the whole room's. Do not let every present NPC disengage on the same turn (see the engagement floor under Proactive NPC Behavior).
 - **React to recent plan outcomes.** If `recent_plan_outcomes` shows the narrator has been ignoring or contradicting an NPC's plans, do not just repeat the same plan with louder language. Pick a different move — leave, withdraw, ask a different question, change targets, escalate, or stay silent. The narrator deviating is a signal, not noise.
 
 # Proactive NPC Behavior
@@ -74,7 +74,9 @@ some NPCs should be chasing their own threads with zero regard for the protagoni
 **NPCs interact with each other.** Set `target_npc_name` to another NPC, not always the
 player. A suspicious officer confronts a nervous colleague; an ambitious subordinate
 flatters a superior; two rivals talk past each other. The player overhears, intercedes, or
-is left out entirely — that is fine.
+is left out entirely — that is fine for a single beat. Being left out is an occasional turn,
+not the sustained pattern: across a scene the protagonist is the gravitational center, not a
+bystander everyone talks around.
 
 **NPCs initiate.** Do not wait for the player to create an opening. An NPC who suspects
 something starts a conversation unprompted. An NPC who wants something asks for it. An NPC
@@ -92,7 +94,12 @@ physically restrained, unconscious, or has a specific, named reason to stand bac
 Some pursue their own agenda and happen to be in the same room. When two or three NPCs are
 present, at most one or two should acknowledge the player's move; the rest should be doing
 something for their own reasons. This is what makes a scene feel inhabited rather than
-staged.
+staged. But never leave the protagonist unaddressed: on any turn where present agent NPCs
+exist, at least one — and ideally only one — directs its plan at the protagonist (target the
+player; ask, confront, offer, warn, press), unless every present NPC is physically prevented
+from doing so. The floor is ONE engaged NPC, never more than the one-or-two ceiling above —
+not all of them. Even under danger, where every present NPC acts, only that one or two engage
+the protagonist directly; the rest act on their own threads, not all aimed at the player.
 
 **Escalate when pressure rises.** If an NPC's goal is blocked, their emotional state
 should escalate: impatience → confrontation → threat → action. Do not recycle the same

@@ -30,6 +30,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type { EnsembleGenerator } from '@/domain/ports/ensemble-generator'
+import type { ThreadBootstrapper } from '@/domain/ports/thread-bootstrapper'
 import type { MetaStoryGenerator } from '@/domain/ports/meta-story-generator'
 import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
@@ -57,6 +58,7 @@ import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
 import { GrokEnsembleGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
+import { GrokThreadBootstrapper } from '@/infrastructure/world-gen/grok-thread-bootstrapper'
 import { GrokMetaStoryGenerator } from '@/infrastructure/world-gen/grok-meta-story-generator'
 import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
 import { HaikuTimePassageEstimator } from '@/infrastructure/world-gen/haiku-time-passage-estimator'
@@ -100,6 +102,7 @@ export type Container = {
   backgroundTasks: BackgroundTasks
   decks: WorldArchetypeProvider
   ensembleGenerator: EnsembleGenerator
+  threadBootstrapper: ThreadBootstrapper
   metaStoryGenerator: MetaStoryGenerator
   drama: DramaPort
   timePassage: TimePassageEstimator
@@ -158,6 +161,7 @@ function buildSqlite(): Container {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredWorldArchetypeProvider(),
     ensembleGenerator: new GrokEnsembleGenerator(),
+    threadBootstrapper: new GrokThreadBootstrapper(),
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
@@ -208,6 +212,7 @@ export async function initContainer(): Promise<Container> {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredWorldArchetypeProvider(),
     ensembleGenerator: new GrokEnsembleGenerator(),
+    threadBootstrapper: new GrokThreadBootstrapper(),
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),

@@ -87,3 +87,26 @@ describe('prompt content guards', () => {
     expect(p).toContain('scenes must never stall')
   })
 })
+
+describe('prompts — NPC initiation (P2/P4/P5)', () => {
+  it('narrator prompt MUST-stages the PLANNED MOVES block and exempts it from omit-by-default', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toContain('### PLANNED MOVES THIS TURN')
+    expect(p).toMatch(/MUST realize every planned move/)
+    expect(p).toMatch(/exempt from "No full-roster posture sweep"/i)
+  })
+
+  it('narrator prompt licenses a present character to press the protagonist (not a menu)', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/take the initiative with the protagonist/i)
+    expect(p).toMatch(/forbids a \*menu\*/i)
+    expect(p).toMatch(/does not forbid a character pressing the protagonist/i)
+  })
+
+  it('npc-agent prompt sets a single-NPC engagement floor toward the protagonist', () => {
+    const p = loadPrompt('npc-agent-system')
+    expect(p).toMatch(/never leave the protagonist unaddressed/i)
+    expect(p).toMatch(/at least one .* directs its plan at the protagonist/i)
+    expect(p).toMatch(/floor is ONE engaged NPC/i)
+  })
+})

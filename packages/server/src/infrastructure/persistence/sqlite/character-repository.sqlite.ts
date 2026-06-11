@@ -148,7 +148,7 @@ const setPlayersPlaceStmt = db.prepare<[number, number]>(
 // Verbatim copies of the NPC agent's statements (lib/npc-agent.ts, P5b strangle).
 // Byte-identical SQL/columns/WHERE/cadence-arithmetic so the SQLite path stays
 // unchanged when the agent is rewired onto this port.
-const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
+const agentNpcsStmt = db.prepare<[number, number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
          c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
          c.reveries, c.daily_loop,
@@ -159,15 +159,19 @@ const agentNpcsStmt = db.prepare<[number, number, number, number]>(`
          (SELECT name FROM places WHERE id = c.in_transit_to_place_id) AS in_transit_to_name
     FROM characters c
    WHERE c.world_id = ?
-     AND c.agency_level IN ('local', 'nearby', 'distant', 'agent')
      AND c.is_player = 0
      AND c.status != 'dead'
      AND (
-       c.agency_level IN ('local', 'agent')
-       OR c.last_agent_tick_turn_id IS NULL
-       OR (c.agency_level = 'nearby' AND ? - c.last_agent_tick_turn_id >= 2)
-       OR (c.agency_level = 'distant' AND ? - c.last_agent_tick_turn_id >= 5)
-       OR (? - c.last_agent_tick_turn_id >= 5)
+       ( c.agency_level IN ('local', 'nearby', 'distant', 'agent') AND (
+           c.agency_level IN ('local', 'agent')
+           OR c.last_agent_tick_turn_id IS NULL
+           OR (c.agency_level = 'nearby' AND ? - c.last_agent_tick_turn_id >= 2)
+           OR (c.agency_level = 'distant' AND ? - c.last_agent_tick_turn_id >= 5)
+           OR (? - c.last_agent_tick_turn_id >= 5)
+         ) )
+       -- Co-located plain-npc-tier candidates (cold-open fix): plan-eligibility
+       -- (drop transient walk-ons) is decided by isPlanEligible in the use case.
+       OR ( c.agency_level = 'npc' AND c.current_place_id = ? )
      )
 `)
 const setLastAgentTickStmt = db.prepare<[number, number]>(
@@ -177,8 +181,9 @@ const findAgentNpcByNameStmt = db.prepare<[number, string]>(
   `SELECT id, recent_activity FROM characters
     WHERE world_id = ?
       AND lower(name) = lower(?)
-      AND agency_level IN ('local', 'nearby', 'distant', 'agent')
-      AND is_player = 0`,
+      AND agency_level IN ('npc', 'local', 'nearby', 'distant', 'agent')
+      AND is_player = 0
+      AND status != 'dead'`,
 )
 const setFocusStmt = db.prepare<[string, number]>(
   `UPDATE characters SET current_focus = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -352,12 +357,19 @@ export class SqliteCharacterRepository implements CharacterRepository {
     )
   }
 
-  agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]> {
+  agentNpcsForTick(
+    worldId: number,
+    tickTurnId: number,
+    playerPlaceId: number | null,
+  ): Promise<AgentNpcRow[]> {
+    // -1 is a non-matching sentinel when the player has no place, so the
+    // co-located npc-tier OR branch adds nothing (no row has current_place_id = -1).
     const rows = agentNpcsStmt.all(
       worldId,
       tickTurnId,
       tickTurnId,
       tickTurnId,
+      playerPlaceId ?? -1,
     ) as AgentNpcRow[]
     return Promise.resolve(rows)
   }

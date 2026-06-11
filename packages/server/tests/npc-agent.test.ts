@@ -96,6 +96,31 @@ describe('repairNpcAgentText', () => {
   })
 })
 
+describe('NpcAgentPatchSchema (planned_actions reordered first)', () => {
+  it('parses a patch with planned_actions present (the forced output)', () => {
+    const parsed = NpcAgentPatchSchema.safeParse({
+      planned_actions: [{ npc_name: 'Setnakht', intent: 'press the scribe', planned_action: 'steps in close and asks who the cartouche names' }],
+      npc_updates: [{ name: 'Setnakht', current_focus: 'weighing the threat' }],
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.planned_actions?.[0]?.npc_name).toBe('Setnakht')
+  })
+
+  it('still tolerates an npc_updates-only patch (both arrays optional)', () => {
+    const parsed = NpcAgentPatchSchema.safeParse({
+      npc_updates: [{ name: 'Setnakht', current_focus: 'wary' }],
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('repairNpcAgentText still recovers a stringified planned_actions body after the reorder', () => {
+    const malformed = '{"planned_actions":"[{\\"npc_name\\":\\"Setnakht\\",\\"intent\\":\\"x\\",\\"planned_action\\":\\"y\\"}]"}'
+    const repaired = repairNpcAgentText(malformed)
+    expect(repaired).not.toBeNull()
+    expect(NpcAgentPatchSchema.safeParse(JSON.parse(repaired as string)).success).toBe(true)
+  })
+})
+
 describe('shouldSkipRoutineTick', () => {
   const base = {
     present_with_protagonist: false,
@@ -176,13 +201,15 @@ describe('applyNpcAgentPatch', () => {
     expect(getPlacesForWorld(worldId).find((p) => p.name === 'Mars Orbit')).toBeUndefined()
   })
 
-  it('drops updates for non-agent-tier NPCs', async () => {
-    // Donna is npc-tier; her current_focus should not change.
+  it('persists updates for a co-located npc-tier NPC (write-back gap closed, P1)', async () => {
+    // Donna is npc-tier and co-located; with the write-back widening the NPC
+    // agent's own update for her now persists (the agent only emits updates for
+    // NPCs it planned for this turn — see isPlanEligible).
     await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
-      npc_updates: [{ name: 'Donna', current_focus: 'should not persist' }],
+      npc_updates: [{ name: 'Donna', current_focus: 'now persists' }],
     })
     const donna = getCharactersForWorld(worldId).find((c) => c.name === 'Donna')!
-    expect(donna.current_focus).toBeNull()
+    expect(donna.current_focus).toBe('now persists')
   })
 
   it('drops updates targeting the player character', async () => {

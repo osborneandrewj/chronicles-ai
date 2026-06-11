@@ -23,3 +23,16 @@ export function hasRichStorySignal(playerText: string, narratorText: string): bo
     /["“][^"”]{2,}["”]/.test(`${playerText}\n${narratorText}`)
   )
 }
+
+// Pure gate for the focused thread-bootstrap fallback: run it only when a
+// bootstrap was warranted (empty dossier + story signal, decided by the caller)
+// AND, after the main archivist patch was applied this turn, the world STILL has
+// no active thread. The post-apply re-query is what keeps it a true fallback —
+// if Haiku (rarely) did emit a thread, the bootstrapper never fires and we never
+// spend the extra call.
+export function shouldBootstrapThread(args: {
+  bootstrapWarranted: boolean
+  hasActiveThreadAfterApply: boolean
+}): boolean {
+  return args.bootstrapWarranted && !args.hasActiveThreadAfterApply
+}

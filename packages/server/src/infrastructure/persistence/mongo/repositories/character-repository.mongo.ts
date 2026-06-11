@@ -418,29 +418,38 @@ export class MongoCharacterRepository implements CharacterRepository {
   // cadence is due this turn. The correlated place-name subqueries become a single
   // id→name lookup over the world's places. `'agent'` is matched literally (a
   // legacy tier the SQL still admits even though it is outside the enum).
-  async agentNpcsForTick(worldId: number, tickTurnId: number): Promise<AgentNpcRow[]> {
+  async agentNpcsForTick(
+    worldId: number,
+    tickTurnId: number,
+    playerPlaceId: number | null,
+  ): Promise<AgentNpcRow[]> {
     // `'agent'` is a legacy tier the SQL still admits even though it is outside
     // the schema enum; cast the tier lists so the literal is accepted in $in.
     const agentTiers = ['local', 'nearby', 'distant', 'agent'] as CharacterDoc['agencyLevel'][]
     const everyTurnTiers = ['local', 'agent'] as CharacterDoc['agencyLevel'][]
+    // Mirrors the SQLite WHERE: (agent-tier AND cadence-due) OR (co-located
+    // npc-tier). The npc-tier branch is only added when the player has a place,
+    // matching the SQLite -1 sentinel (which never matches a real row).
+    const candidates: Record<string, unknown>[] = [
+      {
+        agencyLevel: { $in: agentTiers },
+        $or: [
+          { agencyLevel: { $in: everyTurnTiers } },
+          { lastAgentTickTurnId: null },
+          { agencyLevel: 'nearby', lastAgentTickTurnId: { $lte: tickTurnId - 2 } },
+          { agencyLevel: 'distant', lastAgentTickTurnId: { $lte: tickTurnId - 5 } },
+          { lastAgentTickTurnId: { $lte: tickTurnId - 5 } },
+        ],
+      },
+    ]
+    if (playerPlaceId !== null) {
+      candidates.push({ agencyLevel: 'npc', currentPlaceId: playerPlaceId })
+    }
     const docs = await this.ctx.models.Character.find({
       worldId,
-      agencyLevel: { $in: agentTiers },
       isPlayer: false,
       status: { $ne: 'dead' },
-      $or: [
-        { agencyLevel: { $in: everyTurnTiers } },
-        { lastAgentTickTurnId: null },
-        {
-          agencyLevel: 'nearby',
-          lastAgentTickTurnId: { $lte: tickTurnId - 2 },
-        },
-        {
-          agencyLevel: 'distant',
-          lastAgentTickTurnId: { $lte: tickTurnId - 5 },
-        },
-        { lastAgentTickTurnId: { $lte: tickTurnId - 5 } },
-      ],
+      $or: candidates,
     })
       .sort({ id: 1 })
       .session(this.session ?? null)
@@ -492,18 +501,21 @@ export class MongoCharacterRepository implements CharacterRepository {
     )
   }
 
-  // findAgentNpcByNameStmt: exact-lower-name match scoped to agent-tier non-player
-  // rows. Returns only the two columns the patch applier reads.
+  // findAgentNpcByNameStmt: exact-lower-name match scoped to plan-eligible
+  // non-player, non-dead rows (agent-tier PLUS plain npc-tier, so a newly-eligible
+  // co-located NPC's own updates write back). Returns only the two columns the
+  // patch applier reads.
   async findAgentNpcByName(
     worldId: number,
     name: string,
   ): Promise<{ id: number; recent_activity: string | null } | null> {
-    const agentTiers = ['local', 'nearby', 'distant', 'agent'] as CharacterDoc['agencyLevel'][]
+    const tiers = ['npc', 'local', 'nearby', 'distant', 'agent'] as CharacterDoc['agencyLevel'][]
     const doc = await this.ctx.models.Character.findOne({
       worldId,
       nameKey: name.toLowerCase(),
-      agencyLevel: { $in: agentTiers },
+      agencyLevel: { $in: tiers },
       isPlayer: false,
+      status: { $ne: 'dead' },
     })
       .select({ id: 1, recentActivity: 1 })
       .session(this.session ?? null)

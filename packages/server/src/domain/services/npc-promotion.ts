@@ -50,3 +50,32 @@ export function isTransientServiceNpc(c: {
     durableSignals,
   )
 }
+
+// Tick-eligibility decision (pulled out of the repository WHERE clauses, which
+// were a leaked decision). An agent-tier row (anything past plain `npc`) is
+// always a candidate — the cadence query already filtered it. A plain `npc`-tier
+// row is plan-eligible only when it is physically with the protagonist AND is
+// not a one-shot service walk-on. This lets a newly-met co-located NPC get a
+// planned move on its FIRST encounter — closing the cold-open dead zone — without
+// lowering AUTO_PROMOTE_THRESHOLD or making transient walk-ons chatty.
+export function isPlanEligible(c: {
+  agency_level: string
+  present_with_protagonist: boolean
+  is_transient_service: boolean
+}): boolean {
+  if (c.agency_level !== 'npc') return true
+  return c.present_with_protagonist && !c.is_transient_service
+}
+
+// Which present agent NPCs the model failed to plan a move for this turn. Pure
+// set-difference (case-insensitive) used to decide whether a focused planning
+// retry is needed — Haiku reliably under-fills the optional planned_actions
+// array, so a present NPC left unplanned only ever reacts. Returns the names
+// (preserving `expectedPresentNames` order) with no plan.
+export function missingPlannedActions(
+  expectedPresentNames: string[],
+  planned: Array<{ npc_name: string }>,
+): string[] {
+  const have = new Set(planned.map((p) => p.npc_name.toLowerCase()))
+  return expectedPresentNames.filter((name) => !have.has(name.toLowerCase()))
+}

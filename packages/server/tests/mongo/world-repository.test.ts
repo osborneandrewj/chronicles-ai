@@ -123,4 +123,51 @@ d('mongo WorldRepository', () => {
       expect(cursor.current_scene_id).toBe(activeScene?.id)
     })
   })
+
+  describe('agentNpcsForTick — co-located npc-tier widening (P1 parity)', () => {
+    it('admits co-located npc-tier + agent-tier, excludes off-place npc-tier, and respects the null-place sentinel', async () => {
+      const worlds = new MongoWorldRepository(h.ctx)
+      const places = new MongoPlaceRepository(h.ctx)
+      const characters = new MongoCharacterRepository(h.ctx)
+
+      const { id: worldId } = await worlds.createBounded({
+        name: `Aurora-ag-${Math.random()}`,
+        premise: 'deep',
+        initialStateJson: JSON.stringify({ premise: 'p', ship_name: 'A' }),
+        templateId: 'scout',
+      })
+      const { id: hall } = await places.add({
+        world_id: worldId, name: 'Hall', description: null, kind: 'room', deck: 'A', layout_hint: null,
+      })
+      const { id: vault } = await places.add({
+        world_id: worldId, name: 'Vault', description: null, kind: 'room', deck: 'A', layout_hint: null,
+      })
+      const add = async (name: string, placeId: number): Promise<number> =>
+        (
+          await characters.add({
+            world_id: worldId, name, description: null, is_player: 0,
+            current_place_id: placeId, role: null, active_goal: null, daily_loop: null,
+          })
+        ).id
+
+      const here = await add('Drog', hall) // co-located npc-tier (default)
+      const elsewhere = await add('Far', vault) // off-place npc-tier
+      const promoted = await add('Mara', vault) // agent-tier, off-place
+      await h.ctx.models.Character.updateOne({ id: promoted }, { $set: { agencyLevel: 'local' } })
+
+      const ids = (await characters.agentNpcsForTick(worldId, 1, hall)).map((r) => r.id)
+      expect(ids).toContain(here)
+      expect(ids).toContain(promoted)
+      expect(ids).not.toContain(elsewhere)
+
+      // Null player place: no npc-tier widening (mirrors the SQLite -1 sentinel).
+      const nullIds = (await characters.agentNpcsForTick(worldId, 1, null)).map((r) => r.id)
+      expect(nullIds).not.toContain(here)
+      expect(nullIds).toContain(promoted)
+
+      // Write-back gap closed: a co-located npc-tier NPC resolves by name.
+      const found = await characters.findAgentNpcByName(worldId, 'drog')
+      expect(found?.id).toBe(here)
+    })
+  })
 })

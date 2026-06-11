@@ -367,3 +367,69 @@ describe('SqliteRelationshipRepository', () => {
     expect(edges[0]?.valence).toBeCloseTo(0.4)
   })
 })
+
+describe('SqliteCharacterRepository.agentNpcsForTick — co-located npc-tier widening (P1)', () => {
+  async function addNpc(
+    worldId: number,
+    name: string,
+    placeId: number | null,
+  ): Promise<number> {
+    const { id } = await characters.add({
+      world_id: worldId,
+      name,
+      description: null,
+      is_player: 0,
+      current_place_id: placeId,
+      role: null,
+      active_goal: null,
+      daily_loop: null,
+    })
+    return id
+  }
+
+  it('admits co-located npc-tier NPCs and an agent-tier NPC; excludes off-place npc-tier', async () => {
+    const worldId = await createWorld(`agenttick-${Math.random()}`)
+    const { id: hall } = await places.add({
+      world_id: worldId, name: 'Hall', description: null, kind: 'room', deck: 'A', layout_hint: null,
+    })
+    const { id: vault } = await places.add({
+      world_id: worldId, name: 'Vault', description: null, kind: 'room', deck: 'A', layout_hint: null,
+    })
+
+    const here = await addNpc(worldId, 'Drog', hall) // co-located, npc tier (default)
+    const elsewhere = await addNpc(worldId, 'Far', vault) // off-place npc tier
+    const promoted = await addNpc(worldId, 'Mara', vault) // agent tier, off-place
+    db.prepare(`UPDATE characters SET agency_level = 'local' WHERE id = ?`).run(promoted)
+
+    const rows = await characters.agentNpcsForTick(worldId, 1, hall)
+    const ids = rows.map((r) => r.id)
+    expect(ids).toContain(here) // newly-met co-located NPC now planning-eligible
+    expect(ids).toContain(promoted) // agent-tier always admitted (cadence)
+    expect(ids).not.toContain(elsewhere) // off-place npc-tier stays excluded
+  })
+
+  it('admits no npc-tier rows when the player has no place (null sentinel parity)', async () => {
+    const worldId = await createWorld(`agenttick-null-${Math.random()}`)
+    const { id: hall } = await places.add({
+      world_id: worldId, name: 'Hall', description: null, kind: 'room', deck: 'A', layout_hint: null,
+    })
+    const here = await addNpc(worldId, 'Drog', hall)
+    const promoted = await addNpc(worldId, 'Mara', hall)
+    db.prepare(`UPDATE characters SET agency_level = 'local' WHERE id = ?`).run(promoted)
+
+    const rows = await characters.agentNpcsForTick(worldId, 1, null)
+    const ids = rows.map((r) => r.id)
+    expect(ids).not.toContain(here) // no co-located widening without a player place
+    expect(ids).toContain(promoted) // agent-tier still admitted
+  })
+
+  it('findAgentNpcByName resolves a co-located npc-tier NPC (write-back gap closed)', async () => {
+    const worldId = await createWorld(`findnpc-${Math.random()}`)
+    const { id: hall } = await places.add({
+      world_id: worldId, name: 'Hall', description: null, kind: 'room', deck: 'A', layout_hint: null,
+    })
+    const id = await addNpc(worldId, 'Drog', hall) // npc tier
+    const found = await characters.findAgentNpcByName(worldId, 'drog')
+    expect(found?.id).toBe(id)
+  })
+})
