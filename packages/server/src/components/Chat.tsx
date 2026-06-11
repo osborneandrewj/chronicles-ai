@@ -471,7 +471,7 @@ export function Chat({
 
   return (
     <div
-      className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden overflow-x-hidden bg-[var(--reader-bg)]"
+      className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden overflow-x-hidden reader-bg"
       style={readerStyle}
     >
       <WorldInspector
@@ -480,16 +480,16 @@ export function Chat({
         onClose={toggleInspector}
         refreshKey={inspectorRefreshKey}
       />
-      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b border-[var(--reader-border)] bg-[color:var(--reader-bg)]/90 px-2.5 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-[color:var(--reader-bg)]/75 sm:px-4">
+      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b reader-border reader-bg-translucent px-2.5 py-1.5 backdrop-blur  sm:px-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <Link
             href="/"
             aria-label="Back to worlds"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
           >
             <BackIcon />
           </Link>
-          <span className="truncate text-lg font-semibold tracking-tight text-[var(--reader-text)]">
+          <span className="truncate text-lg font-semibold tracking-tight reader-text">
             {worldName}
           </span>
         </div>
@@ -497,7 +497,7 @@ export function Chat({
           {/* Session total — hidden when there's not enough room next to the
               world name. The per-turn footer carries the cost on every turn,
               so this chip is supplemental. */}
-          <div className="mr-1 hidden text-xs tabular-nums text-[var(--reader-faint)] md:block">
+          <div className="mr-1 hidden text-xs tabular-nums reader-faint md:block">
             {usage.length} turn{usage.length === 1 ? "" : "s"} · ~{formatUsd(sessionTotal)}
           </div>
           <ReaderSettingsMenu
@@ -529,10 +529,10 @@ export function Chat({
         <ol
           ref={scrollRef}
           onScroll={onScroll}
-          // pb-56 clears the floating composer plus the optional scroll-to-end
+          // pb-80 clears the floating composer plus the optional scroll-to-end
           // button, so bottom content can scroll above the controls instead of
           // being covered by them.
-          className="h-full max-w-full space-y-8 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 pt-6 pb-56 sm:px-8 sm:pt-8"
+          className="h-full max-w-full space-y-8 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 pt-6 pb-80 sm:px-8 sm:pt-8"
         >
           {hasOlder && (
             <li className="flex justify-center">
@@ -540,7 +540,7 @@ export function Chat({
                 type="button"
                 onClick={() => void loadOlder()}
                 disabled={loadingOlder}
-                className="min-h-11 rounded-full border border-[var(--reader-border)] bg-[var(--reader-field)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] disabled:cursor-wait disabled:opacity-50"
+                className="min-h-11 rounded-full border reader-border reader-field px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] reader-muted transition reader-hover disabled:cursor-wait disabled:opacity-50"
               >
                 {loadingOlder ? "Loading…" : "Load older"}
               </button>
@@ -548,7 +548,7 @@ export function Chat({
           )}
 
           {messages.length === 0 && (
-            <li className="pt-12 text-center text-sm text-[var(--reader-faint)]">
+            <li className="pt-12 text-center text-sm reader-faint">
               <p className="font-serif italic">The page is blank. Begin.</p>
             </li>
           )}
@@ -608,7 +608,7 @@ export function Chat({
                 <button
                   type="button"
                   onClick={() => setErrorDismissed(true)}
-                  className="min-h-10 rounded-full border border-[var(--reader-border)] px-4 py-2 text-xs font-semibold text-[var(--reader-button-text)] transition hover:bg-[var(--reader-button-hover)]"
+                  className="min-h-10 rounded-full border reader-border px-4 py-2 text-xs font-semibold reader-button-text transition reader-hover"
                 >
                   Dismiss
                 </button>
@@ -648,7 +648,7 @@ export function Chat({
               onClick={scrollToEnd}
               aria-label="Scroll to end"
               title="Scroll to end"
-              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--reader-border)] bg-[var(--reader-panel)] text-[var(--reader-button-text)] shadow-xl transition hover:border-amber-500/50 hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border reader-border reader-panel reader-button-text shadow-xl transition hover:border-amber-500/50 reader-hover-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
               style={{ boxShadow: "0 18px 40px var(--reader-shadow)" }}
             >
               <ScrollEndIcon />
@@ -660,7 +660,7 @@ export function Chat({
             the slash-command button on the left and a round Send affordance
             on the right. */}
         <div
-          className="pointer-events-auto group relative mx-auto flex w-full max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border border-[var(--reader-border)] bg-[var(--reader-panel)] px-4 pt-3 pb-2.5 shadow-2xl backdrop-blur transition focus-within:bg-[var(--reader-field-focus)]"
+          className="pointer-events-auto group relative mx-auto flex w-full max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border reader-border reader-panel px-4 pt-3 pb-2.5 shadow-2xl backdrop-blur transition reader-field-focus"
           style={{ boxShadow: "0 24px 60px var(--reader-shadow)" }}
         >
           {slashOpen && (
@@ -680,7 +680,7 @@ export function Chat({
             disabled={busy}
             // text-base (16px) at every size — prevents iOS Safari from auto-
             // zooming on focus, and reads more comfortably on desktop too.
-            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed text-[var(--reader-text)] placeholder:text-[var(--reader-faint)] focus:outline-none disabled:opacity-50"
+            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed reader-text reader-placeholder focus:outline-none disabled:opacity-50"
           />
           <div className="flex min-h-11 items-center justify-between gap-2">
             <div className="flex items-center gap-1">
@@ -692,7 +692,7 @@ export function Chat({
                 }}
                 aria-label="Slash command"
                 title="Slash command"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-[var(--reader-muted)] transition hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
               >
                 <SlashIcon />
               </button>
@@ -701,7 +701,7 @@ export function Chat({
               type="submit"
               disabled={busy || !input.trim()}
               aria-label="Send"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--reader-accent)] text-[var(--reader-bg)] shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:bg-[var(--reader-panel-strong)] disabled:text-[var(--reader-faint)] disabled:shadow-none"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-accent-bg reader-accent-contrast shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed reader-disabled-bg reader-disabled-text disabled:shadow-none"
             >
               {busy ? <BusyDots /> : <SendIcon />}
             </button>
@@ -709,7 +709,7 @@ export function Chat({
         </div>
         {/* Keyboard hint — useful for users with a physical keyboard. Hidden
             below sm where touch input is the norm. */}
-        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] text-[var(--reader-faint)] sm:block">
+        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] reader-faint sm:block">
           Enter to send · Shift+Enter for newline
         </p>
       </form>
@@ -721,19 +721,19 @@ export function Chat({
 function UserTurn({ text, createdAt }: { text: string; createdAt: string | undefined }) {
   return (
     <div className="flex max-w-full flex-col items-end">
-      <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--reader-faint)]">
+      <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] reader-faint">
         <span>You</span>
         {createdAt && (
           <time
             dateTime={dateTimeAttr(createdAt)}
             title={formatFullTimestamp(createdAt)}
-            className="font-normal normal-case tracking-normal text-[var(--reader-faint)]"
+            className="font-normal normal-case tracking-normal reader-faint"
           >
             {formatTimestamp(createdAt)}
           </time>
         )}
       </div>
-      <div className="mt-1.5 max-w-[90%] overflow-hidden whitespace-pre-wrap break-words rounded-3xl rounded-br-lg bg-[var(--reader-panel-strong)] px-4 py-3 text-base leading-relaxed text-[var(--reader-text)] sm:max-w-[85%]">
+      <div className="mt-1.5 max-w-[90%] overflow-hidden whitespace-pre-wrap break-words rounded-3xl rounded-br-lg reader-panel-strong px-4 py-3 text-base leading-relaxed reader-text sm:max-w-[85%]">
         {text}
       </div>
     </div>
@@ -760,15 +760,15 @@ function AudioProgressBar({
       aria-valuemin={0}
       aria-valuemax={determinate ? 100 : undefined}
       aria-valuenow={pct}
-      className="mt-1.5 h-0.5 w-full max-w-56 overflow-hidden rounded-full bg-[var(--reader-panel-strong)]"
+      className="mt-1.5 h-0.5 w-full max-w-56 overflow-hidden rounded-full reader-panel-strong"
     >
       {determinate ? (
         <div
-          className="h-full rounded-full bg-[var(--reader-accent)] transition-[width] duration-150 ease-linear"
+          className="h-full rounded-full reader-accent-bg transition-[width] duration-150 ease-linear"
           style={{ width: `${pct}%` }}
         />
       ) : (
-        <div className="chronicles-audio-sweep h-full w-1/3 rounded-full bg-[var(--reader-accent)]" />
+        <div className="chronicles-audio-sweep h-full w-1/3 rounded-full reader-accent-bg" />
       )}
     </div>
   );
@@ -794,27 +794,27 @@ function NarratorTurn({
   onReplay: () => void;
 }) {
   return (
-    <div className="max-w-full border-l-2 border-[var(--reader-accent)] pl-4">
+    <div className="max-w-full border-l-2 reader-accent-border pl-4">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--reader-accent)]">
+        <span className="text-[10px] font-medium uppercase tracking-[0.18em] reader-accent">
           Narrator
         </span>
         {audioStatus !== "idle" && (
           <span
             aria-label={audioStatus === "loading" ? "Narrator audio loading" : "Narrator speaking"}
-            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--reader-accent)]"
+            className="inline-block h-1.5 w-1.5 animate-pulse rounded-full reader-accent-bg"
           />
         )}
         {audioStatus === "loading" && (
-          <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--reader-faint)]">
+          <span className="text-[10px] font-medium uppercase tracking-[0.14em] reader-faint">
             Preparing audio
           </span>
         )}
       </div>
       <AudioProgressBar status={audioStatus} progress={audioProgress} />
-      <div className="mt-1.5 max-w-full whitespace-pre-wrap break-words font-serif text-[var(--reader-font-size)] leading-[var(--reader-line-height)] text-[var(--reader-text)]">
+      <div className="mt-1.5 max-w-full whitespace-pre-wrap break-words font-serif text-[var(--reader-font-size)] leading-[var(--reader-line-height)] reader-text">
         {text}
-        {streaming && <span className="chronicles-cursor text-[var(--reader-accent)]" />}
+        {streaming && <span className="chronicles-cursor reader-accent" />}
       </div>
       {!streaming && (cost || canReplay) && (
         <div className="mt-3 flex flex-col items-start gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -837,7 +837,7 @@ function NarratorTurn({
                     ? "Restart playback"
                     : "Replay"
               }
-              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-[var(--reader-border)] bg-[var(--reader-field)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--reader-button-text)] transition hover:border-amber-500/60 hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border reader-border reader-field px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] reader-button-text transition hover:border-amber-500/60 reader-hover-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ReplayIcon />
               <span>Replay</span>
@@ -890,8 +890,8 @@ function ReaderSettingsMenu({
         className={
           "inline-flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
           (size !== "default" || theme !== "dark" || open
-            ? "bg-[var(--reader-accent-soft)] text-[var(--reader-accent)] hover:bg-[var(--reader-button-hover)]"
-            : "text-[var(--reader-muted)] hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)]")
+            ? "reader-accent-soft-bg reader-accent reader-hover"
+            : "reader-muted reader-hover")
         }
       >
         A
@@ -899,10 +899,10 @@ function ReaderSettingsMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-xl border border-[var(--reader-border)] bg-[var(--reader-panel)] py-1 shadow-xl backdrop-blur"
+          className="absolute right-0 top-12 z-20 w-52 overflow-hidden rounded-xl border reader-border reader-panel py-1 shadow-xl backdrop-blur"
           style={{ boxShadow: "0 18px 40px var(--reader-shadow)" }}
         >
-          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--reader-faint)]">
+          <div className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] reader-faint">
             Text size
           </div>
           {READER_SIZE_OPTIONS.map((option) => {
@@ -917,18 +917,18 @@ function ReaderSettingsMenu({
                   onSizeChange(option.id);
                 }}
                 className={
-                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-[var(--reader-button-hover)] " +
-                  (selected ? "text-[var(--reader-accent)]" : "text-[var(--reader-button-text)]")
+                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition reader-hover " +
+                  (selected ? "reader-accent" : "reader-button-text")
                 }
               >
                 <span>{option.label}</span>
-                <span className="font-serif text-[var(--reader-muted)]" style={{ fontSize: option.fontSize }}>
+                <span className="font-serif reader-muted" style={{ fontSize: option.fontSize }}>
                   A
                 </span>
               </button>
             );
           })}
-          <div className="border-t border-[var(--reader-border)] px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--reader-faint)]">
+          <div className="border-t reader-border px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] reader-faint">
             Theme
           </div>
           {READER_THEME_OPTIONS.map((option) => {
@@ -943,14 +943,14 @@ function ReaderSettingsMenu({
                   onThemeChange(option.id);
                 }}
                 className={
-                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-[var(--reader-button-hover)] " +
-                  (selected ? "text-[var(--reader-accent)]" : "text-[var(--reader-button-text)]")
+                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition reader-hover " +
+                  (selected ? "reader-accent" : "reader-button-text")
                 }
               >
                 <span>{option.label}</span>
                 <span
                   aria-hidden
-                  className="h-5 w-5 rounded-full border border-[var(--reader-border)]"
+                  className="h-5 w-5 rounded-full border reader-border"
                   style={{
                     background:
                       option.id === "dark"
@@ -962,7 +962,7 @@ function ReaderSettingsMenu({
             );
           })}
           {currentSize && (
-            <div className="border-t border-[var(--reader-border)] px-3 py-2 text-xs text-[var(--reader-faint)]">
+            <div className="border-t reader-border px-3 py-2 text-xs reader-faint">
               Narrator text: {currentSize.fontSize}
             </div>
           )}
@@ -992,8 +992,8 @@ function HeaderIconButton({
     "inline-flex h-11 w-11 items-center justify-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60";
   const stateClass =
     tone === "amber"
-      ? "bg-[var(--reader-accent-soft)] text-[var(--reader-accent)] hover:bg-[var(--reader-button-hover)]"
-      : "text-[var(--reader-muted)] hover:bg-[var(--reader-button-hover)] hover:text-[var(--reader-text)]";
+      ? "reader-accent-soft-bg reader-accent reader-hover"
+      : "reader-muted reader-hover";
   return (
     <button
       type="button"
@@ -1180,7 +1180,7 @@ function CostFooter({ cost }: { cost: TurnCost }) {
   // Wraps cleanly at narrow widths; on wider viewports the same flex layout
   // keeps it on a single line. No viewport-specific clipping.
   return (
-    <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums text-[var(--reader-faint)]">
+    <div className="min-w-0 max-w-full font-sans text-xs leading-relaxed tabular-nums reader-faint">
       <span title={agentBreakdown(cost)}>text ~{formatUsd(textCost)}</span>
       {cost.tts && (
         <span title={`${fmt(cost.tts.chars)} chars synthesized`}>

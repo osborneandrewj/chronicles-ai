@@ -59,3 +59,89 @@
 .chronicles-audio-sweep {
   animation: chronicles-audio-sweep 1.2s ease-in-out infinite;
 }
+
+.reader-bg {
+  background-color: var(--reader-bg);
+}
+
+.reader-bg-translucent {
+  background-color: color-mix(in srgb, var(--reader-bg) 90%, transparent);
+}
+
+.reader-panel {
+  background-color: var(--reader-panel);
+}
+
+.reader-panel-strong {
+  background-color: var(--reader-panel-strong);
+}
+
+.reader-field {
+  background-color: var(--reader-field);
+}
+
+.reader-field-focus:focus-within {
+  background-color: var(--reader-field-focus);
+}
+
+.reader-border {
+  border-color: var(--reader-border);
+}
+
+.reader-accent-border {
+  border-color: var(--reader-accent);
+}
+
+.reader-text {
+  color: var(--reader-text);
+}
+
+.reader-muted {
+  color: var(--reader-muted);
+}
+
+.reader-faint {
+  color: var(--reader-faint);
+}
+
+.reader-button-text {
+  color: var(--reader-button-text);
+}
+
+.reader-accent {
+  color: var(--reader-accent);
+}
+
+.reader-accent-bg {
+  background-color: var(--reader-accent);
+}
+
+.reader-accent-contrast {
+  color: var(--reader-bg);
+}
+
+.reader-accent-soft-bg {
+  background-color: var(--reader-accent-soft);
+}
+
+.reader-disabled-bg:disabled {
+  background-color: var(--reader-panel-strong);
+}
+
+.reader-disabled-text:disabled {
+  color: var(--reader-faint);
+}
+
+.reader-hover:hover {
+  background-color: var(--reader-button-hover);
+  color: var(--reader-text);
+}
+
+.reader-hover-accent:hover {
+  background-color: var(--reader-button-hover);
+  color: var(--reader-accent);
+}
+
+.reader-placeholder::placeholder {
+  color: var(--reader-faint);
+}
