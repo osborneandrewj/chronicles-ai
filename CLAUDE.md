@@ -10,6 +10,7 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 - `docs/specs/system-design-rebuild-spec.md` — architecture-neutral spec of every behavior (full schema, agents + prompts, deterministic algorithms, API contracts)
 - `docs/specs/memory-architecture.md` — memory chunks, retrieval, embeddings
 - `docs/plans/roadmap.md` — phased plan, current phase
+- `docs/plans/` — active feature/design plans; version-numbered milestone docs in `docs/plans/milestones/`; completed plans in `docs/plans/archive/`
 
 ## Working autonomy
 
@@ -24,6 +25,7 @@ Architecture and design detail lives in `docs/` — read the relevant doc before
 - **Stay in your lane.** Each agent has its own prompt, context, and Zod schema. Don't merge them, don't share full prompts, don't let the narrator see what the archivist sees.
 - **Simplicity first.** Minimum code that solves the problem. Nothing speculative. If you write 200 lines and it could be 50, rewrite it.
 - **Respect the budget.** Context assembler enforces 8K input / 1K output per narrator call. System prompt, authoritative state, and player action are pinned; recent turns + retrieved memories drop first. Don't bypass it.
+- **Archive plans when they ship.** Once a plan doc in `docs/plans/` is implemented and landed, `git mv` it into `docs/plans/archive/` (never delete — the rationale outlives the code). Roadmaps and the milestone template stay put; version-numbered milestone docs go in `docs/plans/milestones/`. See `docs/plans/archive/README.md`.
 
 ## Architecture & separation of concerns
 
