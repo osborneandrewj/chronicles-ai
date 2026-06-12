@@ -201,7 +201,12 @@ export const NpcAgentPatchSchema = z.object({
   // the emphatic describe is the cheap lever; the focused planning retry in
   // runNpcAgentTick is the reliability backstop.
   planned_actions: z
-    .array(PlannedActionSchema)
+    // tolerateNulls: Haiku emits `null` for optional item fields (target_npc_name,
+    // target_place_name) rather than omitting them, which a bare `.optional()`
+    // string rejects (invalid_type). Mirror the npc_updates handling below so the
+    // whole planning array isn't dropped over a single null — present NPCs keep
+    // their agency instead of going reactive.
+    .array(tolerateNulls(PlannedActionSchema))
     .optional()
     .describe(
       'PRIMARY OUTPUT — emit FIRST. One concrete planned_action for EVERY present agent NPC this ' +
@@ -223,7 +228,7 @@ export type NpcAgentPatch = z.infer<typeof NpcAgentPatchSchema>
 // what the model is actually forced to populate (vs an optional array in the big
 // combined patch). Used only when the first pass left a present NPC unplanned.
 const PlannedActionsOnlySchema = z.object({
-  planned_actions: z.array(PlannedActionSchema).min(1),
+  planned_actions: z.array(tolerateNulls(PlannedActionSchema)).min(1),
 })
 
 // Haiku occasionally serializes the whole patch wrong: instead of two arrays it
