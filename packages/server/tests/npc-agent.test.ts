@@ -119,6 +119,32 @@ describe('NpcAgentPatchSchema (planned_actions reordered first)', () => {
     expect(repaired).not.toBeNull()
     expect(NpcAgentPatchSchema.safeParse(JSON.parse(repaired as string)).success).toBe(true)
   })
+
+  it('tolerates null optional fields inside planned_actions (Haiku emits null, not omit)', () => {
+    // Prod regression: Haiku returned `target_npc_name: null` / `target_place_name: null`;
+    // a bare `.optional()` string rejects null, which dropped the whole planning array
+    // and left present NPCs reactive. tolerateNulls coerces the nulls away.
+    const parsed = NpcAgentPatchSchema.safeParse({
+      planned_actions: [
+        {
+          npc_name: 'Setnakht',
+          intent: 'press the scribe',
+          planned_action: 'steps in close and asks who the cartouche names',
+          target_npc_name: null,
+          target_place_name: null,
+        },
+        {
+          npc_name: 'Ahmose',
+          intent: 'withdraw',
+          planned_action: 'slips toward the colonnade without a word',
+          target_place_name: null,
+        },
+      ],
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.planned_actions?.[0]?.target_npc_name).toBeUndefined()
+    expect(parsed.success && parsed.data.planned_actions?.[0]?.npc_name).toBe('Setnakht')
+  })
 })
 
 describe('shouldSkipRoutineTick', () => {
