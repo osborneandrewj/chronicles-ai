@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import pkg from '../../package.json'
 import { ArchivedSection } from '@/components/ArchivedSection'
+import { WhatsNewDialog } from '@/components/release-notes/WhatsNewDialog'
 import { WorldRowMenu } from '@/components/WorldRowMenu'
 import { getContainer } from '@/composition/container'
 import type { WorldSummary } from '@/domain/entities'
@@ -34,9 +35,7 @@ export default async function Home() {
             <h1 className="truncate text-2xl font-semibold tracking-tight text-neutral-100">
               Chronicles
             </h1>
-            <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-300">
-              v{pkg.version}
-            </span>
+            <WhatsNewDialog version={pkg.version} />
           </div>
           <p className="mt-1 text-sm text-neutral-500">
             {worlds.length} world{worlds.length === 1 ? '' : 's'}

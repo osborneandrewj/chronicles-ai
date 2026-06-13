@@ -59,6 +59,18 @@ But **always verify the lockfile** updated in BOTH spots — `npm version` may n
 
 Both `package.json` and `package-lock.json` go in a **single commit**. Don't rely on a later `npm install` to repair the lockfile.
 
+## Release notes ("What's New")
+
+The header version chip is clickable and opens a player-facing "What's New" dialog
+(v0.3.0+). Its content is a hand-authored, static module:
+`packages/server/src/components/release-notes/data.ts`.
+
+**Every bump prepends a `RELEASES` entry** (`{ version, date, highlights }`,
+newest-first) with plain-language, player-facing highlights — no `depcruise`,
+"use case", or other dev jargon. This mirrors the "bump the version" discipline:
+the header→notes link goes stale the moment a version ships without an entry. Goes
+in the same release branch, ideally the same commit as the version bump.
+
 ## Verification
 
 - **Dev server.** Next.js does not HMR module-level JSON imports — the cached `pkg` object persists until the process restarts. After bumping, kill `npm run dev`, start it again, and visually confirm the header on `/` shows the new version.
