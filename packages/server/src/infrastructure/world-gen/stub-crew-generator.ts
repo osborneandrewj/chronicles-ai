@@ -32,10 +32,21 @@ function hashString(s: string): number {
   return h
 }
 
-/** Derive up to `count` names from the NamePool using a template-keyed seed. */
-function namesForTemplate(templateId: string, count: number): string[] {
-  const seed = hashString(templateId)
-  const pairs = sample(['sci-fi', 'space', 'generic'], count, { seed })
+/**
+ * Derive up to `count` names from the NamePool using a template-keyed seed.
+ * Era-key the pool to the archetype's own setting (genre-coupling audit) so an
+ * offline/test monastery seeds "Brother Oswin", not "Vex Kaine" — mirroring the
+ * live grok generator (grok-crew-generator.ts). Falls back to 'generic' when the
+ * template carries no eraTags.
+ */
+function namesForTemplate(
+  template: { id: string; eraTags?: string[] },
+  count: number,
+): string[] {
+  const seed = hashString(template.id)
+  const eraTags =
+    template.eraTags && template.eraTags.length > 0 ? template.eraTags : ['generic']
+  const pairs = sample(eraTags, count, { seed })
   // Use "<Given> <Surname>" format; fall back to "Crew N" if the pool is exhausted.
   return pairs.map((p) => `${p.given} ${p.surname}`)
 }
@@ -45,7 +56,7 @@ export class StubEnsembleGenerator implements EnsembleGenerator {
     const { template } = input
     const sharedRoomKey = template.rooms[0]?.key ?? ''
 
-    const pooledNames = namesForTemplate(template.id, template.crew.length)
+    const pooledNames = namesForTemplate(template, template.crew.length)
 
     const crew: GeneratedCompanion[] = template.crew.map((slot, index) => {
       const homeRoomKey = slot.homeRoomKey
