@@ -10,6 +10,7 @@ import { getContainer } from '@/composition/container'
 import { getGenrePreset } from '@/composition/onboarding'
 import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
+import { usesSimulationFrame } from '@/domain/services/meta-frame'
 import { pickHubArchetype } from '@/domain/services/pick-hub-archetype'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
@@ -179,6 +180,26 @@ export async function createAdventureAction(
   // Seed the codename + selections from the genre id plus per-creation entropy.
   const seed = (hashString(genreId) ^ Date.now()) >>> 0
   const codename = generateCodename(seed)
+
+  // Genre-coupling audit, Phase 1 — the simulation meta-frame is OPT-IN. A
+  // grounded preset (every shipped historical setting) plays as a plain
+  // standalone world seeded from its rich hidden premise: no concealed hub, no
+  // Meta-Story Bible, no session, and — because it never becomes a `subworld` —
+  // no REALITY cue, lucidity, or bleed. The narrator/archivist prompts are
+  // already genre-neutral, so this is the correct, simulation-free experience.
+  if (!usesSimulationFrame(preset.metaFrameKind)) {
+    return createAndOpenWorld({
+      name: codename,
+      premise: preset.hiddenPremise,
+      initialState: {
+        time: 'Day 1, morning',
+        location: preset.label,
+        identity: 'a newcomer, name not yet established',
+        playerName,
+      },
+    })
+  }
+
   const c = getContainer()
 
   // The full concealed-onboarding flow (C10): silently seed a randomly-designated
