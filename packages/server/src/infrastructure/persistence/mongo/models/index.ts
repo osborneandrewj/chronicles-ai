@@ -59,6 +59,9 @@ export type WorldDoc = {
   worldLayer: 'hub' | 'subworld' | 'standalone'
   parentWorldId: number | null
   metaStory: string | null
+  // Genre signal (genre-coupling audit, Phase 4): JSON string array of era/tone
+  // tags, or null. SQLite: genre_tags.
+  genreTags: string | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -78,6 +81,7 @@ const WorldSchema = new Schema<WorldDoc>(
     worldLayer: { type: String, enum: ['hub', 'subworld', 'standalone'], default: 'standalone' },
     parentWorldId: { type: Number, default: null },
     metaStory: { type: String, default: null },
+    genreTags: { type: String, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },

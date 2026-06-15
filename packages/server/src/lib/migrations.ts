@@ -947,6 +947,20 @@ export const migrations: Migration[] = [
       `)
     },
   },
+  {
+    // Genre-coupling audit (Phase 4) — a per-world genre signal. `genre_tags` is
+    // a JSON string array of era/tone tags (e.g. ["roman","ancient","political"])
+    // captured at creation from the chosen genre preset / quick-start genre.
+    // Nullable: open/advanced worlds with no declared genre leave it NULL, and
+    // every consumer treats NULL as "no genre signal" (current behavior). Lets
+    // deterministic services (occupancy traffic language, and future per-genre
+    // narrator vocab) adapt to the setting without guessing from prose.
+    version: 33,
+    name: 'world_genre',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'genre_tags', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

@@ -297,4 +297,12 @@ export class MongoWorldRepository implements WorldRepository {
       { session: this.ctx.currentSession ?? undefined },
     )
   }
+
+  async setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { genreTags: genreTagsJson } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

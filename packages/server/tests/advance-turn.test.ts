@@ -102,6 +102,7 @@ function fakeWorld(exists: boolean): WorldRepository {
     setSettingRegion: async () => {},
     setLayer: async () => {},
     setMetaStory: async () => {},
+    setGenreTags: async () => {},
   }
 }
 

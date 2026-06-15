@@ -76,12 +76,20 @@ export type CreateWorldFormState = {
 // region from the premise, synthesize the narrator's opening move, then send
 // the player into /play. `redirect` throws by design, so it must be the caller's
 // last statement (and is therefore invoked here, not returned).
-async function createAndOpenWorld(input: CreateWorldInput): Promise<never> {
+async function createAndOpenWorld(
+  input: CreateWorldInput,
+  genreTags?: string[],
+): Promise<never> {
   const c = getContainer()
   const { worldId } = await createWorld(input, {
     worlds: c.worlds,
     extractSettingRegion,
   })
+  // Persist the genre signal (genre-coupling audit) so deterministic services
+  // can adapt to the setting; null/absent when no genre was declared.
+  if (genreTags && genreTags.length > 0) {
+    await c.worlds.setGenreTags(worldId, JSON.stringify(genreTags))
+  }
   await generateOpeningTurn(openingTurnDeps(c), worldId, input.premise)
   redirect(`/worlds/${worldId}/play`)
 }
@@ -143,16 +151,19 @@ export async function createBasicWorldAction(
     return { error: "Couldn't generate a world — try again, or use Advanced." }
   }
 
-  return createAndOpenWorld({
-    name: generated.name,
-    premise: generated.premise,
-    initialState: {
-      time: generated.time,
-      location: generated.location,
-      identity: generated.identity,
-      playerName: playerName ?? undefined,
+  return createAndOpenWorld(
+    {
+      name: generated.name,
+      premise: generated.premise,
+      initialState: {
+        time: generated.time,
+        location: generated.location,
+        identity: generated.identity,
+        playerName: playerName ?? undefined,
+      },
     },
-  })
+    [genre],
+  )
 }
 
 // Concealed adventure creation (Phase B, B6). The player chose a genre LABEL;
@@ -188,16 +199,19 @@ export async function createAdventureAction(
   // no REALITY cue, lucidity, or bleed. The narrator/archivist prompts are
   // already genre-neutral, so this is the correct, simulation-free experience.
   if (!usesSimulationFrame(preset.metaFrameKind)) {
-    return createAndOpenWorld({
-      name: codename,
-      premise: preset.hiddenPremise,
-      initialState: {
-        time: 'Day 1, morning',
-        location: preset.label,
-        identity: 'a newcomer, name not yet established',
-        playerName,
+    return createAndOpenWorld(
+      {
+        name: codename,
+        premise: preset.hiddenPremise,
+        initialState: {
+          time: 'Day 1, morning',
+          location: preset.label,
+          identity: 'a newcomer, name not yet established',
+          playerName,
+        },
       },
-    })
+      [...preset.eraTags, ...preset.toneTags],
+    )
   }
 
   const c = getContainer()

@@ -420,17 +420,55 @@ export function buildHooks(
   return hooks.slice(0, MAX_HOOKS)
 }
 
+// Whether a world's traffic reads as automobile-era or pre-automobile. The
+// vehicles/pedestrians density labels are era-neutral; only the prose
+// `notable_motion` cue is era-bound ("idling engines" vs "carts and pack
+// animals"), so this only swaps that cue (genre-coupling audit).
+export type TrafficEra = 'modern' | 'premodern'
+
+// Era tags that read as clearly pre-automobile. Anything else — including modern
+// eras and worlds with NO genre signal — stays 'modern' (the current default),
+// so this never regresses an existing or genre-less world.
+const PREMODERN_ERA_TAGS = new Set([
+  'ancient', 'roman', 'latin', 'greek', 'egyptian', 'persian', 'norse', 'viking',
+  'scandinavian', 'medieval', 'medieval-english', 'feudal-japan', 'japanese',
+  'mongol', 'renaissance', 'italian', 'ottoman', 'turkish', 'arabic', 'chinese',
+  'nahua', 'caribbean',
+])
+
+// Parse the stored genre_tags JSON (a string[] encoded as text, or null) safely.
+// Pure; tolerates malformed/legacy values by returning null.
+export function parseGenreTags(json: string | null | undefined): string[] | null {
+  if (!json) return null
+  try {
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+// Resolve a world's genre tags (parsed array, or null) to a traffic era. Pure.
+export function eraFromGenreTags(genreTags: string[] | null | undefined): TrafficEra {
+  if (!genreTags) return 'modern'
+  return genreTags.some((t) => PREMODERN_ERA_TAGS.has(t)) ? 'premodern' : 'modern'
+}
+
 export function trafficBlock(
   profile: InferredProfile,
   density: OccupancyDensity,
+  era: TrafficEra = 'modern',
 ): OccupancyTraffic | null {
   if (!profile.hasTraffic) return null
+  const busyMotion = era === 'premodern' ? "a drover's shout somewhere up the lane" : 'a horn somewhere up the block'
+  const packedMotion =
+    era === 'premodern' ? 'a press of carts, pack animals, and shouting' : 'gridlock and idling engines'
   const map: Record<OccupancyDensity, OccupancyTraffic> = {
     empty: { vehicles: 'none', pedestrians: 'none', notable_motion: null },
     sparse: { vehicles: 'occasional', pedestrians: 'light', notable_motion: null },
     moderate: { vehicles: 'steady', pedestrians: 'light', notable_motion: null },
-    busy: { vehicles: 'steady', pedestrians: 'moderate', notable_motion: 'a horn somewhere up the block' },
-    packed: { vehicles: 'heavy', pedestrians: 'thick', notable_motion: 'gridlock and idling engines' },
+    busy: { vehicles: 'steady', pedestrians: 'moderate', notable_motion: busyMotion },
+    packed: { vehicles: 'heavy', pedestrians: 'thick', notable_motion: packedMotion },
   }
   return map[density]
 }
