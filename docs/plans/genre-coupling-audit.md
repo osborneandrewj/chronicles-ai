@@ -19,6 +19,19 @@ A second 9-agent recon pass ground-truthed this audit against the **current** co
 
 **Verification gates I cannot satisfy autonomously** (flag for a human-in-the-loop pass): a **streamed narrator turn in the browser** (CLAUDE.md "done" for any narrator change — gates Phase 3) and **prod-Mongo migration sign-off** (gates Phase 4). Phases 1–2-partial are fully covered by `npm test` (687 green) + depcruise.
 
+### Remaining-work checklist (recon-grounded, ordered)
+
+Do these in order — Phase 4's field unblocks Phase 3's consumption.
+
+1. **Phase 4 — add the genre signal on `World` (migration v33, dual-store).**
+   - SQLite: in `lib/migrations.ts`, add `{ version: 33, name: 'world_genre' }` using the `addColumnIfMissing` pattern (cf. v31): `worlds.genre TEXT` (nullable) + `worlds.era_tags TEXT` (JSON array string) — or a single `meta_frame_kind` if you prefer to persist that too. Nullable/defaulted so it applies cleanly on existing rows.
+   - Mongo (prod): add the field(s) to `WorldDoc` + Schema in `infrastructure/persistence/mongo/models/index.ts` and to the world mappers in `…/mongo/repositories/mappers.ts` (~lines 86/104) with a `?? null` fallback — **no migration runner exists, so existing Atlas docs must read safely via the default.**
+   - Entity: add `genre`/`era_tags` to `domain/entities/world.ts`. Add a `setGenre`/widen `createOpen` on `WorldRepository` (port + both adapters).
+   - Persist at creation: in `createAdventureAction` (grounded branch) and `createBasicWorldAction`, write the preset's `eraTags`/genre id. Run **both** `npm test` and `npm run test:mongo`.
+2. **Phase 3 — parameterize the vocab predicates (additive, byte-identical default).** Edit the **live** `domain/services/narrator-guidance.ts` (NOT the `lib/` shim). Add an optional `genreTerms` bundle to `GuidanceContext`; give the six predicates (`isInvestigativeMove` 226, `isTimeCheckMove` 241, `isMediaFeedMove` 252, `isDangerMove` 273, `isSpectacleMove` 280, `repeatedAmbientAnchors` 381) an optional 2nd arg that **concatenates onto the current hardcoded arrays** (reuse `escapeRegExp` at 435) so behavior is unchanged when unsupplied. Add a pure `domain/services/genre-terms.ts` mapping era/tone tags → term lists; populate at the single caller `narrate-turn.ts:253-270` from the world's new genre field (loaded at line 110). **Then re-test a streamed turn on ≥1 non-sci-fi genre** before merge. Same pattern unblocks `npc-promotion.isTransientServiceNpc` and `name-resolution` / `occupancy-sim` term lists.
+3. **Phase 2 (rest) — genre-filter archetypes** (only matters once a `simulation` preset or cross-genre bounded worlds exist): add `genres?: string[]` to the `WorldArchetype` port, populate the 4 constants, filter at the `actions.ts:192` call site (keep `pickHubArchetype`'s `seed % n` signature; ensure the filtered list is non-empty or it throws). Add non-containment archetypes (feudal-village/castle/temple-state/court/tavern) as new files in `archetypes/`. Change `DEFAULT_TEMPLATE_ID` off `scout-vessel` only with care (it's the bounded default).
+4. **Phase 5 — cosmetic renames** (opportunistic; column renames = migrations).
+
 ---
 
 ## Executive summary
