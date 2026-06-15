@@ -20,6 +20,7 @@ export type {
   PlaceProfileRow,
   PopulationTemplateRow,
 } from './occupancy'
+export type { MetaFrameKind } from './meta-frame'
 export type { MetaStoryAct, MetaStoryBible } from './meta-story'
 export type { FlareCandidate, ReverieInput, ReverieRow } from './reverie'
 export type { SimulationSession, SimulationStatus } from './session'

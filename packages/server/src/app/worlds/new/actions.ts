@@ -10,7 +10,8 @@ import { getContainer } from '@/composition/container'
 import { getGenrePreset } from '@/composition/onboarding'
 import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
-import { pickHubArchetype } from '@/domain/services/pick-hub-archetype'
+import { usesSimulationFrame } from '@/domain/services/meta-frame'
+import { filterHubsByGenre, pickHubArchetype } from '@/domain/services/pick-hub-archetype'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
@@ -75,12 +76,20 @@ export type CreateWorldFormState = {
 // region from the premise, synthesize the narrator's opening move, then send
 // the player into /play. `redirect` throws by design, so it must be the caller's
 // last statement (and is therefore invoked here, not returned).
-async function createAndOpenWorld(input: CreateWorldInput): Promise<never> {
+async function createAndOpenWorld(
+  input: CreateWorldInput,
+  genreTags?: string[],
+): Promise<never> {
   const c = getContainer()
   const { worldId } = await createWorld(input, {
     worlds: c.worlds,
     extractSettingRegion,
   })
+  // Persist the genre signal (genre-coupling audit) so deterministic services
+  // can adapt to the setting; null/absent when no genre was declared.
+  if (genreTags && genreTags.length > 0) {
+    await c.worlds.setGenreTags(worldId, JSON.stringify(genreTags))
+  }
   await generateOpeningTurn(openingTurnDeps(c), worldId, input.premise)
   redirect(`/worlds/${worldId}/play`)
 }
@@ -142,16 +151,19 @@ export async function createBasicWorldAction(
     return { error: "Couldn't generate a world — try again, or use Advanced." }
   }
 
-  return createAndOpenWorld({
-    name: generated.name,
-    premise: generated.premise,
-    initialState: {
-      time: generated.time,
-      location: generated.location,
-      identity: generated.identity,
-      playerName: playerName ?? undefined,
+  return createAndOpenWorld(
+    {
+      name: generated.name,
+      premise: generated.premise,
+      initialState: {
+        time: generated.time,
+        location: generated.location,
+        identity: generated.identity,
+        playerName: playerName ?? undefined,
+      },
     },
-  })
+    [genre],
+  )
 }
 
 // Concealed adventure creation (Phase B, B6). The player chose a genre LABEL;
@@ -179,6 +191,29 @@ export async function createAdventureAction(
   // Seed the codename + selections from the genre id plus per-creation entropy.
   const seed = (hashString(genreId) ^ Date.now()) >>> 0
   const codename = generateCodename(seed)
+
+  // Genre-coupling audit, Phase 1 — the simulation meta-frame is OPT-IN. A
+  // grounded preset (every shipped historical setting) plays as a plain
+  // standalone world seeded from its rich hidden premise: no concealed hub, no
+  // Meta-Story Bible, no session, and — because it never becomes a `subworld` —
+  // no REALITY cue, lucidity, or bleed. The narrator/archivist prompts are
+  // already genre-neutral, so this is the correct, simulation-free experience.
+  if (!usesSimulationFrame(preset.metaFrameKind)) {
+    return createAndOpenWorld(
+      {
+        name: codename,
+        premise: preset.hiddenPremise,
+        initialState: {
+          time: 'Day 1, morning',
+          location: preset.label,
+          identity: 'a newcomer, name not yet established',
+          playerName,
+        },
+      },
+      [...preset.eraTags, ...preset.toneTags],
+    )
+  }
+
   const c = getContainer()
 
   // The full concealed-onboarding flow (C10): silently seed a randomly-designated
@@ -190,7 +225,9 @@ export async function createAdventureAction(
     // 1. Pick the hub archetype. The hub premise and arc engine are determined
     //    before world creation so the bible can supply the hub's name.
     const hubs = (await c.decks.all()).filter((a) => a.isHub)
-    const hub = pickHubArchetype(hubs, seed)
+    // Genre-coupling audit (Phase 2): draw a hub appropriate to the chosen
+    // genre's era, so a medieval simulation never awakens into a starship.
+    const hub = pickHubArchetype(filterHubsByGenre(hubs, preset.eraTags), seed)
     const hubPremise = `A ${hub.name.toLowerCase()} with a small, friendly resident crew; ${
       hub.playerIntroTemplate ?? 'a newcomer has just arrived'
     }.`

@@ -8,6 +8,7 @@ import {
   getWorld,
   listArchivedWorlds,
   listWorlds,
+  setGenreTags,
   simulationsForHub,
   setSettingRegion,
   setShipClockMinutes,
@@ -119,6 +120,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setMetaStory(worldId: number, metaStoryJson: string): Promise<void> {
     setMetaStoryStmt.run(metaStoryJson, worldId)
+    return Promise.resolve()
+  }
+
+  setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void> {
+    setGenreTags(worldId, genreTagsJson)
     return Promise.resolve()
   }
 }

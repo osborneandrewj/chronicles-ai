@@ -10,6 +10,7 @@ export const MONASTERY: WorldArchetype = {
   name: 'Cliffside Monastery',
   isHub: true,
   eraTags: ['medieval-english', 'medieval'],
+  genres: ['medieval', 'medieval-english', 'english', 'arabic'],
   simulationRoomKey: 'meditation_crypt',
   entryLocationKey: 'gatehouse',
   initialSceneTitle: 'Arrival',

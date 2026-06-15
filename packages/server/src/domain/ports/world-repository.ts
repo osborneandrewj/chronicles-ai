@@ -82,4 +82,10 @@ export interface WorldRepository {
   setLayer(worldId: number, layer: WorldLayer, parentWorldId: number | null): Promise<void>
   /** Store the hub-only Meta-Story Bible JSON (Phase C, C8). */
   setMetaStory(worldId: number, metaStoryJson: string): Promise<void>
+  /**
+   * Store the world's genre signal (genre-coupling audit): a JSON string array
+   * of era/tone tags, or null to clear. Written once at creation. Leaves all
+   * other fields untouched.
+   */
+  setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void>
 }

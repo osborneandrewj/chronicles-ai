@@ -10,7 +10,7 @@ export type { InitialState, World, WorldSummary }
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
    VALUES (?, ?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, created_at`,
+   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, created_at`,
 )
 
 // Bare bounded-world insert (starship P1). Unlike createWorld, this seeds NO
@@ -23,7 +23,7 @@ const insertBoundedWorldStmt = db.prepare<[string, string, string, string]>(
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, created_at
+  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, created_at
    FROM worlds WHERE id = ?`,
 )
 
@@ -86,6 +86,16 @@ const setWorldSceneCursorStmt = db.prepare<[number, number]>(
 const setShipClockMinutesStmt = db.prepare<[number, number]>(
   'UPDATE worlds SET ship_clock_minutes = ? WHERE id = ?',
 )
+const setGenreTagsStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET genre_tags = ? WHERE id = ?',
+)
+
+// Persist a world's genre signal (genre-coupling audit): a JSON string array of
+// era/tone tags, or null to clear. Written once at creation from the chosen
+// preset / quick-start genre.
+export function setGenreTags(worldId: number, genreTagsJson: string | null): void {
+  setGenreTagsStmt.run(genreTagsJson, worldId)
+}
 
 // Bounded-world sim write (starship P2): advance only world_time, leaving the
 // scene cursor untouched (the player-less pre-sim has no active scene yet).

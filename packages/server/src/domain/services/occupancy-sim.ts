@@ -118,19 +118,23 @@ const PROFILE_DEFS: Record<string, ProfileDef> = {
   road: { capacityMin: 0, capacityMax: 6, typicalRoles: ['drivers', 'pedestrians'], trafficLevel: 'medium', matchTags: ['road', 'travel', 'transit', 'vehicle'], hasTraffic: true },
   transit: { capacityMin: 3, capacityMax: 18, typicalRoles: ['commuters', 'staff'], trafficLevel: 'high', matchTags: ['transit', 'travel', 'crowd', 'commute'], hasTraffic: true },
   park: { capacityMin: 0, capacityMax: 10, typicalRoles: ['visitors'], trafficLevel: 'low', matchTags: ['park', 'outdoor', 'leisure'], hasTraffic: false },
+  // Period place of worship/assembly (genre-coupling audit) so a temple, shrine,
+  // or chapel simulates occupancy instead of falling through to 'generic'.
+  temple: { capacityMin: 2, capacityMax: 12, typicalRoles: ['clergy', 'worshippers'], trafficLevel: 'low', matchTags: ['temple', 'sacred', 'worship', 'ritual', 'rumor'], hasTraffic: false },
   generic: { capacityMin: 0, capacityMax: 6, typicalRoles: ['bystanders'], trafficLevel: 'low', matchTags: ['public'], hasTraffic: false },
 }
 
 const KIND_ALIASES: Record<string, string> = {
-  bar: 'bar', pub: 'bar', tavern: 'bar', saloon: 'bar', nightclub: 'bar',
+  bar: 'bar', pub: 'bar', tavern: 'bar', saloon: 'bar', nightclub: 'bar', inn: 'bar', alehouse: 'bar', taproom: 'bar',
   restaurant: 'restaurant', diner: 'restaurant', eatery: 'restaurant',
   cafe: 'cafe', coffee: 'cafe', coffeehouse: 'cafe',
   hospital: 'hospital', clinic: 'hospital', ward: 'hospital', infirmary: 'hospital',
   office: 'office', workplace: 'office', bureau: 'office',
-  market: 'market', bazaar: 'market', shop: 'market', store: 'market',
+  market: 'market', bazaar: 'market', shop: 'market', store: 'market', marketplace: 'market', souk: 'market', forum: 'market', agora: 'market',
   road: 'road', street: 'road', highway: 'road', freeway: 'road', alley: 'road',
   transit: 'transit', station: 'transit', terminal: 'transit', platform: 'transit',
-  park: 'park', garden: 'park', plaza: 'park', square: 'park',
+  park: 'park', garden: 'park', plaza: 'park', square: 'park', courtyard: 'park',
+  temple: 'temple', shrine: 'temple', church: 'temple', chapel: 'temple', cathedral: 'temple', sanctuary: 'temple', monastery: 'temple', mosque: 'temple', synagogue: 'temple',
 }
 
 // Pure keyword classifier shared by profile inference (which falls back to
@@ -416,17 +420,55 @@ export function buildHooks(
   return hooks.slice(0, MAX_HOOKS)
 }
 
+// Whether a world's traffic reads as automobile-era or pre-automobile. The
+// vehicles/pedestrians density labels are era-neutral; only the prose
+// `notable_motion` cue is era-bound ("idling engines" vs "carts and pack
+// animals"), so this only swaps that cue (genre-coupling audit).
+export type TrafficEra = 'modern' | 'premodern'
+
+// Era tags that read as clearly pre-automobile. Anything else — including modern
+// eras and worlds with NO genre signal — stays 'modern' (the current default),
+// so this never regresses an existing or genre-less world.
+const PREMODERN_ERA_TAGS = new Set([
+  'ancient', 'roman', 'latin', 'greek', 'egyptian', 'persian', 'norse', 'viking',
+  'scandinavian', 'medieval', 'medieval-english', 'feudal-japan', 'japanese',
+  'mongol', 'renaissance', 'italian', 'ottoman', 'turkish', 'arabic', 'chinese',
+  'nahua', 'caribbean',
+])
+
+// Parse the stored genre_tags JSON (a string[] encoded as text, or null) safely.
+// Pure; tolerates malformed/legacy values by returning null.
+export function parseGenreTags(json: string | null | undefined): string[] | null {
+  if (!json) return null
+  try {
+    const parsed: unknown = JSON.parse(json)
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+// Resolve a world's genre tags (parsed array, or null) to a traffic era. Pure.
+export function eraFromGenreTags(genreTags: string[] | null | undefined): TrafficEra {
+  if (!genreTags) return 'modern'
+  return genreTags.some((t) => PREMODERN_ERA_TAGS.has(t)) ? 'premodern' : 'modern'
+}
+
 export function trafficBlock(
   profile: InferredProfile,
   density: OccupancyDensity,
+  era: TrafficEra = 'modern',
 ): OccupancyTraffic | null {
   if (!profile.hasTraffic) return null
+  const busyMotion = era === 'premodern' ? "a drover's shout somewhere up the lane" : 'a horn somewhere up the block'
+  const packedMotion =
+    era === 'premodern' ? 'a press of carts, pack animals, and shouting' : 'gridlock and idling engines'
   const map: Record<OccupancyDensity, OccupancyTraffic> = {
     empty: { vehicles: 'none', pedestrians: 'none', notable_motion: null },
     sparse: { vehicles: 'occasional', pedestrians: 'light', notable_motion: null },
     moderate: { vehicles: 'steady', pedestrians: 'light', notable_motion: null },
-    busy: { vehicles: 'steady', pedestrians: 'moderate', notable_motion: 'a horn somewhere up the block' },
-    packed: { vehicles: 'heavy', pedestrians: 'thick', notable_motion: 'gridlock and idling engines' },
+    busy: { vehicles: 'steady', pedestrians: 'moderate', notable_motion: busyMotion },
+    packed: { vehicles: 'heavy', pedestrians: 'thick', notable_motion: packedMotion },
   }
   return map[density]
 }
