@@ -118,19 +118,23 @@ const PROFILE_DEFS: Record<string, ProfileDef> = {
   road: { capacityMin: 0, capacityMax: 6, typicalRoles: ['drivers', 'pedestrians'], trafficLevel: 'medium', matchTags: ['road', 'travel', 'transit', 'vehicle'], hasTraffic: true },
   transit: { capacityMin: 3, capacityMax: 18, typicalRoles: ['commuters', 'staff'], trafficLevel: 'high', matchTags: ['transit', 'travel', 'crowd', 'commute'], hasTraffic: true },
   park: { capacityMin: 0, capacityMax: 10, typicalRoles: ['visitors'], trafficLevel: 'low', matchTags: ['park', 'outdoor', 'leisure'], hasTraffic: false },
+  // Period place of worship/assembly (genre-coupling audit) so a temple, shrine,
+  // or chapel simulates occupancy instead of falling through to 'generic'.
+  temple: { capacityMin: 2, capacityMax: 12, typicalRoles: ['clergy', 'worshippers'], trafficLevel: 'low', matchTags: ['temple', 'sacred', 'worship', 'ritual', 'rumor'], hasTraffic: false },
   generic: { capacityMin: 0, capacityMax: 6, typicalRoles: ['bystanders'], trafficLevel: 'low', matchTags: ['public'], hasTraffic: false },
 }
 
 const KIND_ALIASES: Record<string, string> = {
-  bar: 'bar', pub: 'bar', tavern: 'bar', saloon: 'bar', nightclub: 'bar',
+  bar: 'bar', pub: 'bar', tavern: 'bar', saloon: 'bar', nightclub: 'bar', inn: 'bar', alehouse: 'bar', taproom: 'bar',
   restaurant: 'restaurant', diner: 'restaurant', eatery: 'restaurant',
   cafe: 'cafe', coffee: 'cafe', coffeehouse: 'cafe',
   hospital: 'hospital', clinic: 'hospital', ward: 'hospital', infirmary: 'hospital',
   office: 'office', workplace: 'office', bureau: 'office',
-  market: 'market', bazaar: 'market', shop: 'market', store: 'market',
+  market: 'market', bazaar: 'market', shop: 'market', store: 'market', marketplace: 'market', souk: 'market', forum: 'market', agora: 'market',
   road: 'road', street: 'road', highway: 'road', freeway: 'road', alley: 'road',
   transit: 'transit', station: 'transit', terminal: 'transit', platform: 'transit',
-  park: 'park', garden: 'park', plaza: 'park', square: 'park',
+  park: 'park', garden: 'park', plaza: 'park', square: 'park', courtyard: 'park',
+  temple: 'temple', shrine: 'temple', church: 'temple', chapel: 'temple', cathedral: 'temple', sanctuary: 'temple', monastery: 'temple', mosque: 'temple', synagogue: 'temple',
 }
 
 // Pure keyword classifier shared by profile inference (which falls back to
