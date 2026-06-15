@@ -11,7 +11,7 @@ import { getGenrePreset } from '@/composition/onboarding'
 import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
 import { usesSimulationFrame } from '@/domain/services/meta-frame'
-import { pickHubArchetype } from '@/domain/services/pick-hub-archetype'
+import { filterHubsByGenre, pickHubArchetype } from '@/domain/services/pick-hub-archetype'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
@@ -225,7 +225,9 @@ export async function createAdventureAction(
     // 1. Pick the hub archetype. The hub premise and arc engine are determined
     //    before world creation so the bible can supply the hub's name.
     const hubs = (await c.decks.all()).filter((a) => a.isHub)
-    const hub = pickHubArchetype(hubs, seed)
+    // Genre-coupling audit (Phase 2): draw a hub appropriate to the chosen
+    // genre's era, so a medieval simulation never awakens into a starship.
+    const hub = pickHubArchetype(filterHubsByGenre(hubs, preset.eraTags), seed)
     const hubPremise = `A ${hub.name.toLowerCase()} with a small, friendly resident crew; ${
       hub.playerIntroTemplate ?? 'a newcomer has just arrived'
     }.`

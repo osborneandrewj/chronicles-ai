@@ -65,6 +65,11 @@ export type WorldArchetype = {
   // starship → sci-fi names, a monastery → medieval). Distinct from the genre
   // preset's eraTags, which key the sub-world cast (B8).
   eraTags?: string[]
+  // Era/culture tags this archetype is appropriate for (genre-coupling audit,
+  // Phase 2). Hub selection intersects these with the chosen genre preset's
+  // eraTags so a medieval adventure never draws a starship as its home base.
+  // Absent ⇒ matches any genre (the pre-filter default).
+  genres?: string[]
 }
 
 export interface WorldArchetypeProvider {
