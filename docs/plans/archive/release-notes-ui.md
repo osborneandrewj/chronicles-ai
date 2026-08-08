@@ -1,6 +1,6 @@
 # Release Notes / "What's New" UI
 
-**Status:** planned · **Target version:** `v0.3.0` (feature → MINOR) · **Branch target:** `main` · **Authored:** 2026-06-11
+**Status:** shipped as v0.3.0 · **Archived:** 2026-08-08 (feature → MINOR) · **Branch target:** `main` · **Authored:** 2026-06-11
 
 ## Goal
 

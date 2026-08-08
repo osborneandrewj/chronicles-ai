@@ -671,7 +671,9 @@ World creation/archival are **Server Actions** (not REST): `createWorldAction`,
   build and in tests; pragmas `journal_mode=WAL`, `foreign_keys=ON`; `runMigrations` on open
   (idempotent, `user_version`-gated, FK disabled around the run for rebuild-style migrations).
 - **Env vars:** `XAI_API_KEY` (narrator + TTS), `ANTHROPIC_API_KEY` (helpers), optional
-  `DATABASE_PATH`, `DAILY_TOKEN_LIMIT` (default 200000), `TTS_VOICE` (default `eve`), `TTS_SPEED`.
+  `DATABASE_PATH`, `DAILY_TOKEN_LIMIT` (default 200000), `TTS_VOICE` (default `eve`),
+  `TTS_SPEED` (optional `0.7`–`1.5`), `TTS_OPTIMIZE_STREAMING_LATENCY` (default `1`; `0|1|2`),
+  `TTS_TRANSPORT` (default `ws`; `http` forces unary POST).
 - **Scripts (`scripts/*.mjs`):** `copy-world`/`clone-world-fresh` (export/import a world with PK/FK
   remap), `opening-turn`, `seed-andy`/`seed-joe` fixtures, `merge-characters`, `backfill-setting-
   region`, world-12 repairs. These define operational boundaries (world is the unit of

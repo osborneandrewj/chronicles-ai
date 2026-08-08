@@ -1,7 +1,7 @@
 # Genre-Coupling Audit — Findings & Remediation Plan
 
-**Status:** proposed (not started)
-**Branch target:** `onion-arch-refactor` (or a feature branch off it)
+**Status:** Phases 1–4 **shipped** (PR #31 → `main` → `production` with package **v0.4.0**, 2026-08-08). Residue below remains intentionally open.
+**Branch:** `feat/genre-decoupling` (merged).
 **Problem:** The engine is meant to run *any* genre/setting, but code, prompts, schemas, and UI silently assume one setting (most often a sci-fi starship / "simulation hub"). This audit finds where that coupling breaks in contrasting settings (Sumerian village, medieval castle, Victorian manor, 1920s noir) and lays out a phased fix.
 **Method:** Nine parallel finder agents swept each layer (prompts, domain services, entities/contracts, world-gen/archetypes, use cases/pipeline, UI, DB schema/migrations); every `breaks`-severity finding was adversarially re-verified against the actual code before inclusion. Raw findings: 98 → 27 confirmed breaks, 67 degrade/cosmetic, 4 rejected. False positives reviewed at the bottom.
 

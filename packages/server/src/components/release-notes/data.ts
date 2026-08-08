@@ -16,6 +16,16 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.4.0',
+    date: '2026-08-08',
+    highlights: [
+      'Narration voice starts sooner — often while the story is still writing, with less silence after the prose finishes.',
+      'Adventures outside sci-fi stay grounded in their own world: historical and period settings no longer wrap you in a starship simulation by default.',
+      'More period places and roles (castles, villages, courts, caravanserais, and the like) so non-modern stories feel at home.',
+      'Turns feel snappier: less waiting before the first words appear, and the living-world memory of present characters works more reliably in production.',
+    ],
+  },
+  {
     version: '0.3.0',
     date: '2026-06-13',
     highlights: [
