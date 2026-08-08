@@ -1,4 +1,4 @@
-import type { Place } from '@/lib/world-state'
+import type { Place } from '@/domain/entities'
 
 // A place to insert (starship P1). The bounded-world seeder writes rooms with a
 // deck + layout_hint (v26) for future map layering. Ids are assigned by the store.

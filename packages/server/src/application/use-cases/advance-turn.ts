@@ -87,7 +87,7 @@ export type AdvanceTurnDeps = {
 
   /** Meta-command detection + execution (pre-stream short-circuit). */
   isMetaCommand: (text: string) => boolean
-  runMetaCommand: (text: string, worldId: number) => string
+  runMetaCommand: (text: string, worldId: number) => string | Promise<string>
 
   /** Read the world's active scene id (the player turn is stamped with it). */
   activeSceneId: (worldId: number) => Promise<number | null>
@@ -172,7 +172,7 @@ export async function advanceTurn(
   if (deps.isMetaCommand(playerText)) {
     return {
       kind: 'canned',
-      response: { kind: 'meta', text: deps.runMetaCommand(playerText, worldId) },
+      response: { kind: 'meta', text: await deps.runMetaCommand(playerText, worldId) },
     }
   }
 

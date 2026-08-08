@@ -1,8 +1,11 @@
 import type {
   Character,
   CharacterAgencyLevel,
+  OccupancySnapshotRow,
   Place,
+  ReverieRow,
   Scene,
+  StoryDossier,
 } from '@/domain/entities'
 import type {
   CharacterRepository,
@@ -15,22 +18,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
-import {
-  getActiveSceneForWorld,
-  getCharactersForWorld,
-  getCharactersInPlace,
-  getLatestOccupancySnapshotRow,
-  getPlace,
-  getPlacesForWorld,
-  getScenesForWorld,
-  getStoryDossierForWorld,
-  getTurnTimestampsForWorld,
-  getWorldCursor,
-  type OccupancySnapshotRow,
-  type StoryDossier,
-} from '@/lib/db'
 import { inferPlaceProfile, type PlaceOccupancy } from '@/lib/place-population'
-import { getReveriesForWorld, type ReverieRow } from '@/lib/reveries'
 import { buildTurnNumberMap } from '@/lib/turn-numbers'
 
 // Character / Place / Scene row TYPE defs now live in
@@ -76,47 +64,10 @@ export type FullWorldState = {
   reveriesByCharacter: Record<number, ReverieRow[]>
 }
 
-export function getNarratorWorldState(worldId: number): NarratorWorldState {
-  const cursor = getWorldCursor(worldId)
-  const activeScene = getActiveSceneForWorld(worldId)
-
-  const knownCharacters = getCharactersForWorld(worldId)
-  const knownPlaces = getPlacesForWorld(worldId)
-  const player = knownCharacters.filter((c) => c.is_player === 1)
-  // Presence follows the PLAYER's physical location (current_place_id), not the
-  // active scene's place. The two can drift — e.g. when the player walks back to
-  // an earlier room in a bounded world and the scene transition lags — and when
-  // they do, the narrator must still see whoever is in the room the player is
-  // actually in, so a dormant NPC re-activates on return. Falls back to the
-  // active scene's place, then null, when the player has no recorded place.
-  const currentPlaceId = player[0]?.current_place_id ?? activeScene?.place_id ?? null
-  const currentPlace = currentPlaceId ? getPlace(currentPlaceId) : null
-  const npcsInPlace = currentPlace
-    ? getCharactersInPlace(worldId, currentPlace.id).filter((c) => c.is_player === 0)
-    : []
-
-  const occupancyRow = currentPlace ? getLatestOccupancySnapshotRow(worldId, currentPlace.id) : null
-  const occupancy =
-    occupancyRow && occupancyRow.scene_id === (activeScene?.id ?? null)
-      ? parseOccupancyRow(occupancyRow)
-      : null
-
-  return {
-    worldTime: cursor.world_time,
-    currentScene: activeScene,
-    currentPlace,
-    presentCharacters: [...player, ...npcsInPlace],
-    knownCharacters,
-    knownPlaces,
-    dossier: getStoryDossierForWorld(worldId),
-    occupancy,
-  }
-}
-
 // Read ports the narrator-context assembler needs each turn. The use case (or
 // the strangled narrate-turn/opening-turn caller) hands these in from the
 // container; the SQLite adapters delegate to the same `lib/db` readers the
-// legacy sync path uses, so the assembled state is byte-identical.
+// legacy path used, so the assembled state is byte-identical on SQLite.
 export type NarratorWorldStateDeps = {
   worlds: Pick<WorldRepository, 'cursor'>
   scenes: Pick<SceneRepository, 'activeForWorld'>
@@ -126,14 +77,13 @@ export type NarratorWorldStateDeps = {
   dossiers: Pick<DossierRepository, 'forWorld'>
 }
 
-// Port-driven twin of getNarratorWorldState. SAME assembly/dedup/formatting —
-// only the row SOURCE changes (injected read ports instead of `@/lib/db`). The
-// SQLite adapters delegate to the identical readers, so SQLite stays byte-green
-// (P2 cutover); the Mongo adapters read the collections.
+// Port-driven narrator-context assembler. Only the row SOURCE is injected —
+// no SQLite-direct twin (A0). SQLite adapters keep the path byte-green;
+// Mongo adapters read the collections.
 //
 // Reads run in dependency waves so Mongo (network) pays 3 round-trips of
 // parallel work instead of 8 sequential hops (Track A1).
-export async function getNarratorWorldStateVia(
+export async function getNarratorWorldState(
   deps: NarratorWorldStateDeps,
   worldId: number,
 ): Promise<NarratorWorldState> {
@@ -147,7 +97,12 @@ export async function getNarratorWorldStateVia(
   ])
 
   const player = knownCharacters.filter((c) => c.is_player === 1)
-  // Presence follows the PLAYER's physical location (see getNarratorWorldState).
+  // Presence follows the PLAYER's physical location (current_place_id), not the
+  // active scene's place. The two can drift — e.g. when the player walks back to
+  // an earlier room in a bounded world and the scene transition lags — and when
+  // they do, the narrator must still see whoever is in the room the player is
+  // actually in, so a dormant NPC re-activates on return. Falls back to the
+  // active scene's place, then null, when the player has no recorded place.
   const currentPlaceId = player[0]?.current_place_id ?? activeScene?.place_id ?? null
 
   // Wave 2 — needs currentPlaceId.
@@ -233,32 +188,6 @@ export function collectSceneTags(state: NarratorWorldState): string[] {
   return tags
 }
 
-export function getFullWorldState(worldId: number): FullWorldState {
-  const cursor = getWorldCursor(worldId)
-  const orderedTurns = getTurnTimestampsForWorld(worldId)
-  const turnTimestamps = Object.fromEntries(
-    orderedTurns.map((turn) => [turn.id, turn.created_at]),
-  )
-  const turnNumbers = buildTurnNumberMap(orderedTurns.map((turn) => turn.id))
-  const characters = getCharactersForWorld(worldId)
-  const reveriesByCharacter: Record<number, ReverieRow[]> = {}
-  for (const r of getReveriesForWorld(worldId)) {
-    ;(reveriesByCharacter[r.character_id] ??= []).push(r)
-  }
-  return {
-    worldTime: cursor.world_time,
-    currentSceneId: cursor.current_scene_id,
-    characters,
-    places: getPlacesForWorld(worldId),
-    scenes: getScenesForWorld(worldId),
-    dossier: getStoryDossierForWorld(worldId),
-    turnTimestamps,
-    turnNumbers,
-    potentialDuplicates: findLikelyDuplicateCharacters(characters),
-    reveriesByCharacter,
-  }
-}
-
 // Read ports the inspector's full-state assembler needs. Same delegation
 // discipline as NarratorWorldStateDeps.
 export type FullWorldStateDeps = {
@@ -271,9 +200,8 @@ export type FullWorldStateDeps = {
   reveries: Pick<ReverieRepository, 'forWorld'>
 }
 
-// Port-driven twin of getFullWorldState. SAME assembly — only the row SOURCE
-// changes (injected read ports). SQLite stays byte-green via delegation.
-export async function getFullWorldStateVia(
+// Port-driven full-state assembler for the inspector. No SQLite-direct twin (A0).
+export async function getFullWorldState(
   deps: FullWorldStateDeps,
   worldId: number,
 ): Promise<FullWorldState> {

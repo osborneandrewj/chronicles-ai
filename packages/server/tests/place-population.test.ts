@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
-import { buildGroups, buildHooks, buildPlaceOccupancySnapshot, classifyPlaceKind, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
+import { buildGroups, buildHooks, classifyPlaceKind, densityForCount, hashSeed, inferPlaceProfile, mulberry32, resolveTemplates } from '@/lib/place-population'
 import { applyArchivistPatch } from '@/lib/archivist'
 import type { StoryThread } from '@/lib/db'
 import {
@@ -14,8 +14,9 @@ import {
   insertOccupancySnapshot,
 } from '@/lib/db'
 import { runMigrations } from '@/lib/migrations'
-import { formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+import { formatStateBlock } from '@/lib/world-state'
 import { createWorld } from '@/lib/worlds'
+import { loadNarratorState, loadOccupancySnapshot } from './helpers/state-assembly'
 
 function freshWorld(): number {
   return createWorld({
@@ -31,21 +32,21 @@ function freshWorld(): number {
 }
 
 describe('classifyPlaceKind', () => {
-  it('returns the profile kind when a keyword matches', () => {
+  it('returns the profile kind when a keyword matches', async () => {
     expect(classifyPlaceKind('The Anchor Tavern')).toBe('bar')
     expect(classifyPlaceKind('Gare de Lyon station')).toBe('transit')
     expect(classifyPlaceKind('a narrow service alley')).toBe('road')
     expect(classifyPlaceKind('the morning market')).toBe('market')
   })
 
-  it('returns null when no keyword matches', () => {
+  it('returns null when no keyword matches', async () => {
     expect(classifyPlaceKind('Paris')).toBeNull()
     expect(classifyPlaceKind('Mevagissey harbour')).toBeNull()
   })
 })
 
 describe('createWorld place kind (C1)', () => {
-  it('classifies a keyworded location into places.kind', () => {
+  it('classifies a keyworded location into places.kind', async () => {
     const id = createWorld({
       name: `KindA-${Math.random()}`,
       premise: 'x',
@@ -54,7 +55,7 @@ describe('createWorld place kind (C1)', () => {
     expect(getPlacesForWorld(id)[0].kind).toBe('bar')
   })
 
-  it('leaves kind null for a bare city location', () => {
+  it('leaves kind null for a bare city location', async () => {
     const id = createWorld({
       name: `KindB-${Math.random()}`,
       premise: 'x',
@@ -65,7 +66,7 @@ describe('createWorld place kind (C1)', () => {
 })
 
 describe('migration v22 — place population schema', () => {
-  it('creates the three tables, the threads tag column, and passes FK check', () => {
+  it('creates the three tables, the threads tag column, and passes FK check', async () => {
     const db = new Database(':memory:')
     db.pragma('foreign_keys = ON')
     runMigrations(db)
@@ -90,7 +91,7 @@ describe('migration v22 — place population schema', () => {
 })
 
 describe('occupancy snapshot persistence', () => {
-  it('round-trips a snapshot row as JSON', () => {
+  it('round-trips a snapshot row as JSON', async () => {
     const worldId = freshWorld()
     const placeId = (db.prepare(
       "SELECT id FROM places WHERE world_id = ? LIMIT 1",
@@ -110,53 +111,53 @@ describe('occupancy snapshot persistence', () => {
     expect(JSON.parse(row!.occupancy_json).density).toBe('busy')
   })
 
-  it('returns empty array when no population_templates exist for the world', () => {
+  it('returns empty array when no population_templates exist for the world', async () => {
     const worldId = freshWorld()
     expect(getPopulationTemplatesForKind(worldId, 'bar')).toEqual([])
   })
 })
 
 describe('deterministic PRNG', () => {
-  it('produces the same sequence for the same seed', () => {
+  it('produces the same sequence for the same seed', async () => {
     const a = mulberry32(hashSeed('world:1|place:2|scene:3'))
     const b = mulberry32(hashSeed('world:1|place:2|scene:3'))
     expect([a(), a(), a()]).toEqual([b(), b(), b()])
   })
 
-  it('produces a different sequence for a different seed', () => {
+  it('produces a different sequence for a different seed', async () => {
     const a = mulberry32(hashSeed('world:1|place:2|scene:3'))
     const b = mulberry32(hashSeed('world:1|place:2|scene:4'))
     expect(a()).not.toEqual(b())
   })
 
-  it('produces a known first value for a fixed seed (regression guard)', () => {
+  it('produces a known first value for a fixed seed (regression guard)', async () => {
     const rng = mulberry32(hashSeed('world:1|place:2|scene:3'))
     expect(rng()).toBeCloseTo(0.9102079933509231, 6)
   })
 })
 
 describe('profile inference', () => {
-  it('infers a bar profile from kind', () => {
+  it('infers a bar profile from kind', async () => {
     const p = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     expect(p.profileKind).toBe('bar')
     expect(p.matchTags).toContain('bar')
     expect(p.capacityMax).toBeGreaterThan(p.capacityMin)
   })
 
-  it('infers a road profile from name keywords when kind is null', () => {
+  it('infers a road profile from name keywords when kind is null', async () => {
     const p = inferPlaceProfile({ name: 'Highway 7 shoulder', kind: null })
     expect(p.profileKind).toBe('road')
     expect(p.trafficLevel).not.toBe('none')
   })
 
-  it('falls back to generic for unrecognized places', () => {
+  it('falls back to generic for unrecognized places', async () => {
     const p = inferPlaceProfile({ name: 'A featureless void', kind: null })
     expect(p.profileKind).toBe('generic')
   })
 })
 
 describe('group selection', () => {
-  it('respects capacity bounds and caps group count at 6', () => {
+  it('respects capacity bounds and caps group count at 6', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('seed-A'))
@@ -167,7 +168,7 @@ describe('group selection', () => {
     expect(groups.every((g) => g.count >= 1)).toBe(true)
   })
 
-  it('is stable for the same seed', () => {
+  it('is stable for the same seed', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const first = buildGroups(profile, templates, mulberry32(hashSeed('seed-B'))).groups
@@ -175,7 +176,7 @@ describe('group selection', () => {
     expect(second).toEqual(first)
   })
 
-  it('maps counts to a density band', () => {
+  it('maps counts to a density band', async () => {
     expect(densityForCount(0, 12)).toBe('empty')
     expect(densityForCount(1, 12)).toBe('sparse')
     expect(densityForCount(3, 12)).toBe('moderate')
@@ -183,7 +184,7 @@ describe('group selection', () => {
     expect(densityForCount(11, 12)).toBe('packed')
   })
 
-  it('returns empty groups when traffic target is 0', () => {
+  it('returns empty groups when traffic target is 0', async () => {
     const base = inferPlaceProfile({ name: 'Desolate Road', kind: 'road' })
     const profile = { ...base, trafficLevel: 'none' as const }
     const { groups, total } = buildGroups(profile, resolveTemplates([], 'road'), mulberry32(hashSeed('x')))
@@ -202,7 +203,7 @@ function thread(partial: Partial<StoryThread>): StoryThread {
 }
 
 describe('hook matching', () => {
-  it('emits a continuation hook when a thread tag overlaps the place', () => {
+  it('emits a continuation hook when a thread tag overlaps the place', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('hooks-A'))
@@ -215,7 +216,7 @@ describe('hook matching', () => {
     expect(cont!.thread_ref).toBe('The missing courier')
   })
 
-  it('emits a seed hook when no thread overlaps but a promotable carrier exists', () => {
+  it('emits a seed hook when no thread overlaps but a promotable carrier exists', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('hooks-B'))
@@ -225,7 +226,7 @@ describe('hook matching', () => {
     expect(hooks.length).toBeLessThanOrEqual(3)
   })
 
-  it('does not exceed 3 hooks total', () => {
+  it('does not exceed 3 hooks total', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('hooks-C'))
@@ -237,7 +238,7 @@ describe('hook matching', () => {
     expect(hooks.length).toBeLessThanOrEqual(3)
   })
 
-  it('filters out threads whose tags do not overlap (empty tags)', () => {
+  it('filters out threads whose tags do not overlap (empty tags)', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('hooks-empty'))
@@ -247,7 +248,7 @@ describe('hook matching', () => {
     expect(hooks.some((h) => h.kind === 'continuation')).toBe(false)
   })
 
-  it('emits a place-level continuation hook (occupant_id null) when no promotable occupants exist', () => {
+  it('emits a place-level continuation hook (occupant_id null) when no promotable occupants exist', async () => {
     const profile = inferPlaceProfile({ name: 'Highway 7 shoulder', kind: 'road' })
     const templates = resolveTemplates([], profile.profileKind)
     const rng = mulberry32(hashSeed('hooks-road'))
@@ -259,7 +260,7 @@ describe('hook matching', () => {
     expect(cont!.occupant_id).toBeNull()
   })
 
-  it('marks strength strong at overlap>=2 and ambient at overlap 1', () => {
+  it('marks strength strong at overlap>=2 and ambient at overlap 1', async () => {
     const profile = inferPlaceProfile({ name: 'The Anchor', kind: 'bar' })
     const templates = resolveTemplates([], profile.profileKind)
     const ambientRng = mulberry32(hashSeed('hooks-ambient'))
@@ -306,20 +307,20 @@ function seedScene(worldId: number, placeName: string, kind: string): { placeId:
 }
 
 describe('buildPlaceOccupancySnapshot', () => {
-  it('builds, persists, and returns occupancy for the active place', () => {
+  it('builds, persists, and returns occupancy for the active place', async () => {
     const worldId = freshWorld()
     const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
-    const occ = buildPlaceOccupancySnapshot(worldId, null)
+    const occ = await loadOccupancySnapshot(worldId, null)
     expect(occ).not.toBeNull()
     expect(occ!.groups.length).toBeGreaterThan(0)
     expect(getLatestOccupancySnapshotRow(worldId, placeId)).not.toBeNull()
   })
 
-  it('reuses the snapshot while in the same scene rather than re-rolling', () => {
+  it('reuses the snapshot while in the same scene rather than re-rolling', async () => {
     const worldId = freshWorld()
     seedScene(worldId, 'The Lantern Room', 'bar')
-    const first = buildPlaceOccupancySnapshot(worldId, null)
-    const second = buildPlaceOccupancySnapshot(worldId, null)
+    const first = await loadOccupancySnapshot(worldId, null)
+    const second = await loadOccupancySnapshot(worldId, null)
     expect(second).toEqual(first)
     const count = db.prepare(
       'SELECT COUNT(*) AS n FROM place_occupancy_snapshots WHERE world_id = ?',
@@ -327,30 +328,30 @@ describe('buildPlaceOccupancySnapshot', () => {
     expect(count.n).toBe(1)
   })
 
-  it('returns null when the active scene has no linked place', () => {
+  it('returns null when the active scene has no linked place', async () => {
     const worldId = freshWorld()
     db.prepare(
       "INSERT INTO scenes (world_id, place_id, title, scene_number, status) VALUES (?, NULL, 'Void', 999, 'active')",
     ).run(worldId)
-    expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
+    expect(await loadOccupancySnapshot(worldId, null)).toBeNull()
   })
 
-  it('returns null when there is no active scene/place', () => {
+  it('returns null when there is no active scene/place', async () => {
     const worldId = freshWorld()
     db.prepare("UPDATE scenes SET status = 'completed' WHERE world_id = ?").run(worldId)
-    expect(buildPlaceOccupancySnapshot(worldId, null)).toBeNull()
+    expect(await loadOccupancySnapshot(worldId, null)).toBeNull()
   })
 
-  it('persists an inferred place profile on first build', () => {
+  it('persists an inferred place profile on first build', async () => {
     const worldId = freshWorld()
     const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
-    buildPlaceOccupancySnapshot(worldId, null)
+    await loadOccupancySnapshot(worldId, null)
     const row = getPlaceProfileRow(worldId, placeId)
     expect(row).not.toBeNull()
     expect(row!.profile_kind).toBe('bar')
   })
 
-  it('respects a pre-existing stored profile over inference', () => {
+  it('respects a pre-existing stored profile over inference', async () => {
     const worldId = freshWorld()
     const { placeId } = seedScene(worldId, 'The Lantern Room', 'bar')
     // Pre-store a profile that yields an empty room (traffic none, capacity 0),
@@ -359,22 +360,22 @@ describe('buildPlaceOccupancySnapshot', () => {
       `INSERT INTO place_profiles (world_id, place_id, profile_kind, capacity_min, capacity_max, traffic_level, match_tags_json, typical_roles_json)
        VALUES (?, ?, 'bar', 0, 0, 'none', '[]', '[]')`,
     ).run(worldId, placeId)
-    const occ = buildPlaceOccupancySnapshot(worldId, null)
+    const occ = await loadOccupancySnapshot(worldId, null)
     expect(occ).not.toBeNull()
     expect(occ!.groups.length).toBe(0)
   })
 })
 
 describe('occupancy in the narrator state block', () => {
-  it('renders a compact occupancy section with density, groups, and hooks', () => {
+  it('renders a compact occupancy section with density, groups, and hooks', async () => {
     const worldId = freshWorld()
     seedScene(worldId, 'The Lantern Room', 'bar')
     db.prepare(
       "INSERT INTO story_threads (world_id, title, kind, status, relevance_tags_json) VALUES (?, 'The missing courier', 'quest', 'active', '[\"bar\",\"rumor\"]')",
     ).run(worldId)
 
-    buildPlaceOccupancySnapshot(worldId, null)
-    const state = getNarratorWorldState(worldId)
+    await loadOccupancySnapshot(worldId, null)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state)
 
     expect(block).toContain('### NEARBY (ambient — not durable characters)')
@@ -382,9 +383,9 @@ describe('occupancy in the narrator state block', () => {
     expect(block).toContain('possible encounters (latent')
   })
 
-  it('omits the occupancy section when there is no snapshot', () => {
+  it('omits the occupancy section when there is no snapshot', async () => {
     const worldId = freshWorld()
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     expect(formatStateBlock(state)).not.toContain('### NEARBY')
   })
 })

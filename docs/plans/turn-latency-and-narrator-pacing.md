@@ -1,6 +1,6 @@
 # Turn Latency + Narrator Pacing — Implementation Plan
 
-**Status:** partially shipped as **package v0.4.0** (PR #32 → `main` → `production`, 2026-08-08). Track A residual + Track B still open.
+**Status:** partially shipped as **package v0.4.0** (PR #32 → `main` → `production`, 2026-08-08). A0 residual done on `feat/a0-delete-sqlite-twins`. A6 deferred + Track B still open.
 **Shipped on:** `feat/voice-ttfa-and-turn-latency` (merged).
 **Scope:** three tracks — (A) cut time-to-first-token on the narrator turn, (B) narrator quality/pacing beyond the already-shipped NPC-initiation work, (C) time-to-first-**audio** (the gap between finished prose and voice).
 
@@ -14,7 +14,7 @@ These two tracks are separable but share a surface: `infrastructure/narrator/nar
 |---|---|
 | Reverie read via SQLite while stamp writes Mongo | **Fixed in v0.4.0** — `reveries.forCharacters` port |
 | World-correction `getNarratorWorldState` SQLite twin | **Fixed in v0.4.0** — `getNarratorWorldStateVia` |
-| Full A0 twin deletion + depcruise fence | **Still open** |
+| Full A0 twin deletion + depcruise fence | **Done** (this branch) |
 
 ### Cross-cutting facts
 
@@ -185,7 +185,7 @@ Behavior: unchanged. Enforced by the A2 characterization test.
 
 | Item | Status | Notes |
 |---|---|---|
-| A0 twin deletion | **not done** | Still planned; prod split-brain reverie read fixed via port instead |
+| A0 twin deletion | **done** | SQLite twins deleted; Via suffix dropped; domain→lib depcruise fence |
 | A1 parallel state waves | **done** | `getNarratorWorldStateVia` 3-wave `Promise.all` |
 | A2 collapse 3 assemblies → 1 | **done** | `applyPromotionDeltaToState` + occupancy merge |
 | A3 geocode off path | **done** | `backgroundTasks.register(resolveUnresolvedPlaces…)` |
@@ -294,8 +294,8 @@ With B1 and B2 landed, the pacing question should be re-asked against real turns
 | PR | Contents | Effort | Rationale |
 |---|---|---|---|
 | **C** *(this branch)* | C0–C3 voice TTFA + A1–A5 + reverie port + cache layout + archivist gate | M | User-facing voice gap + biggest pre-stream wins |
-| **0** | Remaining prod split-brain (world-correction SQLite twin) | XS | Still open |
-| **1** | A0 (twin deletion + depcruise fence) | S | Enabler residual |
+| **0** | Remaining prod split-brain (world-correction SQLite twin) | XS | **Done** in v0.4.0 |
+| **1** | A0 (twin deletion + depcruise fence) | S | **Done** on `feat/a0-delete-sqlite-twins` |
 | **4** | A6 or A6-lite | M | Gated on the `unitOfWork` write-safety check and Andrew's cost call |
 | **5** | B1 + archive the stale plan doc | M | Behavior change; land alone so its effect is attributable |
 | **6** | B2, then re-measure | S | Playtest gate before any B3 work is specified |

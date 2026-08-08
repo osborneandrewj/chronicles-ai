@@ -1,9 +1,9 @@
+import { getContainer } from '@/composition/container'
 import { getLatestMetadata, getUsageTotals } from '@/lib/db'
 import { SLASH_COMMANDS } from '@/lib/slash-commands'
 import { getFullWorldState } from '@/lib/world-state'
-import { getWorld } from '@/lib/worlds'
 
-type Handler = (worldId: number) => string
+type Handler = (worldId: number) => string | Promise<string>
 
 const HELP_TEXT = [
   '**Available meta-commands** (not part of the story, not saved to history):',
@@ -15,10 +15,24 @@ const handlers: Record<string, Handler> = {
   '/help': () => HELP_TEXT,
   '/pause': () =>
     'Paused. The scene holds where it is — take your time. Type when you are ready to continue.',
-  '/inspect': (worldId) => {
-    const world = getWorld(worldId)
+  '/inspect': async (worldId) => {
+    // Port-driven full-state assembly (A0) — no SQLite-direct twin, so Mongo
+    // prod reflects the same store the rest of the pipeline uses.
+    const c = getContainer()
+    const world = await c.worlds.getWorld(worldId)
     if (!world) return `World ${worldId} not found.`
-    const state = getFullWorldState(worldId)
+    const state = await getFullWorldState(
+      {
+        worlds: c.worlds,
+        turns: c.turns,
+        characters: c.characters,
+        places: c.places,
+        scenes: c.scenes,
+        dossiers: c.dossiers,
+        reveries: c.reveries,
+      },
+      worldId,
+    )
     return [
       `**Authoritative state** _(${world.name})_`,
       '',
@@ -28,6 +42,7 @@ const handlers: Record<string, Handler> = {
     ].join('\n')
   },
   '/usage': (worldId) => {
+    // Still SQLite-bound totals (pre-existing; usage port strangle is separate).
     const totals = getUsageTotals(worldId)
     if (totals.turns === 0) {
       return 'No turns with recorded token usage yet.'
@@ -63,7 +78,7 @@ export function isMetaCommand(text: string): boolean {
   return text.trimStart().startsWith('/')
 }
 
-export function runMetaCommand(text: string, worldId: number): string {
+export async function runMetaCommand(text: string, worldId: number): Promise<string> {
   const token = text.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
   const handler = handlers[token]
   if (!handler) {

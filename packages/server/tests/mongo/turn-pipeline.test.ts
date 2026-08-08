@@ -19,8 +19,8 @@ import { MongoWorldRepository } from '@/infrastructure/persistence/mongo/reposit
 import { SystemClock } from '@/infrastructure/clock/system-clock'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
 import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
-import { buildPlaceOccupancySnapshotVia } from '@/lib/place-population'
-import { getNarratorWorldStateVia } from '@/lib/world-state'
+import { buildPlaceOccupancySnapshot } from '@/lib/place-population'
+import { getNarratorWorldState } from '@/lib/world-state'
 
 import { replSetAvailable, startReplSet, type ReplSetHandle } from './replset'
 
@@ -85,7 +85,7 @@ d('mongo turn pipeline (e2e)', () => {
     expect(seededCharacters.some((c) => c.is_player === 1)).toBe(true)
   })
 
-  it('assembles narrator context from MONGO via getNarratorWorldStateVia (port-driven read)', async () => {
+  it('assembles narrator context from MONGO via getNarratorWorldState (port-driven read)', async () => {
     const worlds = new MongoWorldRepository(h.ctx)
     const scenes = new MongoSceneRepository(h.ctx)
     const places = new MongoPlaceRepository(h.ctx)
@@ -109,7 +109,7 @@ d('mongo turn pipeline (e2e)', () => {
     // The P2 assembler now sources its rows from the injected READ PORTS — here
     // the Mongo port set — so this asserts the assembled context reads MONGO,
     // not SQLite.
-    const state = await getNarratorWorldStateVia(
+    const state = await getNarratorWorldState(
       { worlds, scenes, places, characters, occupancy, dossiers },
       worldId,
     )
@@ -618,7 +618,7 @@ d('mongo turn pipeline (e2e)', () => {
     expect((await worlds.cursor(worldId)).world_time).toBe('late morning')
   })
 
-  // P5b: the deterministic turn-path helper `buildPlaceOccupancySnapshotVia`
+  // P5b: the deterministic turn-path helper `buildPlaceOccupancySnapshot`
   // (the occupancy strangle) now takes injected ports. Exercise it directly
   // against the Mongo port set — no LLM — to prove the snapshot it builds is
   // written to AND re-read from MONGO (not the colliding SQLite world id). This
@@ -649,7 +649,7 @@ d('mongo turn pipeline (e2e)', () => {
     const deps = { dossiers, occupancy, places, scenes, worlds }
 
     // First call builds + persists a snapshot into Mongo.
-    const first = await buildPlaceOccupancySnapshotVia(deps, worldId, playerTurn.id)
+    const first = await buildPlaceOccupancySnapshot(deps, worldId, playerTurn.id)
     expect(first).not.toBeNull()
 
     const seededPlaces = await places.forWorld(worldId)
@@ -662,7 +662,7 @@ d('mongo turn pipeline (e2e)', () => {
 
     // Second call in the same scene REUSES the persisted snapshot (no re-roll):
     // identical seed, identical value — proving the read came back from Mongo.
-    const second = await buildPlaceOccupancySnapshotVia(deps, worldId, playerTurn.id)
+    const second = await buildPlaceOccupancySnapshot(deps, worldId, playerTurn.id)
     expect(second).toEqual(first)
   })
 })

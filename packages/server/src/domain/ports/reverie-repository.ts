@@ -1,4 +1,4 @@
-import type { ReverieInput, ReverieRow } from '@/lib/reveries'
+import type { ReverieInput, ReverieRow } from '@/domain/entities'
 
 // ReverieRepository (spec §3.4) — dumb CRUD over append-only NPC `reveries`.
 // Reverie flaring / mint-state / dedup is deciding logic that stays in the

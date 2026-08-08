@@ -8,7 +8,7 @@ import { isOverDailyLimit } from '@/lib/cost-cap'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import {
   formatStateBlock,
-  getNarratorWorldStateVia,
+  getNarratorWorldState,
   type NarratorWorldStateDeps,
 } from '@/lib/world-state'
 
@@ -45,7 +45,7 @@ export async function generateOpeningTurn(
     return
   }
 
-  const priorState = await getNarratorWorldStateVia(deps, worldId)
+  const priorState = await getNarratorWorldState(deps, worldId)
   const stateBlock = formatStateBlock(priorState)
   const premiseBlock = formatPremiseBlock(premise)
   const activeSceneId = (await deps.scenes.activeForWorld(worldId))?.id ?? null

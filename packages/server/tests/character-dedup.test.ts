@@ -4,7 +4,7 @@ import { applyArchivistPatch } from '@/lib/archivist'
 import { findLikelyDuplicateCharacters } from '@/lib/character-dedup'
 import { db, insertTurn, type Character } from '@/lib/db'
 import { addReveriesForCharacter, getReveriesForCharacter } from '@/lib/reveries'
-import { getFullWorldState } from '@/lib/world-state'
+import { loadFullWorldState } from './helpers/state-assembly'
 import { createWorld } from '@/lib/worlds'
 
 // Minimal Character factory — only the fields the detector reads matter; cast
@@ -107,7 +107,7 @@ describe('getFullWorldState.potentialDuplicates', () => {
         { name: 'Jérôme Moreau', current_place_name: 'Cornavin station' },
       ],
     })
-    const dup = getFullWorldState(world.id).potentialDuplicates
+    const dup = (await loadFullWorldState(world.id)).potentialDuplicates
     expect(dup.some((p) => p.reason === 'descriptor + named at same place')).toBe(true)
   })
 })

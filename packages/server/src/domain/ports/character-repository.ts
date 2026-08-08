@@ -1,4 +1,4 @@
-import type { Character } from '@/lib/world-state'
+import type { Character } from '@/domain/entities'
 
 // Result of the appearance-bump / auto-promotion pass (spec §3.4-P3). `promoted`
 // is the names of NPCs that crossed the auto-promote threshold on this call;

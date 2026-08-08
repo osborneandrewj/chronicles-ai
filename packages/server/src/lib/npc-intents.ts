@@ -1,7 +1,9 @@
 import type {
+  InsertNpcIntent,
   IntentDisposition,
   IntentVisibility,
   NpcIntentRow,
+  ReconcileIntentInput,
 } from '@/domain/entities'
 import { db } from '@/lib/db'
 
@@ -10,22 +12,14 @@ import { db } from '@/lib/db'
 // narrator runs and the post-narrator reconciliation step can update the same
 // row with the narrator turn id, a disposition label, and an interpretation.
 //
-// The NpcIntentRow row TYPE def + the visibility/disposition enums now live in
-// `domain/entities/npc-intent.ts` (spec §3.3); re-exported here for back-compat.
-export type { IntentDisposition, IntentVisibility, NpcIntentRow }
-
-export type InsertNpcIntent = {
-  worldId: number
-  characterId: number
-  playerTurnId: number
-  agencyLevel: string
-  intentText: string
-  plannedAction: string
-  intentType?: string | null
-  targetCharacterId?: number | null
-  targetPlaceId?: number | null
-  privateRationale?: string | null
-  expectedVisibility?: IntentVisibility
+// Row types + write inputs live in domain/entities/npc-intent.ts (spec §3.3);
+// re-exported here for back-compat with existing `@/lib/npc-intents` importers.
+export type {
+  InsertNpcIntent,
+  IntentDisposition,
+  IntentVisibility,
+  NpcIntentRow,
+  ReconcileIntentInput,
 }
 
 const insertIntentStmt = db.prepare<
@@ -142,16 +136,6 @@ const reconcileIntentStmt = db.prepare<
        updated_at = datetime('now')
    WHERE id = ?`,
 )
-
-export type ReconcileIntentInput = {
-  intentId: number
-  narratorTurnId: number
-  disposition: IntentDisposition
-  interpretation?: string | null
-  outcomeSummary?: string | null
-  resolvedOutcome?: string | null
-  confidence?: number | null
-}
 
 export function reconcileIntent(input: ReconcileIntentInput): void {
   reconcileIntentStmt.run(

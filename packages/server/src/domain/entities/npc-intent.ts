@@ -28,3 +28,28 @@ export type NpcIntentRow = {
   created_at: string
   updated_at: string
 }
+
+// Port write inputs (A0 — lived in lib/npc-intents; ports must not import lib).
+export type InsertNpcIntent = {
+  worldId: number
+  characterId: number
+  playerTurnId: number
+  agencyLevel: string
+  intentText: string
+  plannedAction: string
+  intentType?: string | null
+  targetCharacterId?: number | null
+  targetPlaceId?: number | null
+  privateRationale?: string | null
+  expectedVisibility?: IntentVisibility
+}
+
+export type ReconcileIntentInput = {
+  intentId: number
+  narratorTurnId: number
+  disposition: IntentDisposition
+  interpretation?: string | null
+  outcomeSummary?: string | null
+  resolvedOutcome?: string | null
+  confidence?: number | null
+}

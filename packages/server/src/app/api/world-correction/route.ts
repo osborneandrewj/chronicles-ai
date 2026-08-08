@@ -11,7 +11,7 @@ import {
 } from '@/application/use-cases/apply-correction'
 import { getContainer } from '@/composition/container'
 import { applyArchivistPatch, extractCorrectionPatch } from '@/lib/archivist'
-import { getNarratorWorldStateVia } from '@/lib/world-state'
+import { getNarratorWorldState } from '@/lib/world-state'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,9 +47,9 @@ export async function POST(req: Request) {
         worlds,
         turns,
         corrections,
-        // Port-driven assembler (not the SQLite-direct twin) so Mongo prod
-        // corrections read the same store the narrator writes.
-        readPriorState: (worldId) => getNarratorWorldStateVia(stateDeps, worldId),
+        // Port-driven assembler so Mongo prod corrections read the same store
+        // the narrator writes.
+        readPriorState: (worldId) => getNarratorWorldState(stateDeps, worldId),
         // The extractor returns a richer type; adapt it to the use case's
         // narrow CorrectionPatchResult shape at this boundary.
         extractPatch: (prior, playerText, recent) =>

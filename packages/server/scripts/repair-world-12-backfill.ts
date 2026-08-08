@@ -5,17 +5,28 @@
 // dossier bootstrap forced on, seeding the ambush threat / map clue / warn-
 // command objective / timeline. DATABASE_PATH must point at the SQLite file the
 // app's db module opens (default is cwd/chronicles.sqlite).
+import { getContainer } from '@/composition/container'
 import { applyArchivistPatch, extractPatch } from '@/lib/archivist'
 import { recentTurns, latestTurn } from '@/lib/db'
 import { getNarratorWorldState } from '@/lib/world-state'
-import { getWorld } from '@/lib/worlds'
 
 const WORLD_ID = 12
 
 async function main() {
-  const world = getWorld(WORLD_ID)
+  const c = getContainer()
+  const world = await c.worlds.getWorld(WORLD_ID)
   if (!world) throw new Error('world 12 not found at DATABASE_PATH')
-  const prior = getNarratorWorldState(WORLD_ID)
+  const prior = await getNarratorWorldState(
+    {
+      worlds: c.worlds,
+      scenes: c.scenes,
+      places: c.places,
+      characters: c.characters,
+      occupancy: c.occupancy,
+      dossiers: c.dossiers,
+    },
+    WORLD_ID,
+  )
   const recent = recentTurns(WORLD_ID, 8).map((t) => ({ role: t.role, content: t.content }))
   const narratorTurnId = latestTurn(WORLD_ID)?.id ?? 0
   const { patch } = await extractPatch(
