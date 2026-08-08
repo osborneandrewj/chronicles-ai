@@ -1,5 +1,4 @@
-import type { WorldLayer } from '@/domain/entities'
-import type { InitialState, World, WorldSummary } from '@/lib/worlds'
+import type { InitialState, World, WorldLayer, WorldSummary } from '@/domain/entities'
 
 // Input for createOpen (P3 cutover). An open world is seeded eagerly: the
 // `worlds` row plus a starting place (derived from `initialState.location`), a

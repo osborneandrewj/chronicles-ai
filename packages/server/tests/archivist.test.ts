@@ -21,7 +21,7 @@ import {
   insertTurn,
 } from '@/lib/db'
 import { createWorld } from '@/lib/worlds'
-import { getNarratorWorldState } from '@/lib/world-state'
+import { loadNarratorState } from './helpers/state-assembly'
 
 // Each test gets its own world on the shared in-memory singleton. We never
 // reset the singleton — better-sqlite3 has no concept of nested transactions
@@ -44,12 +44,12 @@ function seedWorld(name: string): { worldId: number; turnId: number } {
 describe('buildArchivistUserContent (opening bootstrap, A)', () => {
   const base = { priorBlock: '{"world_time":"dusk"}', transcript: 'NARRATOR: Rain falls.', occupancyBlock: '' }
 
-  it('includes the thread mandate on the opening turn', () => {
+  it('includes the thread mandate on the opening turn', async () => {
     expect(buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: true })).toContain(THREAD_MANDATE_DIRECTIVE)
     expect(buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })).not.toContain(THREAD_MANDATE_DIRECTIVE)
   })
 
-  it('always carries the prior state and transcript and ends with the return instruction', () => {
+  it('always carries the prior state and transcript and ends with the return instruction', async () => {
     const content = buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })
     expect(content).toContain(base.priorBlock)
     expect(content).toContain(base.transcript)
@@ -60,19 +60,19 @@ describe('buildArchivistUserContent (opening bootstrap, A)', () => {
 describe('archivist directive assembly', () => {
   const base = { priorBlock: '{}', transcript: 'PLAYER: x', occupancyBlock: '' }
 
-  it('injects only the thread mandate when bootstrapping a non-opening empty dossier', () => {
+  it('injects only the thread mandate when bootstrapping a non-opening empty dossier', async () => {
     const content = buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: false })
     expect(content).toContain(THREAD_MANDATE_DIRECTIVE)
     expect(content).not.toContain(PLACE_KIND_DIRECTIVE)
   })
 
-  it('injects both mandates on the true opening turn', () => {
+  it('injects both mandates on the true opening turn', async () => {
     const content = buildArchivistUserContent({ ...base, threadMandate: true, placeKindMandate: true })
     expect(content).toContain(THREAD_MANDATE_DIRECTIVE)
     expect(content).toContain(PLACE_KIND_DIRECTIVE)
   })
 
-  it('injects neither on a routine turn', () => {
+  it('injects neither on a routine turn', async () => {
     const content = buildArchivistUserContent({ ...base, threadMandate: false, placeKindMandate: false })
     expect(content).not.toContain(THREAD_MANDATE_DIRECTIVE)
     expect(content).not.toContain(PLACE_KIND_DIRECTIVE)
@@ -87,7 +87,7 @@ describe('applyArchivistPatch', () => {
     ;({ worldId, turnId } = seedWorld(`World-${Math.random()}`))
   })
 
-  it('seed: createWorld produces one player, one place, scene 1 active', () => {
+  it('seed: createWorld produces one player, one place, scene 1 active', async () => {
     const characters = getCharactersForWorld(worldId)
     expect(characters).toHaveLength(1)
     expect(characters[0].name).toBe('Edith')
@@ -1004,9 +1004,9 @@ describe('applyArchivistPatch', () => {
 })
 
 describe('extractDeterministicPatch', () => {
-  it('extracts an obvious accepted destination move without an LLM', () => {
+  it('extracts an obvious accepted destination move without an LLM', async () => {
     const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     const patch = extractDeterministicPatch(
       prior,
@@ -1021,9 +1021,9 @@ describe('extractDeterministicPatch', () => {
     })
   })
 
-  it('accepts natural destination variants like a campus arrival', () => {
+  it('accepts natural destination variants like a campus arrival', async () => {
     const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     const patch = extractDeterministicPatch(
       prior,
@@ -1042,9 +1042,9 @@ describe('extractDeterministicPatch', () => {
     })
   })
 
-  it('does not extract a destination the narrator did not confirm', () => {
+  it('does not extract a destination the narrator did not confirm', async () => {
     const { worldId } = seedWorld(`Deterministic-${Math.random()}`)
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     expect(
       extractDeterministicPatch(
@@ -1065,7 +1065,7 @@ describe('sanitizeArchivistPatch', () => {
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
     })
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     const patch: ArchivistPatch = {
       scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
@@ -1096,7 +1096,7 @@ describe('sanitizeArchivistPatch', () => {
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
     })
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     const patch: ArchivistPatch = {
       scene: { action: 'open', title: 'Behind the Bar', place_name: 'Back room' },
@@ -1127,7 +1127,7 @@ describe('sanitizeArchivistPatch', () => {
       scene: { action: 'open', title: 'At Tapped', place_name: 'Tapped' },
       characters: [{ name: 'Edith', is_player: true, current_place_name: 'Tapped' }],
     })
-    const prior = getNarratorWorldState(worldId)
+    const prior = await loadNarratorState(worldId)
 
     const patch: ArchivistPatch = {
       scene: { action: 'open', title: 'At Home', place_name: '33rd Street house' },
@@ -1162,13 +1162,13 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
     await applyArchivistPatch(world.id, t1.id, {
       characters: [{ name: 'Abby', description: 'The driver.', current_place_name: 'The vault' }],
     })
-    const before = getNarratorWorldState(world.id)
+    const before = await loadNarratorState(world.id)
     const vaultSceneId = before.currentScene?.id
     const t2 = insertTurn(world.id, 'assistant', 'You step inside the safe house.', null)
     await applyArchivistPatch(world.id, t2.id, {
       characters: [{ name: 'Reuben', is_player: true, current_place_name: 'Safe house' }],
     })
-    const after = getNarratorWorldState(world.id)
+    const after = await loadNarratorState(world.id)
     expect(after.currentScene?.id).not.toBe(vaultSceneId)
     expect(after.currentPlace?.name).toBe('Safe house')
   })
@@ -1183,7 +1183,7 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
     await applyArchivistPatch(world.id, t1.id, {
       characters: [{ name: 'Micha', description: 'A colleague.', current_place_name: 'The hospital' }],
     })
-    const before = getNarratorWorldState(world.id)
+    const before = await loadNarratorState(world.id)
     const hospitalSceneId = before.currentScene?.id
     // Backward "home flip": player sent home while Micha is explicitly restated at the hospital.
     const t2 = insertTurn(world.id, 'assistant', 'The narrator wrongly snaps you home.', null)
@@ -1193,7 +1193,7 @@ describe('applyArchivistPatch player-move scene invariant (A1)', () => {
         { name: 'Micha', current_place_name: 'The hospital' },
       ],
     })
-    const after = getNarratorWorldState(world.id)
+    const after = await loadNarratorState(world.id)
     // The invariant must NOT advance the cursor — an NPC pinned at the old scene
     // place is the backward-flip signature; defer to v0.6.10 logic (which holds).
     expect(after.currentScene?.id).toBe(hospitalSceneId)
@@ -1223,19 +1223,19 @@ describe('normalizeTransitPlaceName', () => {
   it('strips a leading "en route to" prefix to the destination', () => {
     expect(normalizeTransitPlaceName('En route to safe house')).toBe('safe house')
   })
-  it('keeps a city qualifier on the destination', () => {
+  it('keeps a city qualifier on the destination', async () => {
     expect(normalizeTransitPlaceName('En route to safe house - Prague')).toBe('safe house - Prague')
   })
   it('resolves "X - en route to Y" to Y', () => {
     expect(normalizeTransitPlaceName('Prague flat - en route to the docks')).toBe('the docks')
   })
-  it('strips other transit framings', () => {
+  it('strips other transit framings', async () => {
     expect(normalizeTransitPlaceName('Heading back to the office')).toBe('the office')
     expect(normalizeTransitPlaceName('On the way to the bridge')).toBe('the bridge')
     expect(normalizeTransitPlaceName('Not yet at the vault')).toBe('the vault')
     expect(normalizeTransitPlaceName('Heading to the office')).toBe('the office')
   })
-  it('leaves a real place name untouched', () => {
+  it('leaves a real place name untouched', async () => {
     expect(normalizeTransitPlaceName('The basement vault of the Violet Exchange')).toBe('The basement vault of the Violet Exchange')
   })
 })

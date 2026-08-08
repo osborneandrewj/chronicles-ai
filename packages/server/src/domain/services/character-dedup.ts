@@ -1,5 +1,5 @@
 import type { Character } from '@/domain/entities'
-import { isDescriptorName, nameKey } from '@/lib/character-identity'
+import { isDescriptorName, nameKey } from '@/domain/services/character-identity'
 
 export type DuplicatePair = {
   aId: number

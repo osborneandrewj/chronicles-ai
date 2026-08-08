@@ -6,7 +6,8 @@ import { applyNpcAgentPatch, type NpcAgentDeps } from '@/lib/npc-agent'
 import { db, insertTurn } from '@/lib/db'
 import { addReveriesForCharacter, getReveriesForCharacters } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
-import { formatDossierBlock, formatStateBlock, getNarratorWorldState } from '@/lib/world-state'
+import { formatDossierBlock, formatStateBlock } from '@/lib/world-state'
+import { loadNarratorState } from './helpers/state-assembly'
 
 // The NPC agent reads/writes through injected ports (P5b); on SQLite the
 // container adapters delegate to the same byte-identical SQL.
@@ -69,7 +70,7 @@ describe('story dossier state', () => {
       ],
     })
 
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state)
 
     expect(block).toContain('## STORY DOSSIER')
@@ -82,7 +83,7 @@ describe('story dossier state', () => {
     expect(block).toContain('Find the transmitter')
   })
 
-  it('omits the dossier block when no story pressure exists', () => {
+  it('omits the dossier block when no story pressure exists', async () => {
     expect(formatDossierBlock({ threads: [], clues: [], objectives: [], resources: [], timeline: [] })).toBe(
       '',
     )
@@ -127,7 +128,7 @@ describe('story dossier state', () => {
       turnId,
     )
 
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state, [], [], {
       byCharacter: getReveriesForCharacters([maraId.id]),
       flaring: new Set(),
@@ -152,7 +153,7 @@ describe('story dossier state', () => {
       ],
     })
 
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state)
 
     expect(block).toContain('Andras Voss (player)')
@@ -170,7 +171,7 @@ describe('story dossier state', () => {
       },
     })
 
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state)
 
     expect(block).toContain('pacing: mood tense; pace medium; focus action')
@@ -182,7 +183,7 @@ describe('story dossier state', () => {
     await applyArchivistPatch(worldId, turnId, {
       story_resources: [{ name: 'brass key', held_by_name: 'protagonist', salient: true }],
     })
-    const carriedBlock = formatStateBlock(getNarratorWorldState(worldId))
+    const carriedBlock = formatStateBlock(await loadNarratorState(worldId))
     expect(carriedBlock).toContain('CARRIED / TRACKED OBJECTS')
     expect(carriedBlock).toContain('brass key')
 
@@ -194,7 +195,7 @@ describe('story dossier state', () => {
         { name: 'brass key', held_by_name: null, location_name: 'Wheat field near a spire' },
       ],
     })
-    const droppedBlock = formatStateBlock(getNarratorWorldState(worldId))
+    const droppedBlock = formatStateBlock(await loadNarratorState(worldId))
     expect(droppedBlock).toContain('### ITEMS HERE')
     expect(droppedBlock).toMatch(/### ITEMS HERE[^]*brass key/)
     // No longer carried.
@@ -211,7 +212,7 @@ describe('story dossier state', () => {
       story_resources: [{ name: 'sealed dossier', held_by_name: 'Torres', salient: true }],
     })
 
-    const block = formatStateBlock(getNarratorWorldState(worldId))
+    const block = formatStateBlock(await loadNarratorState(worldId))
     expect(block).toContain('carries (authoritative): sealed dossier')
   })
 
@@ -228,7 +229,7 @@ describe('story dossier state', () => {
       ],
     })
 
-    const state = getNarratorWorldState(worldId)
+    const state = await loadNarratorState(worldId)
     const block = formatStateBlock(state)
 
     expect(block).toContain('behavior cue: noticed Andras repeat the same question twice')

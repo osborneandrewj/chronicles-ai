@@ -3,7 +3,7 @@ import type {
   IntentDisposition,
   NpcIntentRow,
   ReconcileIntentInput,
-} from '@/lib/npc-intents'
+} from '@/domain/entities'
 
 export type ReconcileBatchResult = {
   intentId: number

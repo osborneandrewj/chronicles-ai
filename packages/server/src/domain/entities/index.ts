@@ -11,9 +11,11 @@ export type {
 } from './character'
 export type { WorldCorrectionRow } from './correction'
 export type {
+  InsertNpcIntent,
   IntentDisposition,
   IntentVisibility,
   NpcIntentRow,
+  ReconcileIntentInput,
 } from './npc-intent'
 export type {
   OccupancySnapshotRow,

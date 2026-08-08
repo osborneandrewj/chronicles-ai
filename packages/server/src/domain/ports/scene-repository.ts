@@ -1,4 +1,4 @@
-import type { Scene } from '@/lib/world-state'
+import type { Scene } from '@/domain/entities'
 
 // Input for SceneRepository.add (starship P4a). A bare scene insert — the
 // CreateStarshipWorld use case writes the initial active Scene 1 after the

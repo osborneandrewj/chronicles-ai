@@ -27,11 +27,11 @@ module.exports = {
     {
       name: 'domain-points-inward',
       comment:
-        'domain/ is pure: it may not import application, infrastructure, composition, server-render, app, or components.',
+        'domain/ is pure: it may not import application, infrastructure, composition, server-render, app, components, or lib (legacy SQL-owning modules). Ports and pure services depend only on domain entities/siblings — never on lib twins that could silently bind SQLite.',
       severity: 'error',
       from: { path: '^packages/server/src/domain' },
       to: {
-        path: '^packages/server/src/(application|infrastructure|composition|server|app|components)',
+        path: '^packages/server/src/(application|infrastructure|composition|server|app|components|lib)',
       },
     },
     {

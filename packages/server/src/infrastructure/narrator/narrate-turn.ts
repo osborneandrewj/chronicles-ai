@@ -36,7 +36,7 @@ import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-recon
 import { narratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
-import { buildPlaceOccupancySnapshotVia, type PlaceOccupancy } from '@/lib/place-population'
+import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
 import { computeReverieFlares } from '@/lib/reveries'
@@ -45,7 +45,7 @@ import {
   collectSceneTags,
   formatSceneDigestForClassifier,
   formatStateBlock,
-  getNarratorWorldStateVia,
+  getNarratorWorldState,
 } from '@/lib/world-state'
 
 // Infrastructure NarratorPort adapter (spec §3.5, §5.1-P5). Owns the AI-SDK
@@ -118,7 +118,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   // State is read before the classifier so it can see who's present and where.
   // Single assembly (Track A2): later writes merge into this snapshot in memory.
-  const priorState = await getNarratorWorldStateVia(stateDeps, worldId)
+  const priorState = await getNarratorWorldState(stateDeps, worldId)
 
   // Update NPC attention tiers before the NPC agent call.
   const promotion = await characters.recordAppearancesAndAutoPromote(
@@ -174,7 +174,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           return { error: String(err) } as const
         })
       : Promise.resolve(null),
-    buildPlaceOccupancySnapshotVia(
+    buildPlaceOccupancySnapshot(
       { dossiers, occupancy, places, scenes, worlds },
       worldId,
       playerTurnId,
