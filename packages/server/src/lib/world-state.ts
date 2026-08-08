@@ -130,26 +130,39 @@ export type NarratorWorldStateDeps = {
 // only the row SOURCE changes (injected read ports instead of `@/lib/db`). The
 // SQLite adapters delegate to the identical readers, so SQLite stays byte-green
 // (P2 cutover); the Mongo adapters read the collections.
+//
+// Reads run in dependency waves so Mongo (network) pays 3 round-trips of
+// parallel work instead of 8 sequential hops (Track A1).
 export async function getNarratorWorldStateVia(
   deps: NarratorWorldStateDeps,
   worldId: number,
 ): Promise<NarratorWorldState> {
-  const cursor = await deps.worlds.cursor(worldId)
-  const activeScene = await deps.scenes.activeForWorld(worldId)
+  // Wave 1 — independent roots.
+  const [cursor, activeScene, knownCharacters, knownPlaces, dossier] = await Promise.all([
+    deps.worlds.cursor(worldId),
+    deps.scenes.activeForWorld(worldId),
+    deps.characters.forWorld(worldId),
+    deps.places.forWorld(worldId),
+    deps.dossiers.forWorld(worldId),
+  ])
 
-  const knownCharacters = await deps.characters.forWorld(worldId)
-  const knownPlaces = await deps.places.forWorld(worldId)
   const player = knownCharacters.filter((c) => c.is_player === 1)
   // Presence follows the PLAYER's physical location (see getNarratorWorldState).
   const currentPlaceId = player[0]?.current_place_id ?? activeScene?.place_id ?? null
-  const currentPlace = currentPlaceId ? await deps.places.byId(currentPlaceId) : null
-  const npcsInPlace = currentPlace
-    ? (await deps.characters.inPlace(worldId, currentPlace.id)).filter((c) => c.is_player === 0)
-    : []
 
-  const occupancyRow = currentPlace
-    ? await deps.occupancy.latestSnapshot(worldId, currentPlace.id)
-    : null
+  // Wave 2 — needs currentPlaceId.
+  const currentPlace = currentPlaceId ? await deps.places.byId(currentPlaceId) : null
+
+  // Wave 3 — needs currentPlace (+ activeScene for occupancy scene match).
+  const [npcsInPlace, occupancyRow] = currentPlace
+    ? await Promise.all([
+        deps.characters.inPlace(worldId, currentPlace.id).then((rows) =>
+          rows.filter((c) => c.is_player === 0),
+        ),
+        deps.occupancy.latestSnapshot(worldId, currentPlace.id),
+      ])
+    : [[], null]
+
   const occupancy =
     occupancyRow && occupancyRow.scene_id === (activeScene?.id ?? null)
       ? parseOccupancyRow(occupancyRow)
@@ -162,8 +175,41 @@ export async function getNarratorWorldStateVia(
     presentCharacters: [...player, ...npcsInPlace],
     knownCharacters,
     knownPlaces,
-    dossier: await deps.dossiers.forWorld(worldId),
+    dossier,
     occupancy,
+  }
+}
+
+// Apply appearance/promotion deltas to an in-memory state snapshot so callers
+// can skip a full re-read after recordAppearancesAndAutoPromote (Track A2).
+// Only bumps present non-player characters (matching the SQL path).
+export function applyPromotionDeltaToState(
+  state: NarratorWorldState,
+  promotion: { promoted: string[] },
+  turnId: number,
+): NarratorWorldState {
+  const promoted = new Set(promotion.promoted)
+  const presentIds = new Set(
+    state.presentCharacters.filter((c) => c.is_player !== 1).map((c) => c.id),
+  )
+  const patchChar = (c: Character): Character => {
+    if (!presentIds.has(c.id)) return c
+    const appearance_count = c.appearance_count + 1
+    const agency_level =
+      promoted.has(c.name) && c.agency_level === 'npc'
+        ? ('local' as Character['agency_level'])
+        : c.agency_level
+    return {
+      ...c,
+      appearance_count,
+      last_seen_turn_id: turnId,
+      agency_level,
+    }
+  }
+  return {
+    ...state,
+    presentCharacters: state.presentCharacters.map(patchChar),
+    knownCharacters: state.knownCharacters.map(patchChar),
   }
 }
 

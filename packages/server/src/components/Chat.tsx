@@ -321,16 +321,19 @@ export function Chat({
     return undefined;
   }, [messages]);
 
-  // Drives auto-narration of the newest assistant turn. While it's still
-  // streaming we key audio off the AI SDK message id (the DB id doesn't exist
-  // yet, and this keeps streaming detection / replay supersession stable). Once
-  // it's persisted we switch to the DB turn id so /api/tts can cache the audio
-  // and the cost recorder can credit the right turn. Meta-command responses
-  // (preceding user message starts with "/") are pre-canned strings, not
-  // narrator prose — an undefined id tears down any in-flight audio, matching
-  // the "new turn supersedes" semantics of real narrator turns.
+  // Drives auto-narration of the newest assistant turn. Job identity stays on
+  // the AI SDK message id for the whole live turn so mid-stream TTS is not
+  // aborted when `dbTurnId` metadata lands. Cache + cost accounting use the
+  // separate numeric dbTurnId. Meta-command responses (preceding user message
+  // starts with "/") are pre-canned strings, not narrator prose — an undefined
+  // id skips auto-narration.
   const narratableTurn = useMemo(() => {
-    const idle = { id: undefined as string | undefined, text: "", streaming: false };
+    const idle = {
+      id: undefined as string | undefined,
+      dbTurnId: undefined as number | undefined,
+      text: "",
+      streaming: false,
+    };
     if (!lastAssistant) return idle;
     const idx = messages.findIndex((m) => m.id === lastAssistant.id);
     if (idx < 0) return idle;
@@ -340,8 +343,14 @@ export function Chat({
     }
     const isStreaming = streaming && lastAssistant.id === latestMessage?.id;
     const dbId = effectiveDbTurnId(lastAssistant);
-    const id = isStreaming ? lastAssistant.id : dbId !== undefined ? String(dbId) : undefined;
-    return { id, text: messageText(lastAssistant), streaming: isStreaming };
+    // Job key is always the UI message id for the whole turn lifetime — never
+    // flip to the DB id mid-turn (that abort/re-TTS race was the main voice lag).
+    return {
+      id: lastAssistant.id,
+      dbTurnId: dbId,
+      text: messageText(lastAssistant),
+      streaming: isStreaming,
+    };
   }, [messages, lastAssistant, streaming, latestMessage]);
 
   const reportTtsChars = useCallback(
@@ -375,6 +384,7 @@ export function Chat({
     text: narratableTurn.text,
     streaming: narratableTurn.streaming,
     turnId: narratableTurn.id,
+    dbTurnId: narratableTurn.dbTurnId,
     onTurnComplete: reportTtsChars,
   });
 
@@ -556,13 +566,14 @@ export function Chat({
           {messages.map((m, idx) => {
             const cost = m.role === "assistant" ? costByMessageId.get(m.id) : undefined;
             const isStreamingThis = m.id === streamingAssistantId;
-            // Audio is keyed by DB turn id (metadata.dbTurnId for live turns,
-            // numeric message id for history), so match the indicator/replay on
-            // that resolved id rather than the AI SDK `msg-…` id.
+            // Live jobs key off the UI message id; replays/history may use the
+            // numeric DB turn id. Match either so the speaking indicator sticks.
             const dbId = m.role === "assistant" ? effectiveDbTurnId(m) : undefined;
             const dbIdStr = dbId !== undefined ? String(dbId) : undefined;
             const isAudioTurn =
-              m.role === "assistant" && dbIdStr !== undefined && dbIdStr === audioTurnId;
+              m.role === "assistant" &&
+              audioTurnId !== undefined &&
+              (m.id === audioTurnId || (dbIdStr !== undefined && dbIdStr === audioTurnId));
             const turnAudioStatus = isAudioTurn ? audioStatus : "idle";
             const turnAudioProgress = isAudioTurn ? audioProgress : null;
             const text = messageText(m);

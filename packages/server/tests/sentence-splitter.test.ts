@@ -66,14 +66,39 @@ describe('splitNewChunks (minChars first-chunk overlap mode)', () => {
     expect(text.slice(cursor)).toBe('Second.')
   })
 
-  it('waits (emits nothing) when no paragraph boundary has cleared minChars yet — even past the soft cap', () => {
-    // A long single paragraph with no blank line. In minChars mode there is NO
-    // soft-cap forced cut, so the decision stays deterministic between a partial
-    // stream and the full-text replay.
-    const runOn = 'word '.repeat(200).trim() // ~999 chars, no paragraph boundary
-    const { chunks, cursor } = splitNewChunks(runOn, 0, { minChars: 280 })
+  it('falls back to a sentence boundary when no paragraph break has cleared minChars', () => {
+    // Long single paragraph with sentence ends but no blank line — common
+    // narrator shape. Must fire mid-stream so TTS can overlap generation.
+    const s1 =
+      'The corridor smelled of ozone and cold metal, every footfall ringing off the bulkheads. '
+    const s2 = 'Ahead, a red status light blinked once and held. '
+    const s3 = 'She checked the seal on her gauntlet and kept moving.'
+    const runOn = s1 + s2 + s3
+    const { chunks, cursor } = splitNewChunks(runOn, 0, { minChars: 140 })
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]!.length).toBeGreaterThanOrEqual(140)
+    expect(chunks[0]).toMatch(/[.!?]["')\]”’]*$/)
+    // Remainder starts after the chosen sentence boundary.
+    expect(runOn.slice(cursor).length).toBeLessThan(runOn.length)
+    expect(chunks[0]! + ' ' + runOn.slice(cursor).trim()).toContain('gauntlet')
+  })
+
+  it('waits when neither a paragraph nor sentence boundary has cleared minChars', () => {
+    const short = 'Still building the first clause without end'
+    const { chunks, cursor } = splitNewChunks(short, 0, { minChars: 140 })
     expect(chunks).toEqual([])
     expect(cursor).toBe(0)
+  })
+
+  it('reproduces the same sentence-fallback cut on partial stream and full-text replay', () => {
+    const full =
+      'First long enough sentence about the empty hall and the distant drums. ' +
+      'Second sentence continues the beat of the scene without a blank line. ' +
+      'Third closes the thought for the tail.'
+    const live = splitNewChunks(full.slice(0, 200), 0, { minChars: 100 })
+    const replay = splitNewChunks(full, 0, { minChars: 100 })
+    expect(live.chunks).toEqual(replay.chunks)
+    expect(live.cursor).toBe(replay.cursor)
   })
 
   it('flush+minChars emits the entire remainder as a single chunk (no soft-cap subdivision)', () => {
