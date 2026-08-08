@@ -1,6 +1,6 @@
 # NPC Initiation Fixes — Implementation Plan
 
-**Status:** proposed (not started)
+**Status:** shipped (stale "proposed" header; work landed before archive) · **Archived:** 2026-08-08
 **Branch target:** `onion-arch-refactor` (or a feature branch off it)
 **Problem:** NPCs rarely initiate conversation/interaction with the player. Root-cause evaluation: `memory/npc_initiation_rootcauses.md`.
 

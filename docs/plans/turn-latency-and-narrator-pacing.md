@@ -1,21 +1,20 @@
 # Turn Latency + Narrator Pacing — Implementation Plan
 
-**Status:** in progress (Track A partial + Track C voice shipped on `feat/genre-decoupling`)
-**Branch target:** feature branch off `main`
+**Status:** partially shipped as **package v0.4.0** (PR #32 → `main` → `production`, 2026-08-08). Track A residual + Track B still open.
+**Shipped on:** `feat/voice-ttfa-and-turn-latency` (merged).
 **Scope:** three tracks — (A) cut time-to-first-token on the narrator turn, (B) narrator quality/pacing beyond the already-shipped NPC-initiation work, (C) time-to-first-**audio** (the gap between finished prose and voice).
 
 ## Framing
 
-These two tracks are separable but share a surface: `infrastructure/narrator/narrate-turn.ts` (699 lines) is where the turn is assembled, and both the latency problem and the pacing levers live in it. Track A is pure restructuring with **no behavior change** — every value the narrator sees must be byte-identical afterward. Track B is deliberate behavior change. **Land A first**, so B's prompt/guidance changes are evaluated against a fast turn rather than a slow one.
+These two tracks are separable but share a surface: `infrastructure/narrator/narrate-turn.ts` is where the turn is assembled, and both the latency problem and the pacing levers live in it. Track A is pure restructuring with **no behavior change** — every value the narrator sees must be byte-identical afterward. Track B is deliberate behavior change. **Land A first**, so B's prompt/guidance changes are evaluated against a fast turn rather than a slow one.
 
-### Prerequisite (not part of this plan, but blocks honest measurement)
+### Prerequisite (prod split-brain)
 
-Two SQLite/Mongo split-brain reads are live on prod (`PERSISTENCE=mongo`) and will distort any latency or quality measurement taken now:
-
-- `narrate-turn.ts:196` — `getReveriesForCharacters(reverieNpcIds)` reads SQLite directly (`lib/reveries.ts:35`, module-level `db.prepare`) while `reveries.stampFlared` 14 lines later writes through the Mongo port. Reveries never flare on prod.
-- `app/api/world-correction/route.ts:14` — passes `readPriorState: getNarratorWorldState` (the SQLite-direct twin at `lib/world-state.ts:79`) instead of `getNarratorWorldStateVia`.
-
-Fix both before benchmarking. They are also the argument for step A0 below.
+| Bug | Status |
+|---|---|
+| Reverie read via SQLite while stamp writes Mongo | **Fixed in v0.4.0** — `reveries.forCharacters` port |
+| World-correction `getNarratorWorldState` SQLite twin | **Fixed in v0.4.0** — `getNarratorWorldStateVia` |
+| Full A0 twin deletion + depcruise fence | **Still open** |
 
 ### Cross-cutting facts
 
@@ -182,7 +181,7 @@ So for **every in-character turn with a living NPC present** — the overwhelmin
 
 Behavior: unchanged. Enforced by the A2 characterization test.
 
-### Track A shipped (partial, this branch)
+### Track A shipped (partial, v0.4.0)
 
 | Item | Status | Notes |
 |---|---|---|
