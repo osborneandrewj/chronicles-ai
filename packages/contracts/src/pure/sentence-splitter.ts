@@ -18,10 +18,11 @@ export interface SplitOptions {
   // First-chunk overlap mode. When set, splitNewChunks emits AT MOST ONE chunk:
   // the text up to the first paragraph boundary whose accumulated content
   // reaches `minChars` (leading sub-minChars paragraphs are coalesced into it).
-  // There is deliberately NO soft-cap forced cut in this mode, so the chunk-1
-  // boundary is identical whether computed from a partial stream or the full
-  // text on replay — which is what makes replay a cache hit. On flush, the
-  // entire remainder is emitted as a single chunk (the prosodically-whole tail).
+  // If no paragraph break has arrived but a sentence boundary at/after minChars
+  // exists, cut there so long single-paragraph turns still start TTS mid-stream.
+  // The boundary decision is deterministic across partial-stream and full-text
+  // replay so cache hashes match. On flush, the entire remainder is emitted as
+  // a single chunk (the prosodically-whole tail).
   minChars?: number
 }
 
@@ -75,10 +76,9 @@ export function splitNewChunks(
 }
 
 // First-chunk overlap extractor (see SplitOptions.minChars). On flush, returns
-// the whole remainder as one chunk. Otherwise returns the slice up to the first
-// paragraph boundary at/after `minChars`, or nothing if no such boundary has
-// arrived yet. No soft-cap subdivision: the boundary must be a real paragraph
-// break so the decision is deterministic across partial-stream and full-text.
+// the whole remainder as one chunk. Otherwise prefers the first paragraph
+// boundary at/after minChars; falls back to a sentence boundary at/after
+// minChars so single-paragraph narration still overlaps with generation.
 function splitFirstChunk(
   text: string,
   cursor: number,
@@ -100,7 +100,43 @@ function splitFirstChunk(
     }
   }
 
+  // No qualifying paragraph break yet. Prefer a sentence cut once we have
+  // enough text — same cut on partial stream and full-text replay because we
+  // take the *first* sentence end at/after minChars (deterministic).
+  const fromCursor = text.slice(cursor)
+  if (fromCursor.trim().length >= minChars) {
+    const absCut = firstSentenceEndAtOrAfter(text, cursor, minChars)
+    if (absCut != null) {
+      const piece = text.slice(cursor, absCut).trim()
+      if (piece.length >= minChars) {
+        return { chunks: [piece], cursor: absCut }
+      }
+    }
+  }
+
   return { chunks: [], cursor }
+}
+
+// Absolute index of the first sentence-ending match whose accumulated content
+// from `cursor` is at least `minChars`. Returns null when none is available yet.
+// Accepts either "punct + whitespace" (mid-paragraph) or "punct at end of
+// available text" so a completed final sentence still fires mid-stream.
+function firstSentenceEndAtOrAfter(
+  text: string,
+  cursor: number,
+  minChars: number,
+): number | null {
+  const window = text.slice(cursor)
+  const endBoundary = /[.!?]+(["')\]”’]*)(?:\s+|$)/g
+  let m: RegExpExecArray | null
+  while ((m = endBoundary.exec(window)) !== null) {
+    const end = m.index + m[0].length
+    const piece = window.slice(0, end).trim()
+    if (piece.length >= minChars) {
+      return cursor + end
+    }
+  }
+  return null
 }
 
 // Subdivide a paragraph that exceeds the soft cap into sentence-bounded

@@ -34,6 +34,15 @@ describe('hasRichStorySignal', () => {
   it('fires on straight-quoted dialogue', () => {
     expect(hasRichStorySignal('', 'She says, "wait here for the others."')).toBe(true)
   })
+  it('is quiet on ambient time-of-day color without actual passage', () => {
+    expect(hasRichStorySignal('I look around', 'Morning light spills across the empty plaza.')).toBe(false)
+  })
+  it('fires on explicit time passage', () => {
+    expect(hasRichStorySignal('I wait', 'Two hours later the bells ring.')).toBe(true)
+  })
+  it('is quiet on bare "message" without a send/leave verb', () => {
+    expect(hasRichStorySignal('I read the notice', 'The message board lists ferry times.')).toBe(false)
+  })
 })
 
 describe('POST /api/chat — request parsing', () => {

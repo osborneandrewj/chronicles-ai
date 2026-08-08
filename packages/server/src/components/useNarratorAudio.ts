@@ -8,9 +8,10 @@ const MUTE_STORAGE_KEY = "chronicles.narrator.muted";
 const PRIME_AUDIO_SECONDS = 0.05;
 const PROGRESSIVE_AUDIO_MIME = "audio/mpeg";
 // First-chunk overlap floor: the opening chunk synthesized mid-stream extends to
-// the first paragraph boundary at or after this many characters, so it's a real
-// prosodic unit rather than a one-line opener with a huge tail. Tunable.
-const FIRST_CHUNK_MIN_CHARS = 280;
+// the first paragraph (or sentence) boundary at or after this many characters,
+// so it's a real prosodic unit rather than a one-line opener with a huge tail.
+// Lowered from 280 so long single-paragraph turns still fire mid-stream.
+const FIRST_CHUNK_MIN_CHARS = 140;
 const TTFA_DEBUG = process.env.NODE_ENV !== "production";
 
 export type NarratorAudioStatus = "idle" | "loading" | "speaking";
@@ -27,7 +28,18 @@ interface UseNarratorAudioArgs {
   worldId: number;
   text: string;
   streaming: boolean;
+  /**
+   * Stable job identity for the whole turn (client message id while live).
+   * Must NOT change when the DB turn id arrives — renaming the job aborts
+   * mid-stream synthesis and forces a full re-TTS after prose finishes.
+   */
   turnId: string | undefined;
+  /**
+   * Numeric DB turn id once persisted. Used for TTS cache + cost accounting
+   * only; does not own job identity. Undefined while streaming / before
+   * `dbTurnId` metadata lands.
+   */
+  dbTurnId?: number;
   voice?: string;
   onTurnComplete?: (turnId: string, chars: number) => void;
 }
@@ -58,6 +70,8 @@ interface TtfaMarks {
 interface JobState {
   jobKey: string;
   turnId: string;
+  /** Numeric DB id for cache/cost once known; may arrive after job starts. */
+  dbTurnId: number | undefined;
   source: "stream" | "replay";
   cursor: number;
   nextSeq: number;
@@ -66,6 +80,8 @@ interface JobState {
   controllers: Set<AbortController>;
   flushed: boolean;
   charsSent: number;
+  /** Chars synthesized before dbTurnId was known; flushed once the id arrives. */
+  pendingCostChars: number;
   // First-chunk overlap bookkeeping. firstChunkSent flips once the opening chunk
   // has been dispatched (mid-stream or, for short turns/replay, at flush);
   // tailSent flips once the remainder has been dispatched. Together they make
@@ -86,10 +102,16 @@ interface JobState {
   ttfaLogged: boolean;
 }
 
-function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): JobState {
+function freshJob(
+  jobKey: string,
+  turnId: string,
+  source: "stream" | "replay",
+  dbTurnId?: number,
+): JobState {
   return {
     jobKey,
     turnId,
+    dbTurnId,
     source,
     cursor: 0,
     nextSeq: 0,
@@ -98,6 +120,7 @@ function freshJob(jobKey: string, turnId: string, source: "stream" | "replay"): 
     controllers: new Set(),
     flushed: false,
     charsSent: 0,
+    pendingCostChars: 0,
     firstChunkSent: false,
     tailSent: false,
     sourceNode: null,
@@ -122,6 +145,7 @@ export function useNarratorAudio({
   text,
   streaming,
   turnId,
+  dbTurnId,
   voice,
   onTurnComplete,
 }: UseNarratorAudioArgs): UseNarratorAudioReturn {
@@ -249,7 +273,12 @@ export function useNarratorAudio({
   }, []);
 
   const resetJob = useCallback(
-    (nextKey: string | null, nextTurnId: string, nextSource: "stream" | "replay") => {
+    (
+      nextKey: string | null,
+      nextTurnId: string,
+      nextSource: "stream" | "replay",
+      nextDbTurnId?: number,
+    ) => {
       const j = jobRef.current;
       if (j) {
         j.controllers.forEach((c) => c.abort());
@@ -258,7 +287,9 @@ export function useNarratorAudio({
       }
       stopCurrentAudio();
       setStatus("idle");
-      jobRef.current = nextKey ? freshJob(nextKey, nextTurnId, nextSource) : null;
+      jobRef.current = nextKey
+        ? freshJob(nextKey, nextTurnId, nextSource, nextDbTurnId)
+        : null;
     },
     [stopCurrentAudio],
   );
@@ -344,7 +375,9 @@ export function useNarratorAudio({
           body: JSON.stringify({
             text: chunk,
             worldId,
-            turnId: numericTurnId(owner.turnId),
+            // Prefer the persisted DB id for cache/cost; fall back only when
+            // the job key itself is numeric (replay of a historical turn).
+            turnId: owner.dbTurnId ?? numericTurnId(owner.turnId),
             voice,
           }),
           signal: controller.signal,
@@ -361,8 +394,13 @@ export function useNarratorAudio({
         if (jobRef.current !== owner) return;
         if (res.headers.get("X-TTS-Cache") !== "HIT") {
           owner.charsSent += chunk.length;
-          if (owner.turnId) {
-            onTurnCompleteRef.current?.(owner.turnId, chunk.length);
+          // Cost recorder needs a numeric DB turn id. While streaming the job
+          // key is a client UUID — buffer chars until dbTurnId lands.
+          const costTurnId = owner.dbTurnId ?? numericTurnId(owner.turnId);
+          if (costTurnId != null) {
+            onTurnCompleteRef.current?.(String(costTurnId), chunk.length);
+          } else {
+            owner.pendingCostChars += chunk.length;
           }
         }
         if (seq === owner.playSeq && await playProgressiveMediaResponse(res, owner, playNext, setStatus)) {
@@ -410,9 +448,27 @@ export function useNarratorAudio({
     [ensureAudioContext, playNext, voice, worldId],
   );
 
+  // Rebind the DB turn id onto the live job without resetting it — so mid-stream
+  // synthesis and already-playing audio survive the stream→persist transition.
+  // Also flush any cost chars that arrived before the id was known.
+  useEffect(() => {
+    const j = jobRef.current;
+    if (!j || j.source !== "stream") return;
+    if (dbTurnId != null && j.dbTurnId !== dbTurnId) {
+      j.dbTurnId = dbTurnId;
+      if (j.pendingCostChars > 0) {
+        const pending = j.pendingCostChars;
+        j.pendingCostChars = 0;
+        onTurnCompleteRef.current?.(String(dbTurnId), pending);
+      }
+    }
+  }, [dbTurnId]);
+
   useEffect(() => {
     if (!effective.jobKey) {
-      resetJob(null, "", "stream");
+      // Only tear down when there is truly no active turn. A brief undefined
+      // window while dbTurnId metadata is in flight must not abort audio —
+      // Chat keeps a stable client message id as jobKey for the whole turn.
       return;
     }
     // Only auto-narrate turns created after this hook mounted. Without this
@@ -424,7 +480,18 @@ export function useNarratorAudio({
         !playedRef.current.has(effective.turnId));
     if (!allowed) return;
     if (!jobRef.current || jobRef.current.jobKey !== effective.jobKey) {
-      resetJob(effective.jobKey, effective.turnId, effective.source);
+      resetJob(
+        effective.jobKey,
+        effective.turnId,
+        effective.source,
+        effective.source === "stream" ? dbTurnId : numericTurnId(effective.turnId),
+      );
+    } else if (
+      jobRef.current.source === "stream" &&
+      dbTurnId != null &&
+      jobRef.current.dbTurnId !== dbTurnId
+    ) {
+      jobRef.current.dbTurnId = dbTurnId;
     }
 
     const j = jobRef.current;
@@ -434,10 +501,10 @@ export function useNarratorAudio({
     const text = effective.text;
 
     if (effective.streaming) {
-      // First-chunk overlap: the moment the first paragraph boundary at/after
-      // the floor lands, synthesize that opening chunk while the narrator keeps
-      // streaming. At most one chunk fires mid-stream — the rest waits for flush
-      // so the tail stays a single continuous read (one seam, not N).
+      // First-chunk overlap: the moment the first paragraph/sentence boundary
+      // at/after the floor lands, synthesize that opening chunk while the
+      // narrator keeps streaming. At most one chunk fires mid-stream — the rest
+      // waits for flush so the tail stays a single continuous read (one seam).
       if (!j.firstChunkSent) {
         const { chunks, cursor } = splitNewChunks(text, j.cursor, {
           minChars: FIRST_CHUNK_MIN_CHARS,
@@ -493,7 +560,7 @@ export function useNarratorAudio({
       playedRef.current.add(j.turnId);
       if (j.source === "replay") setOverride(null);
     }
-  }, [effective, fetchChunk, resetJob]);
+  }, [effective, fetchChunk, resetJob, dbTurnId]);
 
   // Determinate playback progress. While speaking, sample the active clip's
   // position each frame (currentTime/duration for the media paths, an elapsed/

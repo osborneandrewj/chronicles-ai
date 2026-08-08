@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { worldTimeBand } from '@/lib/world-time'
-import { collectSceneTags, formatStateBlock, type NarratorWorldState } from '@/lib/world-state'
+import {
+  applyPromotionDeltaToState,
+  collectSceneTags,
+  formatStateBlock,
+  type Character,
+  type NarratorWorldState,
+} from '@/lib/world-state'
 
 function baseState(overrides: Partial<NarratorWorldState>): NarratorWorldState {
   return {
@@ -100,5 +106,48 @@ describe('off-scene loop continuity', () => {
     )
     expect(worldTimeBand('Day 1, 9am')).toBe('morning')
     expect(block).toContain('routine: opens the shop')
+  })
+})
+
+describe('applyPromotionDeltaToState', () => {
+  function char(partial: Partial<Character> & Pick<Character, 'id' | 'name'>): Character {
+    return {
+      world_id: 1,
+      description: null,
+      is_player: 0,
+      status: 'active',
+      agency_level: 'npc',
+      current_place_id: 1,
+      in_transit_to_place_id: null,
+      last_seen_turn_id: null,
+      last_known_situation: null,
+      recent_activity: null,
+      appearance_count: 0,
+      daily_loop: null,
+      ...partial,
+    } as Character
+  }
+
+  it('bumps appearance_count and last_seen for present non-players', () => {
+    const marcus = char({ id: 2, name: 'Marcus', appearance_count: 2 })
+    const player = char({ id: 1, name: 'You', is_player: 1, appearance_count: 0 })
+    const state = baseState({
+      presentCharacters: [player, marcus],
+      knownCharacters: [player, marcus],
+    })
+    const next = applyPromotionDeltaToState(state, { promoted: [] }, 99)
+    expect(next.presentCharacters.find((c) => c.name === 'Marcus')?.appearance_count).toBe(3)
+    expect(next.presentCharacters.find((c) => c.name === 'Marcus')?.last_seen_turn_id).toBe(99)
+    expect(next.presentCharacters.find((c) => c.is_player === 1)?.appearance_count).toBe(0)
+  })
+
+  it('promotes named npcs to local agency when listed', () => {
+    const marcus = char({ id: 2, name: 'Marcus', appearance_count: 2, agency_level: 'npc' })
+    const state = baseState({
+      presentCharacters: [marcus],
+      knownCharacters: [marcus],
+    })
+    const next = applyPromotionDeltaToState(state, { promoted: ['Marcus'] }, 10)
+    expect(next.knownCharacters[0]?.agency_level).toBe('local')
   })
 })

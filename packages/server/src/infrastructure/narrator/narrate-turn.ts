@@ -39,8 +39,9 @@ import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
 import { buildPlaceOccupancySnapshotVia, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
-import { computeReverieFlares, getReveriesForCharacters } from '@/lib/reveries'
+import { computeReverieFlares } from '@/lib/reveries'
 import {
+  applyPromotionDeltaToState,
   collectSceneTags,
   formatSceneDigestForClassifier,
   formatStateBlock,
@@ -116,6 +117,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   }
 
   // State is read before the classifier so it can see who's present and where.
+  // Single assembly (Track A2): later writes merge into this snapshot in memory.
   const priorState = await getNarratorWorldStateVia(stateDeps, worldId)
 
   // Update NPC attention tiers before the NPC agent call.
@@ -124,26 +126,31 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     priorState.presentCharacters,
     playerTurnId,
   )
+  const postPromotionState = applyPromotionDeltaToState(priorState, promotion, playerTurnId)
 
-  const classification = await classifyAction(
-    playerText,
-    formatSceneDigestForClassifier(priorState),
-  )
-
-  // Lazy real-world geocoding — best-effort, never blocks the narrator.
-  // Bounded worlds are sealed fictional interiors (a ship, a facility, a
-  // monastery); geocoding their rooms to real-world coordinates ("Bridge,
-  // Canterbury, Kent") leaks real geography into a fictional space. Skip the
-  // resolver entirely for bounded worlds so no Nominatim call ever fires.
+  // Geocode off the critical path (Track A3). Comment already claimed
+  // "never blocks the narrator"; now it actually doesn't. Resolution lands
+  // one turn later — narrator does not read geo_status on first mention.
   if (world.spatial_mode !== 'bounded') {
-    await resolveUnresolvedPlaces({ places, worlds }, worldId).catch((err) => {
-      console.error('[place-resolver pre-narrator]', err)
-    })
+    backgroundTasks.register(
+      resolveUnresolvedPlaces({ places, worlds }, worldId).catch((err) => {
+        console.error('[place-resolver pre-narrator]', err)
+      }),
+    )
   }
 
-  // NPC agent failure must NEVER block the narrator — degrade to plan-less.
-  const postPromotionState = await getNarratorWorldStateVia(stateDeps, worldId)
-  const recentForAgents = await turns.recentTurns(worldId, 4)
+  // One recent-turns fetch for agent + narrator history (Track A5).
+  const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_TURNS)
+  const recentForAgents = allRecent.slice(-4)
+  const priorHistory = allRecent.slice(0, -1)
+
+  // Classifier + (occupancy ∥ npc-agent) — occupancy has no dependency on plans
+  // (Track A4). Classifier stays serial with the agent because the gate uses
+  // stance; A6 speculative agent is deferred until write-safety is proven.
+  const classification = await classifyAction(
+    playerText,
+    formatSceneDigestForClassifier(postPromotionState),
+  )
   const { stance, input_mode } = classification
   const shouldRunNpcAgent = shouldTickNpcAgent({
     stance,
@@ -151,49 +158,54 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     presentCharacters: postPromotionState.presentCharacters,
   })
   const npcAgentDeps = { characters, npcIntents, places, reveries, unitOfWork, worlds }
-  const npcAgentSettled = shouldRunNpcAgent
-    ? await runNpcAgentTick(
-        npcAgentDeps,
-        worldId,
-        playerTurnId,
-        world.premise,
-        playerText,
-        recentForAgents,
-      ).catch((err) => {
-        console.error('[npc agent failed pre-narrator]', err)
-        return { error: String(err) } as const
-      })
-    : null
-  const npcAgentResult = npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
-  const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
-  const plans = npcAgentResult?.plans ?? []
+  const era = eraFromGenreTags(parseGenreTags(world.genre_tags))
 
-  // Deterministic occupancy snapshot — non-fatal. Era-gate the traffic language
-  // (cart-and-pack-animal vs idling-engines) from the world's genre signal.
-  let turnOccupancy: PlaceOccupancy | null = null
-  try {
-    turnOccupancy = await buildPlaceOccupancySnapshotVia(
+  const [npcAgentSettled, occupancySettled] = await Promise.all([
+    shouldRunNpcAgent
+      ? runNpcAgentTick(
+          npcAgentDeps,
+          worldId,
+          playerTurnId,
+          world.premise,
+          playerText,
+          recentForAgents,
+        ).catch((err) => {
+          console.error('[npc agent failed pre-narrator]', err)
+          return { error: String(err) } as const
+        })
+      : Promise.resolve(null),
+    buildPlaceOccupancySnapshotVia(
       { dossiers, occupancy, places, scenes, worlds },
       worldId,
       playerTurnId,
-      eraFromGenreTags(parseGenreTags(world.genre_tags)),
-    )
-  } catch (err) {
-    console.error('[place-population]', err)
-  }
+      era,
+    ).catch((err) => {
+      console.error('[place-population]', err)
+      return null
+    }),
+  ])
 
-  // Re-read so the just-persisted occupancy snapshot is visible.
-  const narratorState = await getNarratorWorldStateVia(stateDeps, worldId)
+  const npcAgentResult = npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
+  const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
+  const plans = npcAgentResult?.plans ?? []
+  const turnOccupancy: PlaceOccupancy | null = occupancySettled
+
+  // Merge occupancy into the in-memory snapshot (no third state assembly).
+  const narratorState = {
+    ...postPromotionState,
+    occupancy: turnOccupancy ?? postPromotionState.occupancy,
+  }
   const recentNarratorProse = recentForAgents
     .filter((t) => t.role === 'assistant')
     .map((t) => t.content)
 
   // Deterministic reverie flares — pure + free; stamping is best-effort.
+  // Read through the port so Mongo prod actually flares (was SQLite-direct).
   const sceneTags = collectSceneTags(narratorState)
   const reverieNpcIds = narratorState.knownCharacters
     .filter((c) => c.is_player !== 1 && c.status !== 'dead')
     .map((c) => c.id)
-  const reveriesByCharacter = getReveriesForCharacters(reverieNpcIds)
+  const reveriesByCharacter = await reveries.forCharacters(reverieNpcIds)
   const flareCandidates = [...reveriesByCharacter.values()].flat().map((r) => ({
     id: r.id,
     character_id: r.character_id,
@@ -249,8 +261,6 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         })
     : ''
 
-  const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_TURNS)
-  const priorHistory = allRecent.slice(0, -1)
   const historyMessages = compactHistory(priorHistory)
   const presentNpcCount = narratorState.presentCharacters.filter((c) => c.is_player !== 1).length
   const turnGuidance = formatNarratorTurnGuidance({
@@ -302,12 +312,19 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     }
   }
 
+  // Prompt layout for cache-friendly multi-turn (xAI prefix cache):
+  //   [system = NARRATOR_BASE + PREMISE]  stable for a given world (cache hot)
+  //   [...history...]                     append-only within the packer window
+  //   [user = STATE + guidance + act]     only this message mutates per turn
+  // Premise used to live in the trailing user message (always a full miss on
+  // the large state block). Pinning it on system keeps the shared prefix
+  // reusable across turns of the same world.
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${premiseBlock}\n\n${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
   }
   const modelMessages: ModelMessage[] = [
-    { role: 'system', content: NARRATOR_BASE },
+    { role: 'system', content: `${NARRATOR_BASE}\n\n${premiseBlock}` },
     ...historyMessages,
     trailingUser,
   ]

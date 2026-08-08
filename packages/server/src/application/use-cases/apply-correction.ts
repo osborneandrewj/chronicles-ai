@@ -50,7 +50,7 @@ export type ApplyCorrectionDeps = {
   turns: TurnRepository
   corrections: CorrectionRepository
   /** Read the narrator-facing prior state the extractor reasons over. */
-  readPriorState: (worldId: number) => unknown
+  readPriorState: (worldId: number) => unknown | Promise<unknown>
   /** Run the correction extractor (LLM). Owns the SDK call. */
   extractPatch: (
     prior: unknown,
@@ -82,12 +82,12 @@ export async function applyCorrection(
     throw new WorldNotFoundError(worldId)
   }
 
-  const prior = readPriorState(worldId)
-  const recent: RecentTurn[] = (await turns.recentTurns(worldId, RECENT_TURNS_FOR_CONTEXT))
-    // recentTurns returns DESC by id; the prompt wants chronological order.
-    .slice()
-    .reverse()
-    .map((t) => ({ role: t.role as 'user' | 'assistant', content: t.content }))
+  const prior = await readPriorState(worldId)
+  // recentTurns is already oldest→newest (SQLite and Mongo both reverse after
+  // a newest-first query). Do not reverse again.
+  const recent: RecentTurn[] = (await turns.recentTurns(worldId, RECENT_TURNS_FOR_CONTEXT)).map(
+    (t) => ({ role: t.role as 'user' | 'assistant', content: t.content }),
+  )
 
   let result: CorrectionPatchResult
   try {
