@@ -16,6 +16,7 @@ import {
   resolveTemplates,
   trafficBlock,
   type PlaceOccupancy,
+  type TrafficEra,
 } from '@/domain/services/occupancy-sim'
 import {
   getActiveSceneForWorld,
@@ -49,6 +50,7 @@ export {
   type GroupSource,
   type HookStrength,
   type InferredProfile,
+  type TrafficEra,
   type OccupancyDensity,
   type OccupancyGroup,
   type OccupancyTraffic,
@@ -157,6 +159,7 @@ export async function buildPlaceOccupancySnapshotVia(
   deps: PlaceOccupancyDeps,
   worldId: number,
   sourceTurnId: number | null,
+  era: TrafficEra = 'modern',
 ): Promise<PlaceOccupancy | null> {
   const scene = await deps.scenes.activeForWorld(worldId)
   if (!scene || !scene.place_id) return null
@@ -206,7 +209,7 @@ export async function buildPlaceOccupancySnapshotVia(
     density,
     seed: seedKey,
     groups,
-    traffic: trafficBlock(profile, density),
+    traffic: trafficBlock(profile, density, era),
     encounter_hooks: encounterHooks,
   }
 

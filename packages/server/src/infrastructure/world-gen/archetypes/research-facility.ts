@@ -11,6 +11,7 @@ export const RESEARCH_FACILITY: WorldArchetype = {
   name: 'Corporate Research Facility',
   isHub: true,
   eraTags: ['generic', 'modern'],
+  genres: ['generic', 'modern'],
   simulationRoomKey: 'immersion_lab',
   entryLocationKey: 'atrium',
   initialSceneTitle: 'Arrival',

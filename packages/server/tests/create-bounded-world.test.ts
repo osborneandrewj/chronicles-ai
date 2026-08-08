@@ -136,6 +136,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     async setSettingRegion() {},
     async setLayer() {},
     async setMetaStory() {},
+    async setGenreTags() {},
   }
 
   const places: CreateBoundedWorldDeps['places'] = {

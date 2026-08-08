@@ -21,6 +21,7 @@ import { packNarratorHistory } from '@/domain/services/history-packer'
 import { lucidityDelta, lucidityStage } from '@/domain/services/lucidity'
 import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
 import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
+import { eraFromGenreTags, parseGenreTags } from '@/domain/services/occupancy-sim'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
 import { hasRichStorySignal, shouldBootstrapThread } from '@/domain/services/story-signal'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -167,13 +168,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
   const plans = npcAgentResult?.plans ?? []
 
-  // Deterministic occupancy snapshot — non-fatal.
+  // Deterministic occupancy snapshot — non-fatal. Era-gate the traffic language
+  // (cart-and-pack-animal vs idling-engines) from the world's genre signal.
   let turnOccupancy: PlaceOccupancy | null = null
   try {
     turnOccupancy = await buildPlaceOccupancySnapshotVia(
       { dossiers, occupancy, places, scenes, worlds },
       worldId,
       playerTurnId,
+      eraFromGenreTags(parseGenreTags(world.genre_tags)),
     )
   } catch (err) {
     console.error('[place-population]', err)

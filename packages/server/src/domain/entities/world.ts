@@ -24,6 +24,10 @@ export type World = {
   world_layer: WorldLayer
   parent_world_id: number | null
   meta_story_json: string | null
+  // Genre signal (genre-coupling audit): JSON string array of era/tone tags
+  // captured at creation (e.g. '["roman","ancient","political"]'); null when no
+  // genre was declared. Consumers treat null as "no signal" (current behavior).
+  genre_tags: string | null
   created_at: string
 }
 

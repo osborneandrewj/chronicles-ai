@@ -25,11 +25,13 @@ export function nextAgencyTier(turnsAway: number, hasOpenThread: boolean): Chara
   return 'npc'
 }
 
-// A walk-on service role (mail carrier, cashier, barista, …) with no durable
-// story signal in its goals. These are demoted back to plain `npc` rather than
-// auto-promoted, so a one-drink bartender never becomes an agent NPC. Returns
-// false the moment a durable signal (threat / follow / secret / named antagonist
-// / relationship) appears in the durable fields — then it is a real character.
+// A walk-on service role with no durable story signal in its goals — a modern
+// courier/cashier/barista or its period equivalent (a peddler, stable boy,
+// ferryman, town crier; genre-coupling audit). These are demoted back to plain
+// `npc` rather than auto-promoted, so a one-drink bartender never becomes an
+// agent NPC. Returns false the moment a durable signal (threat / follow / secret
+// / named antagonist / relationship) appears in the durable fields — then it is
+// a real character.
 export function isTransientServiceNpc(c: {
   name: string
   description: string | null
@@ -39,7 +41,7 @@ export function isTransientServiceNpc(c: {
 }): boolean {
   const text = `${c.name} ${c.description ?? ''}`.toLowerCase()
   const serviceRole =
-    /\b(usps|postal|mail carrier|mailman|mailwoman|courier|delivery driver|package driver|parcel carrier|fedex|ups|doordash|rideshare|taxi driver|cashier|receptionist|clerk|server|barista)\b/.test(
+    /\b(usps|postal|mail carrier|mailman|mailwoman|courier|delivery driver|package driver|parcel carrier|fedex|ups|doordash|rideshare|taxi driver|cashier|receptionist|clerk|server|barista|errand boy|errand girl|page boy|porter|stable boy|stable hand|stablehand|groom|ferryman|peddler|pedlar|hawker|street vendor|water carrier|potboy|scullion|link boy|town crier|messenger|runner)\b/.test(
       text,
     )
 

@@ -231,7 +231,7 @@ function isInvestigativeMove(text: string): boolean {
     )
   const hasQuestion = /\b(what|who|where|when|why|how|which)\b|\?/.test(compact)
   const targetsToolOrInquiry =
-    /\b(vox|auspex|cogitator|scanner|sensor|reader|servo|computer|database|archive|records?)\b/.test(
+    /\b(vox|auspex|cogitator|scanner|sensor|reader|servo|computer|database|archive|records?|ledgers?|manifests?|dispatch|dispatches|letters?|documents?|papers|maps?|charts?|scrolls?|tablet|inscription|registers?|registry|logbook|log|correspondence)\b/.test(
       compact,
     ) || hasQuestion
 
@@ -243,10 +243,15 @@ function isTimeCheckMove(text: string): boolean {
   const hasCheckVerb = /\b(check|look at|look|glance at|read|consult|see|inspect)\b/.test(compact)
   const hasTimeQuestion = /\bwhat time\b|\btime is it\b|\bcurrent time\b/.test(compact)
   const hasTimeDevice =
-    /\b(watch|wristwatch|phone|cell|mobile|smartphone|clock|wall clock|alarm clock|dashboard clock|car clock|computer clock|laptop|terminal|display|screen)\b/.test(
+    /\b(watch|wristwatch|phone|cell|mobile|smartphone|clock|wall clock|alarm clock|dashboard clock|car clock|computer clock|laptop|terminal|display|screen|sundial|hourglass|hour glass|water clock|candle clock|bells?|church bells?|bell tower|chimes?|the sun|position of the sun|the stars)\b/.test(
       compact,
     )
-  return hasTimeQuestion || (hasCheckVerb && hasTimeDevice && /\btime|clock|watch|phone\b/.test(compact))
+  return (
+    hasTimeQuestion ||
+    (hasCheckVerb &&
+      hasTimeDevice &&
+      /\b(time|clock|watch|phone|sundial|hourglass|bell|chime|sun|stars?|candle)\b/.test(compact))
+  )
 }
 
 function isMediaFeedMove(text: string): boolean {
@@ -256,7 +261,7 @@ function isMediaFeedMove(text: string): boolean {
       compact,
     )
   const hasMediaSurface =
-    /\b(x|twitter|feed|timeline|social media|news|headlines?|tv|television|radio|podcast|browser|web|internet|notifications?|alerts?|email|inbox|screen|phone)\b/.test(
+    /\b(x|twitter|feed|timeline|social media|news|headlines?|tv|television|radio|podcast|browser|web|internet|notifications?|alerts?|email|inbox|screen|phone|newspaper|broadsheets?|gazette|herald|chronicle|bulletin|notice board|placards?|proclamations?|town crier|crier|rumors?|rumours?|gossip|messengers?|dispatches?|posted notices?)\b/.test(
       compact,
     )
 
@@ -272,7 +277,7 @@ function isTransitionMove(text: string): boolean {
 
 function isDangerMove(text: string): boolean {
   const compact = normalize(text)
-  return /\b(explosion|blast|crater|blood|corpse|dead|wound|weapon|gun|knife|attack|threat|danger|fire|smoke|scream|alarm|soldier|body)\b/.test(
+  return /\b(explosion|blast|crater|blood|corpse|dead|wound|weapon|gun|knife|attack|threat|danger|fire|smoke|scream|alarm|soldier|body|poison|venom|plague|curse|hex|necromancer|demon|beast|wolves?|bandits?|raiders?|sword|blade|dagger|spear|arrows?|axe|halberd|musket|cannon|siege|ambush|noose|gallows|pyre|assassin|plot)\b/.test(
     compact,
   )
 }
@@ -284,7 +289,7 @@ function isSpectacleMove(text: string): boolean {
       compact,
     )
   const hasSpectacleObject =
-    /\b(car|cars|cruiser|cruisers|squad car|truck|building|wall|door|bulkhead|ship|tower|bridge|body|bodies|dragon|spell|ward|reactor|engine|weapon|blade|gun|flame|fire|lightning|vacuum)\b/.test(
+    /\b(car|cars|cruiser|cruisers|squad car|truck|building|wall|door|bulkhead|ship|tower|bridge|body|bodies|dragon|spell|ward|reactor|engine|weapon|blade|gun|flame|fire|lightning|vacuum|ziggurat|temple|cathedral|stained.glass|statue|idol|altar|pillar|column|gate|portcullis|catapult|trebuchet|chariot|galley|mast|sail|banner|throne|obelisk|pyramid|aqueduct)\b/.test(
       compact,
     )
   const repeatsSpectacle = /\b(do the same|same thing|again|one by one)\b/.test(compact)
@@ -401,6 +406,22 @@ function repeatedAmbientAnchors(turns: RecentTurn[]): string[] {
     { label: 'water', terms: ['water', 'sea'] },
     { label: 'streetlights', terms: ['streetlights'] },
     { label: 'fluorescents', terms: ['fluorescents'] },
+    // Period / cross-genre ambient anchors (genre-coupling audit) so repeated
+    // closers are caught outside the modern/temperate default set.
+    { label: 'sand', terms: ['sand', 'dune', 'dunes'] },
+    { label: 'palms', terms: ['palm', 'palms'] },
+    { label: 'dust', terms: ['dust'] },
+    { label: 'candlelight', terms: ['candle', 'candlelight'] },
+    { label: 'torchlight', terms: ['torch', 'torchlight'] },
+    { label: 'incense', terms: ['incense'] },
+    { label: 'smoke', terms: ['smoke'] },
+    { label: 'stone', terms: ['stone', 'marble'] },
+    { label: 'cobblestones', terms: ['cobbles', 'cobblestone', 'cobblestones'] },
+    { label: 'gaslight', terms: ['gaslight', 'gaslamp', 'gas lamp'] },
+    { label: 'lantern', terms: ['lantern', 'lanterns'] },
+    { label: 'hearth', terms: ['hearth'] },
+    { label: 'river', terms: ['river'] },
+    { label: 'reeds', terms: ['reeds'] },
   ]
 
   return anchors

@@ -86,6 +86,7 @@ export function mapWorld(d: WorldDoc): World {
     world_layer: d.worldLayer ?? 'standalone',
     parent_world_id: d.parentWorldId ?? null,
     meta_story_json: d.metaStory ?? null,
+    genre_tags: d.genreTags ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }

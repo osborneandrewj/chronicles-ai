@@ -1,5 +1,7 @@
 import 'server-only'
 
+import type { MetaFrameKind } from '@/domain/entities'
+
 // Genre preset type for historical-adventure world creation.
 // The hiddenPremise is a rich internal seed NEVER shown to the player —
 // only id + label are surfaced to the picker UI.
@@ -15,4 +17,12 @@ export type GenrePreset = {
   eraTags: string[]
   /** Mood/genre tone tags, e.g. ['political', 'martial', 'intrigue']. */
   toneTags: string[]
+  /**
+   * Narrative meta-frame for this preset's adventure. Omit (the default) for a
+   * plain grounded standalone world — no concealed hub, Meta-Story Bible,
+   * session, lucidity, or REALITY cue. Set 'simulation' to OPT IN to the
+   * concealed-simulation machinery (genre-coupling audit, Phase 1). Every
+   * shipped historical preset is grounded.
+   */
+  metaFrameKind?: MetaFrameKind
 }
