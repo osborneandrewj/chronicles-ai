@@ -52,8 +52,9 @@ export type WorldDoc = {
   // template_id TEXT (nullable).
   spatialMode: 'open' | 'bounded'
   templateId: string | null
-  // Prose-driven ship-clock (v29 / starship P6): minutes since the Day-1 00:00
-  // baseline. Set for bounded worlds; null for open. SQLite: ship_clock_minutes.
+  // Internal narrative clock (v29 / starship P6 origin): minutes since Day-1
+  // 00:00. Nullable until first advance. Any world may set it (bounded = ship
+  // sim; open/subworld = narrative deadlines). SQLite: ship_clock_minutes.
   shipClockMinutes: number | null
   // Simulation-hub layering (C1).
   worldLayer: 'hub' | 'subworld' | 'standalone'

@@ -86,6 +86,26 @@ describe('prompt content guards', () => {
     const p = loadPrompt('narrator-system').toLowerCase()
     expect(p).toContain('scenes must never stall')
   })
+
+  it('time-passage prompt is genre-neutral (no starship-only framing)', () => {
+    const p = loadPrompt('time-passage').toLowerCase()
+    expect(p).not.toContain("starship story's narrative clock")
+    expect(p).not.toContain('watch standing')
+    expect(p).toContain('genre-neutral')
+  })
+
+  it('archivist records purchase/synonym story_resources and objective completion', () => {
+    const p = loadPrompt('archivist-system').toLowerCase()
+    expect(p).toContain('purchase / synonym backstop')
+    expect(p).toContain('held_by_name: "protagonist"')
+    expect(p).toMatch(/completion \/ failure is mandatory/)
+  })
+
+  it('correction channel forces protagonist identity onto is_player', () => {
+    const p = loadPrompt('archivist-correction').toLowerCase()
+    expect(p).toContain('is_player: true')
+    expect(p).toMatch(/never mint a second protagonist|never create a non-player/)
+  })
 })
 
 describe('prompts — NPC initiation (P2/P4/P5)', () => {

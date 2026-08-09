@@ -29,6 +29,19 @@ describe('enterSubworld', () => {
       },
     } as unknown as WorldRepository
     const sessions = {
+      async byId() {
+        return {
+          id: 5,
+          hub_world_id: 10,
+          subworld_world_id: null,
+          player_identity: 'Joseph Osborne',
+          status: 'in_hub',
+          has_awoken: 0,
+          lucidity: 0,
+          created_at: '',
+          updated_at: '',
+        }
+      },
       async setSubworld(id: number, sub: number | null) {
         calls.setSubworld.push([id, sub])
       },
@@ -44,11 +57,59 @@ describe('enterSubworld', () => {
 
     expect(result.subworldId).toBe(77)
     expect(calls.createOpen).toHaveLength(1)
+    // Session identity fills playerName when the form did not supply one.
+    expect((calls.createOpen[0] as { initialState: { playerName?: string } }).initialState.playerName).toBe(
+      'Joseph Osborne',
+    )
     // Geocoding gated off — the no-op extractor returns null, so no region write.
     expect(calls.setSettingRegion).toBe(0)
     expect(calls.setLayer).toEqual([[77, 'subworld', 10]])
     expect(calls.setSubworld).toEqual([[5, 77]])
     expect(calls.flips).toEqual(['in_subworld'])
+  })
+
+  it('prefers explicit form playerName over session identity', async () => {
+    const createOpen: unknown[] = []
+    const worlds = {
+      async createOpen(input: unknown) {
+        createOpen.push(input)
+        return { id: 88 }
+      },
+      async setSettingRegion() {},
+      async setLayer() {},
+    } as unknown as WorldRepository
+    const sessions = {
+      async byId() {
+        return {
+          id: 5,
+          hub_world_id: 10,
+          subworld_world_id: null,
+          player_identity: 'Session Name',
+          status: 'in_hub',
+          has_awoken: 0,
+          lucidity: 0,
+          created_at: '',
+          updated_at: '',
+        }
+      },
+      async setSubworld() {},
+      async flip() {},
+    } as unknown as SessionRepository
+
+    await enterSubworld(
+      {
+        hubWorldId: 10,
+        sessionId: 5,
+        name: 'Codename',
+        premise: 'premise',
+        initialState: { ...initialState, playerName: 'Form Name' },
+      },
+      { worlds, sessions },
+    )
+
+    expect((createOpen[0] as { initialState: { playerName?: string } }).initialState.playerName).toBe(
+      'Form Name',
+    )
   })
 })
 

@@ -15,6 +15,8 @@ type GuidanceContext = {
   activeObjectiveTitles?: string[]
   openClueTitles?: string[]
   activeThreatTitles?: string[]
+  /** Highest-stakes active quest/objective title for idle primary pressure. */
+  primaryPressureTitle?: string | null
 }
 
 export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
@@ -150,9 +152,14 @@ function pickMomentumCue(ctx: GuidanceContext): string | null {
   const idle = countTrailingIdleMoves(ctx)
   if (idle < MOMENTUM_IDLE_THRESHOLD) return null
   const threat = ctx.activeThreatTitles?.[0]
+  const primary = ctx.primaryPressureTitle?.trim()
+  // Prefer threat, then primary A-plot pressure, so idle worlds reassert the
+  // abandoned quest rather than random ambience (PR D).
   const pressure = threat
     ? ` Draw the pressure from the active threat "${threat}".`
-    : ''
+    : primary
+      ? ` Draw the pressure from the primary objective "${primary}" (watcher, audit rumor, time bite, consequence of delay) — never list it as options to the player.`
+      : ''
   return (
     'The player is marking time — the world acts: make something happen TO the protagonist this ' +
     'turn that they did not initiate (an NPC pursues its goal, a threat closes, time bites, a new ' +

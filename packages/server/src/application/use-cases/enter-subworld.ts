@@ -35,9 +35,22 @@ export async function enterSubworld(
 ): Promise<EnterSubworldResult> {
   const { sessions, worlds } = deps
 
+  // Single protagonist identity (PR B): always prefer an explicit form name,
+  // else the session's player_identity. Never invent a random given name when a
+  // session identity exists — the seed default ("You") only applies when both
+  // are absent.
+  const session = await sessions.byId(sessionId)
+  const sessionIdentity = session?.player_identity?.trim() || ''
+  const formName = initialState.playerName?.trim() || ''
+  const playerName = formName || sessionIdentity || undefined
+  const seededInitialState: InitialState = {
+    ...initialState,
+    playerName,
+  }
+
   // Loose/open simulation; geocoding disabled (fictional interior).
   const { worldId } = await createWorld(
-    { name, premise, initialState },
+    { name, premise, initialState: seededInitialState },
     { worlds, extractSettingRegion: async () => null },
   )
 

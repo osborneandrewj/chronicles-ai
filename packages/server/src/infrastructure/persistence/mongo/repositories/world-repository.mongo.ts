@@ -120,7 +120,10 @@ export class MongoWorldRepository implements WorldRepository {
     )
 
     const characterId = await this.ctx.nextSeq('characterId')
-    const playerName = initialState.playerName?.trim() || 'Player'
+    // Diegetic default aligned with SQLite seed: 'You', not the meta word
+    // 'Player'. The archivist renames in place when the protagonist is named
+    // (A9 single-player invariant).
+    const playerName = initialState.playerName?.trim() || 'You'
     await this.ctx.models.Character.create(
       [
         {

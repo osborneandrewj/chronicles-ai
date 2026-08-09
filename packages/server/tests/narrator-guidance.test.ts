@@ -50,6 +50,24 @@ describe('narrator momentum ladder', () => {
     expect(out).toContain('Ambush at the bend')
   })
 
+  it('prefers primary objective pressure when idle and no threat is listed', () => {
+    const recentTurns = [
+      { role: 'user' as const, content: 'I look around' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+      { role: 'user' as const, content: 'I wait' },
+      { role: 'assistant' as const, content: 'Quiet.' },
+    ]
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns,
+        primaryPressureTitle: 'Secure the warehouse manifests',
+      }),
+    )
+    expect(out.toLowerCase()).toContain('world acts')
+    expect(out).toContain('Secure the warehouse manifests')
+  })
+
   it('stands down the L2 cue when planned NPC moves already exist (they are the intrusion)', () => {
     const recentTurns = [
       { role: 'user' as const, content: 'I look around' },

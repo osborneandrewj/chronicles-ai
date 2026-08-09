@@ -11,6 +11,7 @@ import type { ArchivistPatch } from '@/lib/archivist'
 import type { NarratorWorldState } from '@/lib/world-state'
 import { playerPossesses } from '@/domain/services/inventory-resolution'
 import { extractItemMovements, extractObjectAcquisition } from '@/domain/services/object-acquisition'
+import { shouldEscalateViolence } from '@/domain/services/violence-escalation'
 
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 
@@ -69,6 +70,62 @@ export function extractDeterministicPatch(
       }
     }
     if (resources.length > 0) patch.story_resources = resources
+  }
+
+  // PR E: public violence / superhuman cost — deterministic dossier suggestions
+  // so institutional aftermath does not depend solely on the archivist opting in.
+  // Skip when an active threat already covers the same title (no spam).
+  const escalation = shouldEscalateViolence({
+    narration: narratorText,
+    playerText,
+    placeName: prior.currentPlace?.name ?? null,
+    placeKind: prior.currentPlace?.kind ?? null,
+    presentNpcNames: prior.presentCharacters
+      .filter((c) => c.is_player !== 1)
+      .map((c) => c.name),
+  })
+  if (escalation.threat) {
+    const already = prior.dossier.threads.some(
+      (t) =>
+        t.status === 'active' &&
+        t.kind === 'threat' &&
+        normalize(t.title) === normalize(escalation.threat!.title),
+    )
+    if (!already) {
+      patch.story_threads = [
+        ...(patch.story_threads ?? []),
+        {
+          title: escalation.threat.title,
+          kind: 'threat',
+          status: 'active',
+          summary: escalation.threat.summary,
+          stakes: escalation.threat.stakes,
+          consequences: escalation.threat.consequences,
+        },
+      ]
+    }
+  }
+  if (escalation.timelineEvent) {
+    patch.timeline_events = [
+      ...(patch.timeline_events ?? []),
+      {
+        title: escalation.timelineEvent.title,
+        summary: escalation.timelineEvent.summary,
+        importance: escalation.timelineEvent.importance,
+      },
+    ]
+  }
+  if (escalation.resource) {
+    patch.story_resources = [
+      ...(patch.story_resources ?? []),
+      {
+        name: escalation.resource.name,
+        kind: escalation.resource.kind,
+        detail: escalation.resource.detail,
+        held_by_name: escalation.resource.held_by_name,
+        salient: true,
+      },
+    ]
   }
 
   return Object.keys(patch).length > 0 ? patch : null

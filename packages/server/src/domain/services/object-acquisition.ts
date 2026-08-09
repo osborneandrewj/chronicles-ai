@@ -1,24 +1,24 @@
 // Pure domain service (Phase A, A4) — deterministic object-acquisition
 // extraction. Mirrors `extractDestination` in patch-sanitizer: a player whose
-// text clearly takes, pockets, grabs, or is handed an object should have that
-// object promoted into the tracked-object ledger held_by the protagonist —
-// WITHOUT depending on the archivist LLM opting in. The playthrough showed
-// objects (photograph, ring, data pad, chainsword, bolt pistol) living only in
-// prose memorable_facts, which let stale "NPC possesses X" facts override the
-// player taking them. This closes that gap deterministically.
+// text clearly takes, pockets, grabs, buys, or is handed an object should have
+// that object promoted into the tracked-object ledger held_by the protagonist —
+// WITHOUT depending on the archivist LLM opting in.
 //
 // No I/O — given the player's text and the narrator's response, returns the
-// object name to promote (or null). The narrator-acceptance check (the object's
-// head noun must appear in the narration) keeps a blocked or imagined grab from
-// minting a phantom resource.
+// object name to promote (or null). Acceptance requires a word-boundary match
+// of the object (or a synonym) near a possession-shaped verb/outcome in the
+// narration, so a blocked grab, a distant synonym mention, or a currency line
+// does not mint a phantom resource.
 
-// Active takes are matched against the PLAYER's text only — the player is the
-// implicit "I" subject, so an NPC grabbing something in the narration is not
-// mis-attributed to the protagonist.
+// Active takes / purchases are matched against the PLAYER's text only — the
+// player is the implicit "I" subject, so an NPC grabbing something in the
+// narration is not mis-attributed to the protagonist.
 const ACTIVE_PATTERNS: RegExp[] = [
-  // "I take / grab / pick up / pocket / snatch / seize / lift / swipe / collect
-  // / retrieve [the|a|my|his|her|their] <object>"
-  /\b(?:i\s+)?(?:take|grab|pick\s+up|pocket|snatch|seize|lift|swipe|collect|retrieve|pluck)\s+(?:the\s+|a\s+|an\s+|my\s+|his\s+|her\s+|their\s+|its\s+)?([^.!?\n,;]{2,60})/i,
+  // take / grab / pick up / pocket / snatch / seize / lift / swipe / collect /
+  // retrieve / pluck / accept / buy / purchase / pay for
+  /\b(?:i\s+)?(?:take|grab|pick\s+up|pocket|snatch|seize|lift|swipe|collect|retrieve|pluck|accept|buy|purchase|pay\s+for)\s+(?:the\s+|a\s+|an\s+|my\s+|his\s+|her\s+|their\s+|its\s+)?([^.!?\n,;]{2,60})/i,
+  // "sheathe / belt / strap on my new X" — post-purchase possession language
+  /\b(?:i\s+)?(?:sheathe|belt|strap\s+on|buckle\s+on|slide)\s+(?:the\s+|a\s+|an\s+|my\s+)?(?:new\s+)?([^.!?\n,;]{2,60})/i,
 ]
 
 // Passive receipts are matched against the NARRATOR's text — being handed an
@@ -29,7 +29,7 @@ const RECEIVE_PATTERNS: RegExp[] = [
 ]
 
 // Words that are not really objects — guard against "I take a look", "I take a
-// breath", "I take cover", "I grab her hand", etc.
+// breath", "I take cover", "I grab her hand", currency payments, etc.
 const NON_OBJECT_HEADS = new Set([
   'look',
   'breath',
@@ -61,8 +61,106 @@ const NON_OBJECT_HEADS = new Set([
   'point',
   'rest',
   'position',
-  'cover',
+  // Currency / payment — never mint or move a tracked object for a price line.
+  'drachmae',
+  'drachma',
+  'coins',
+  'coin',
+  'silver',
+  'obols',
+  'obol',
+  'payment',
+  'denarii',
+  'denarius',
+  'aurei',
+  'aureus',
+  'sesterces',
+  'sestertius',
+  'coppers',
+  'copper',
+  'gold',
+  'money',
+  'cash',
+  'change',
+  'price',
+  'fee',
+  'fare',
+  'talents',
+  'talent',
+  'shekels',
+  'shekel',
+  'dollars',
+  'dollar',
+  'credits',
+  'credit',
+  'thrones',
+  'throne',
 ])
+
+// Small, data-driven synonym classes for period/player language drift.
+// Canonical name is the first entry (preferred player-facing mint name when the
+// player used any member of the class). Extensible — add rows, do not free-form
+// LLM synonym expansion on every token.
+const OBJECT_SYNONYM_CLASSES: readonly (readonly string[])[] = [
+  ['sword', 'xiphos', 'gladius', 'blade', 'sabre', 'saber', 'cutlass'],
+  ['knife', 'dagger', 'pugio', 'dirk'],
+  ['cloak', 'himation', 'chlamys', 'mantle'],
+]
+
+// Possession-shaped outcomes in narrator prose. A match only counts when the
+// accepted object name/synonym co-occurs with one of these inside a window.
+const POSSESSION_MARKERS: RegExp[] = [
+  /\blift(?:s|ed|ing)?\b/i,
+  /\bclose(?:s|d)?\s+around\b/i,
+  /\bhand(?:s|ed)?\b/i,
+  /\btake(?:s|n|ing)?\b/i,
+  /\bbuckle(?:s|d|ing)?\b/i,
+  /\bsheathe(?:s|d|ing)?\b/i,
+  /\bbelt(?:s|ed|ing)?\b/i,
+  /\bat\s+your\s+hip\b/i,
+  /\binto\s+your\b/i,
+  /\binto\s+(?:a\s+|the\s+)?(?:pocket|jacket|bag|pack|satchel|belt|sheath|holster)\b/i,
+  /\byour\s+hand\b/i,
+  /\bslip(?:s|ped|ping)?\b/i,
+  /\bpass(?:es|ed|ing)?\b/i,
+  /\boffer(?:s|ed|ing)?\b/i,
+  /\bgive(?:s|n)?\b/i,
+  /\bgave\b/i,
+  /\bweigh(?:s|ed|ing)?\b/i,
+  /\bsettling\b/i,
+  /\bheft(?:s|ed|ing)?\b/i,
+  /\bgrasp(?:s|ed|ing)?\b/i,
+  /\bclutch(?:es|ed|ing)?\b/i,
+  /\baccept(?:s|ed|ing)?\b/i,
+  /\breceive(?:s|d|ing)?\b/i,
+  /\bpocket(?:s|ed|ing)?\b/i,
+  /\bstrap(?:s|ped|ping)?\b/i,
+  /\bslide(?:s|d|ing)?\b/i,
+  /\boutstretched\b/i,
+  /\bgrip(?:s|ped|ping)?\b/i,
+]
+
+// Denial / failed-transfer language near the object → do not mint.
+const DENIAL_MARKERS: RegExp[] = [
+  /\bout\s+of\s+reach\b/i,
+  /\bknocks?\s+(?:your|the)\s+hand\b/i,
+  /\bbefore\s+you\s+reach\b/i,
+  /\bnot\s+there\b/i,
+  /\bempty\b/i,
+  /\bkeeps?\s+(?:the\s+)?\w+\s+out\b/i,
+  /\bdenies?\b/i,
+  /\brefuses?\b/i,
+  /\bsnatches?\s+(?:it|them)\s+(?:away|back)\b/i,
+  /\bpulls?\s+(?:it|them)\s+back\b/i,
+  /\bcannot\s+reach\b/i,
+  /\bcan'?t\s+reach\b/i,
+  /\bnever\s+(?:had|got|reaches?)\b/i,
+]
+
+// Window sizes (chars around a noun match). Exact head-noun matches get a
+// slightly wider window; synonym matches are stricter.
+const EXACT_PROXIMITY = 90
+const SYNONYM_PROXIMITY = 55
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
@@ -78,7 +176,7 @@ function cleanObject(raw: string): string | null {
   value = value.split(
     /\b(?:and|then|before|after|to|so|but|while|as|without|with|from|into|onto|in|on|at|for|that|which|who|near|over|under|behind|beside)\b/i,
   )[0]
-  value = value.replace(/^(?:the|a|an|my|his|her|their|its)\s+/i, '')
+  value = value.replace(/^(?:the|a|an|my|his|her|their|its|new)\s+/i, '')
   value = value.replace(/[^a-zA-Z0-9'\- ]+$/g, '').trim()
   value = normalizeWhitespace(value)
   if (value.length < 2 || value.length > 48) return null
@@ -93,9 +191,105 @@ function headNoun(objectName: string): string {
   return words[words.length - 1] ?? ''
 }
 
-// Returns the object name the player acquires this turn, or null. The object's
-// head noun must also appear in the narrator's response (acceptance), so a
-// grab the narrator did not honour does not mint a phantom resource.
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function wordBoundaryIncludes(haystack: string, needle: string): boolean {
+  if (!needle) return false
+  return new RegExp(`\\b${escapeRegExp(needle)}\\b`, 'i').test(haystack)
+}
+
+/** Return the synonym class containing `term` (lowercased head), or null. */
+function synonymClassFor(term: string): readonly string[] | null {
+  const key = term.toLowerCase()
+  for (const cls of OBJECT_SYNONYM_CLASSES) {
+    if (cls.includes(key)) return cls
+  }
+  return null
+}
+
+/**
+ * Prefer the player's face-name when minting: if the player said "sword" and
+ * the narrator said "xiphos", mint as "sword" (detail may note the period form
+ * elsewhere). Falls back to the cleaned player object when no class matches.
+ */
+function mintName(playerObject: string, acceptedNarratorForm: string | null): string {
+  const playerHead = headNoun(playerObject)
+  const cls = synonymClassFor(playerHead)
+  if (cls) {
+    // Canonical is first entry when the player used any class member.
+    return cls[0]
+  }
+  // No class — keep player's phrase; if empty, fall back to narrator form.
+  return playerObject || acceptedNarratorForm || playerObject
+}
+
+function windowAround(text: string, index: number, length: number, radius: number): string {
+  const start = Math.max(0, index - radius)
+  const end = Math.min(text.length, index + length + radius)
+  return text.slice(start, end)
+}
+
+function hasMarkerIn(window: string, markers: RegExp[]): boolean {
+  return markers.some((re) => re.test(window))
+}
+
+/**
+ * Find a word-boundary occurrence of any candidate term in `narratorLower`
+ * that sits near a possession marker (and not a denial marker).
+ * Returns the matched term when accepted, else null.
+ */
+function findAcceptedForm(
+  narratorLower: string,
+  candidates: string[],
+  proximity: number,
+): string | null {
+  for (const term of candidates) {
+    if (!term || term.length < 3) continue
+    const re = new RegExp(`\\b${escapeRegExp(term)}\\b`, 'gi')
+    let match: RegExpExecArray | null
+    while ((match = re.exec(narratorLower)) !== null) {
+      const win = windowAround(narratorLower, match.index, match[0].length, proximity)
+      if (hasMarkerIn(win, DENIAL_MARKERS)) continue
+      if (hasMarkerIn(win, POSSESSION_MARKERS)) return term
+    }
+  }
+  return null
+}
+
+/**
+ * Narrator acceptance for an acquired object: word-boundary match of the head
+ * noun or a synonym class member, co-occurring with a possession-shaped verb
+ * inside a proximity window. Exact matches use a wider window than synonyms.
+ */
+function narratorAcceptsAcquisition(
+  object: string,
+  narratorLower: string,
+): { accepted: boolean; form: string | null } {
+  const head = headNoun(object)
+  if (head.length < 3 || NON_OBJECT_HEADS.has(head)) {
+    return { accepted: false, form: null }
+  }
+
+  // Exact head first (wider window).
+  const exact = findAcceptedForm(narratorLower, [head], EXACT_PROXIMITY)
+  if (exact) return { accepted: true, form: exact }
+
+  // Synonym class (stricter window). Also try full multi-word object.
+  const cls = synonymClassFor(head)
+  if (cls) {
+    const others = cls.filter((t) => t !== head)
+    const syn = findAcceptedForm(narratorLower, others, SYNONYM_PROXIMITY)
+    if (syn) return { accepted: true, form: syn }
+  }
+
+  return { accepted: false, form: null }
+}
+
+// Returns the object name the player acquires this turn, or null.
+// Single-object scope (accepted limitation): returns on the first match only —
+// "I buy the sword and a shield" mints one item. Multi-object minting is deferred.
 export function extractObjectAcquisition(
   playerText: string,
   narratorText: string,
@@ -115,8 +309,9 @@ export function extractObjectAcquisition(
       if (!object) continue
       const head = headNoun(object)
       if (head.length < 3 || NON_OBJECT_HEADS.has(head)) continue
-      if (!narrator.includes(head)) continue
-      return object
+      const { accepted, form } = narratorAcceptsAcquisition(object, narrator)
+      if (!accepted) continue
+      return mintName(object, form)
     }
   }
   return null
@@ -125,10 +320,9 @@ export function extractObjectAcquisition(
 // The other half of possession movement: a player dropping/stashing an object
 // (it leaves their hands and rests where they are) or handing one to a named
 // character (it changes holder). Mirrors extractObjectAcquisition — pure regex
-// over the player's text, with the same narrator-acceptance guard (the object's
-// head noun must appear in the narration) so an unhonoured move mints nothing.
-// The *who actually holds it now* and *do they have it to give* decisions live
-// in the patch-sanitizer pipeline (it has prior state); this only parses intent.
+// over the player's text, with the same narrator-acceptance guard so an
+// unhonoured move mints nothing. The *who actually holds it now* and *do they
+// have it to give* decisions live in the patch-sanitizer pipeline.
 export type ItemMovement =
   | { type: 'drop'; object: string }
   | { type: 'give'; object: string; recipient: string }
@@ -174,11 +368,17 @@ function cleanRecipient(raw: string): string | null {
   return value
 }
 
-// Narrator honoured this object move (its head noun shows up in the narration).
+// Narrator honoured this object move (word-boundary head noun in narration).
+// Movements keep a simpler acceptance than acquisition: they already require
+// the player to name a held object, and currency heads are rejected above.
 function narratorHonours(object: string, narratorLower: string): boolean {
   const head = headNoun(object)
   if (head.length < 3 || NON_OBJECT_HEADS.has(head)) return false
-  return narratorLower.includes(head)
+  if (wordBoundaryIncludes(narratorLower, head)) return true
+  // Allow synonym acceptance for moves too (drop "the blade" when ledger says sword).
+  const cls = synonymClassFor(head)
+  if (!cls) return false
+  return cls.some((t) => t !== head && wordBoundaryIncludes(narratorLower, t))
 }
 
 export function extractItemMovements(
@@ -215,4 +415,9 @@ export function extractItemMovements(
   }
 
   return movements
+}
+
+/** Exported for tests / inventory resolution — synonym class of a head noun. */
+export function objectSynonymClass(term: string): readonly string[] | null {
+  return synonymClassFor(headNoun(term))
 }

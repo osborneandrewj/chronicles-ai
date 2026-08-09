@@ -54,9 +54,11 @@ export interface WorldRepository {
   /** Advance only world_time (the P2 pre-sim clock), leaving the scene cursor. */
   setWorldTime(worldId: number, worldTime: string): Promise<void>
   /**
-   * Set the prose-driven ship-clock counter (minutes since the Day-1 00:00
-   * baseline) for a bounded world (starship P6). `getWorld` returns it as
-   * `ship_clock_minutes`; the narrate-turn pipeline advances it post-stream.
+   * Set the internal narrative clock counter (minutes since the Day-1 00:00
+   * baseline) for any world. `getWorld` returns it as `ship_clock_minutes`
+   * (historical column name). Bounded worlds use it for ship simulation;
+   * open/subworlds use it for narrative deadlines. Advanced post-stream by
+   * the narrate-turn pipeline.
    */
   setShipClockMinutes(worldId: number, minutes: number): Promise<void>
   /**

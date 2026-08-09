@@ -3,10 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
 import { worldTimeBand } from '@/domain/services/world-clock'
 
-// The prose-driven ship-clock (starship P6). Minutes since a Day-1 00:00 baseline
-// render to a narrative time-of-day phrase + a WorldTimeBand, and the phrase must
-// round-trip through worldTimeBand() back to the SAME band (the living tick parses
-// world_time). Pure + deterministic.
+// Internal narrative clock (starship P6 origin; any-world minutes). Bounded
+// worlds keep the ~HH:MM token for band round-trip; open worlds may omit it.
+// Extended coverage lives in narrative-clock.test.ts.
 
 describe('minutesToWorldTime', () => {
   it('renders Day 1 at the baseline (00:00) as late night', () => {

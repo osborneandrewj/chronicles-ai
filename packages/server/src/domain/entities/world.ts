@@ -16,8 +16,10 @@ export type World = {
   setting_region: string | null
   spatial_mode: SpatialMode
   template_id: string | null
-  // Prose-driven ship-clock (starship P6): minutes since a Day-1 00:00 baseline.
-  // Set for bounded worlds; null for open worlds (which keep current_time).
+  // Internal narrative clock (minutes since a Day-1 00:00 baseline). Nullable
+  // until first advance/backfill. Bounded worlds use it for ship simulation;
+  // open/subworlds use it for narrative deadlines. Column name is historical
+  // (`ship_clock_minutes`); the invariant is any-world minutes, not ship-only.
   ship_clock_minutes: number | null
   // Simulation-hub layering (C1). `parent_world_id` links a subworld to its hub;
   // `meta_story_json` is the hub-only Meta-Story Bible (generated, never rendered).
