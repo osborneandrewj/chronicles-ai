@@ -876,13 +876,12 @@ export const migrations: Migration[] = [
     },
   },
   {
-    // v0.x (starship P6) — the ship-clock. `worlds.ship_clock_minutes` is the
-    // PROSE-DRIVEN narrative clock for bounded worlds: minutes since a Day-1
-    // 00:00 baseline. The narrate-turn pipeline estimates elapsed in-world time
-    // from the just-written prose and advances this, then renders a narrative
-    // time-of-day (e.g. "Day 3 — early morning") into world_time. Nullable: set
-    // for bounded worlds, NULL for open worlds (which keep the archivist's
-    // free-text current_time). Guarded against re-run.
+    // v0.x (starship P6 origin) — internal narrative clock minutes. Column name
+    // is historical (`ship_clock_minutes`); any world may set it. Bounded worlds
+    // use it for ship simulation; open/subworlds for narrative deadlines. The
+    // narrate-turn pipeline advances it post-stream (deterministic primary;
+    // LLM only on explicit jump language) and renders world_time. Nullable
+    // until first advance/backfill. Guarded against re-run.
     version: 29,
     name: 'ship_clock_minutes',
     up: (db) => {

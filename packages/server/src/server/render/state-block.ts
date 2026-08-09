@@ -7,6 +7,17 @@
 import 'server-only'
 
 import type { Character, Place, Scene, StoryDossier } from '@/domain/entities'
+import {
+  pickPrimaryPressure,
+  rankClues,
+  rankObjectives,
+  rankQuests,
+  rankResources,
+  rankThreads,
+  rankTimeline,
+  type RankingContext,
+} from '@/domain/services/dossier-ranking'
+import { tryParseWorldTime } from '@/domain/services/narrative-clock'
 import { activityForBand, parseDailyLoop } from '@/lib/daily-loop'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 import { type PlaceOccupancy } from '@/lib/place-population'
@@ -78,6 +89,21 @@ export function formatStateBlock(
       lines.push(`- ${c.name} (${role})${c.description ? ` — ${limit(c.description, 180)}` : ''}`)
       if (c.is_player === 1) {
         if (c.status !== 'active') lines.push(`  - status: ${c.status}`)
+        // Single protagonist identity pin — narrator and archivist must not invent
+        // a second PC name (Andy vs Joseph Osborne class of bug).
+        lines.push(
+          `  - canonical name: ${c.name} (use this; never invent another PC name)`,
+        )
+        if (c.aliases) {
+          const aka = c.aliases
+            .split(/[\n,;]/)
+            .map((a) => a.trim())
+            .filter(Boolean)
+            .slice(0, 4)
+          if (aka.length > 0) {
+            lines.push(`  - also known as: ${aka.join(', ')}`)
+          }
+        }
         lines.push('  - continuity: this row is the protagonist; preserve location, carried items, injuries, notable discoveries, obligations, and relationship facts unless narration clearly changes them.')
         // A4: pinned CARRIED / TRACKED OBJECTS — the authoritative possession
         // ledger for the protagonist. Rendered as flat `name — status` lines (not
@@ -316,7 +342,9 @@ export function formatStateBlock(
     lines.push('', canonBlock)
   }
 
-  const dossierBlock = formatDossierBlock(state.dossier)
+  const dossierBlock = formatDossierBlock(state.dossier, {
+    worldTime: state.worldTime,
+  })
   if (dossierBlock) {
     lines.push('', dossierBlock)
   }
@@ -426,22 +454,48 @@ export function formatOccupancyBlock(occupancy: PlaceOccupancy | null): string {
   return lines.join('\n')
 }
 
-export function formatDossierBlock(dossier: StoryDossier): string {
+export type FormatDossierOptions = {
+  /** Current internal narrative clock minutes for deadline ranking. */
+  clockMinutes?: number | null
+  /** Rendered world_time string — used to backfill ranking when minutes absent. */
+  worldTime?: string | null
+}
+
+function rankingContextFrom(options?: FormatDossierOptions): RankingContext {
+  if (options?.clockMinutes != null && Number.isFinite(options.clockMinutes)) {
+    return { clockMinutes: options.clockMinutes }
+  }
+  if (options?.worldTime) {
+    const parsed = tryParseWorldTime(options.worldTime)
+    if (parsed.ok) return { clockMinutes: parsed.minutes }
+  }
+  return { clockMinutes: null }
+}
+
+export function formatDossierBlock(
+  dossier: StoryDossier,
+  options?: FormatDossierOptions,
+): string {
   const lines: string[] = []
-  const activeQuests = dossier.threads
-    .filter((t) => t.status === 'active' && t.kind === 'quest')
-    .slice(0, 4)
-  const activeThreads = dossier.threads
-    .filter((t) => t.status === 'active' && t.kind !== 'quest')
-    .slice(0, 4)
-  const activeObjectives = dossier.objectives
-    .filter((o) => o.status === 'active' || o.status === 'blocked')
-    .slice(0, 5)
-  const openClues = dossier.clues
-    .filter((c) => c.status === 'open' || c.status === 'interpreted')
-    .slice(0, 6)
-  const resources = dossier.resources.slice(0, 6)
-  const timeline = dossier.timeline.filter((e) => e.importance >= 3).slice(0, 5)
+  const ctx = rankingContextFrom(options)
+  // R8: rank before slice so stale actives do not permanently occupy the window.
+  const activeQuests = rankQuests(
+    dossier.threads.filter((t) => t.status === 'active' && t.kind === 'quest'),
+    ctx,
+  )
+  const activeThreads = rankThreads(
+    dossier.threads.filter((t) => t.status === 'active' && t.kind !== 'quest'),
+    ctx,
+  )
+  const activeObjectives = rankObjectives(
+    dossier.objectives.filter((o) => o.status === 'active' || o.status === 'blocked'),
+    ctx,
+  )
+  const openClues = rankClues(
+    dossier.clues.filter((c) => c.status === 'open' || c.status === 'interpreted'),
+  )
+  const resources = rankResources(dossier.resources)
+  const timeline = rankTimeline(dossier.timeline)
 
   if (
     activeQuests.length === 0 &&
@@ -456,6 +510,18 @@ export function formatDossierBlock(dossier: StoryDossier): string {
 
   lines.push('## STORY DOSSIER')
   lines.push('Use this as playable pressure, not exposition. Hidden pressure can move the world but must not be blurted out.')
+
+  const primary = pickPrimaryPressure(
+    dossier.threads.filter((t) => t.status === 'active'),
+    dossier.objectives.filter((o) => o.status === 'active' || o.status === 'blocked'),
+    ctx,
+  )
+  if (primary) {
+    lines.push('', '### PRIMARY PRESSURE (internal — never list as options to the player)')
+    const detail = primary.detail ? ` — ${limit(primary.detail, 180)}` : ''
+    const clock = options?.worldTime ? ` (world time: ${options.worldTime})` : ''
+    lines.push(`- ${primary.title}${detail}${clock}`)
+  }
 
   if (activeQuests.length > 0) {
     lines.push('', '### ACTIVE QUESTS')

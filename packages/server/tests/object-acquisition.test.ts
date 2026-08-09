@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractItemMovements, extractObjectAcquisition } from '@/domain/services/object-acquisition'
+import {
+  extractItemMovements,
+  extractObjectAcquisition,
+} from '@/domain/services/object-acquisition'
 
 describe('extractObjectAcquisition', () => {
   it('extracts a taken object the narrator honours', () => {
@@ -47,6 +50,90 @@ describe('extractObjectAcquisition', () => {
 
   it('returns null when there is no acquisition verb', () => {
     expect(extractObjectAcquisition('I look at the photograph', 'You study the photograph.')).toBeNull()
+  })
+
+  // ── PR A: purchase / synonym / tightened acceptance ──────────────────────
+
+  it('mints a sword when the player buys one and the narrator says xiphos', () => {
+    // Cluster Psi-1 seq 67–68: player said "sword", narrator said "xiphos".
+    expect(
+      extractObjectAcquisition(
+        'I pick up the sword. then I give the merchant 22 drachmae.',
+        'You lift the xiphos from the merchant’s outstretched hand, the iron balanced cleanly along your forearm, and a low whistle escapes you as twenty-two drachmae change hands.',
+      ),
+    ).toBe('sword')
+  })
+
+  it('mints from buy / purchase commerce verbs', () => {
+    expect(
+      extractObjectAcquisition(
+        'I buy the sword from the merchant',
+        'You take the blade, buckling it at your hip as coins change hands.',
+      ),
+    ).toBe('sword')
+  })
+
+  it('mints from accept', () => {
+    expect(
+      extractObjectAcquisition(
+        'I accept the cloak',
+        'You accept the cloak, settling it across your shoulders.',
+      ),
+    ).toBe('cloak')
+  })
+
+  it('does not match sword as a substring of swordsman (word-boundary)', () => {
+    expect(
+      extractObjectAcquisition(
+        'I take the sword',
+        'The swordsman blocks your path.',
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects a synonym present without a nearby possession verb', () => {
+    expect(
+      extractObjectAcquisition(
+        'I take the sword',
+        "A guard's blade rasps in its scabbard across the courtyard.",
+      ),
+    ).toBeNull()
+  })
+
+  it('rejects an exact noun with a denied possession outcome', () => {
+    expect(
+      extractObjectAcquisition(
+        'I take the sword',
+        'The guard keeps the sword out of reach.',
+      ),
+    ).toBeNull()
+  })
+
+  it('accepts synonym + possession verb (xiphos/sword)', () => {
+    expect(
+      extractObjectAcquisition(
+        'I take the sword',
+        'You lift the xiphos, belting it on.',
+      ),
+    ).toBe('sword')
+  })
+
+  it('does not treat currency as a give-object movement', () => {
+    expect(
+      extractItemMovements(
+        'I give the merchant my drachmae',
+        '…coins change hands as the merchant nods.',
+      ),
+    ).toEqual([])
+  })
+
+  it('does not mint currency as an acquired object', () => {
+    expect(
+      extractObjectAcquisition(
+        'I take the drachmae',
+        'You take the drachmae from the table.',
+      ),
+    ).toBeNull()
   })
 })
 

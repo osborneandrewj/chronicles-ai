@@ -16,6 +16,19 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.5.0',
+    date: '2026-08-09',
+    highlights: [
+      'Gear you buy or pick up sticks with you — even when the story uses a period name for the same thing (a xiphos still counts as your sword).',
+      'Your character keeps one clear name across adventures and corrections, so the story does not split you into two people.',
+      'Time moves forward in open-world stories, so deadlines and “three days until…” actually matter.',
+      'When you drift, the main story pressure can resurface through the world — without a menu of quest options.',
+      'Your active goals stay visible even as new ones pile up — a finished errand no longer crowds out what you actually care about.',
+      'In grounded historical settings, superhuman feats and public violence draw real consequences: witnesses, fear, and the city’s response.',
+      'Named strangers stay themselves more reliably when they finally tell you who they are.',
+    ],
+  },
+  {
     version: '0.4.0',
     date: '2026-08-08',
     highlights: [

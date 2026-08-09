@@ -19,7 +19,13 @@ import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import { packNarratorHistory } from '@/domain/services/history-packer'
 import { lucidityDelta, lucidityStage } from '@/domain/services/lucidity'
-import { minutesToWorldTime, worldTimeToMinutes } from '@/domain/services/narrative-clock'
+import {
+  estimateTurnMinutes,
+  hasExplicitTimeJump,
+  mergeElapsedMinutes,
+  minutesToWorldTime,
+  resolveClockMinutes,
+} from '@/domain/services/narrative-clock'
 import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
 import { eraFromGenreTags, parseGenreTags } from '@/domain/services/occupancy-sim'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
@@ -263,6 +269,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   const historyMessages = compactHistory(priorHistory)
   const presentNpcCount = narratorState.presentCharacters.filter((c) => c.is_player !== 1).length
+  const activeObjectiveTitles = narratorState.dossier.objectives
+    .filter((o) => o.status === 'active' || o.status === 'blocked')
+    .map((o) => o.title)
+  const activeThreatTitles = narratorState.dossier.threads
+    .filter((t) => t.status === 'active' && t.kind === 'threat')
+    .map((t) => t.title)
+  const primaryQuest = narratorState.dossier.threads.find(
+    (t) => t.status === 'active' && t.kind === 'quest',
+  )
   const turnGuidance = formatNarratorTurnGuidance({
     stance,
     inputMode: input_mode,
@@ -271,15 +286,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     presentNpcCount,
     plannedActionCount: plans.length,
     worldTime: narratorState.worldTime,
-    activeObjectiveTitles: narratorState.dossier.objectives
-      .filter((o) => o.status === 'active' || o.status === 'blocked')
-      .map((o) => o.title),
+    activeObjectiveTitles,
     openClueTitles: narratorState.dossier.clues
       .filter((c) => c.status === 'open' || c.status === 'interpreted')
       .map((c) => c.title),
-    activeThreatTitles: narratorState.dossier.threads
-      .filter((t) => t.status === 'active' && t.kind === 'threat')
-      .map((t) => t.title),
+    activeThreatTitles,
+    primaryPressureTitle:
+      primaryQuest?.title ?? activeObjectiveTitles[0] ?? activeThreatTitles[0] ?? null,
   })
 
   // Reality-bending cue (Phase D) — subworlds only. Surface the lucidity stage
@@ -352,35 +365,55 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       const narratorTurn = await turns.insert(worldId, 'assistant', trimmed, activeSceneId)
       narratorTurnId = narratorTurn.id
 
-      // DURING-PLAY living tick (bounded worlds only). On a sealed ship ALL crew
-      // stay active every turn, so we advance the OFF-scene crew one tick of the
-      // pre-play sim machinery (move toward band targets, gate/spend a drama beat,
-      // drift relationships). Best-effort + fail-open like the other post-stream
-      // enrichers — never blocks the turn; registered so it drains on SIGTERM.
-      // Open worlds keep the turn pipeline's off-scene skip optimisation untouched.
-      if (isBounded) {
-        // PROSE-DRIVEN ship-clock (bounded worlds only, starship P6). Read the
-        // just-written narration, estimate how much in-world time it covered, and
-        // advance the ship-clock counter by that — so narrative time flows from
-        // the STORY, not a fixed per-turn tick. Runs BEFORE the living tick so the
-        // tick places crew against the freshly advanced band. Fail-open: a clock
-        // failure must never block the turn (and the living tick still runs on the
-        // prior band). Backfill the counter from world_time on first use (null).
-        try {
-          const current =
-            world.ship_clock_minutes ?? worldTimeToMinutes(narratorState.worldTime)
+      // NARRATIVE CLOCK (any world). Deterministic estimate is primary; LLM
+      // time-passage runs only on explicit jump language (max merge, never sum).
+      // Bounded worlds still couple clock → living tick; open/subworld get clock
+      // only. Fail-open: a clock failure must never block the turn.
+      try {
+        const current = resolveClockMinutes({
+          storedMinutes: world.ship_clock_minutes,
+          worldTime: narratorState.worldTime,
+          holdMinutes: 0,
+        })
+        const travelCue =
+          /\b(walk|travel|ride|sail|head(?:s|ed)?\s+to|go\s+to|leave|depart|arrive|enter|reach)\b/i.test(
+            playerText,
+          ) ||
+          /\b(arrive|arrives|arrived|enter|enters|entered|reach(?:es|ed)?|leave|leaves|left|depart)\b/i.test(
+            trimmed,
+          )
+        const deterministic = estimateTurnMinutes({
+          stance,
+          sceneChanged: travelCue,
+          travelled: travelCue,
+          narrationLength: trimmed.length,
+        })
+        let llmMinutes: number | null = null
+        if (hasExplicitTimeJump(trimmed)) {
           const { elapsedMinutes } = await timePassage.estimate({
             narration: trimmed,
             priorWorldTime: narratorState.worldTime,
           })
-          const next = current + elapsedMinutes
-          const { worldTime } = minutesToWorldTime(next)
-          await worlds.setShipClockMinutes(worldId, next)
-          await worlds.setWorldTime(worldId, worldTime)
-        } catch (err) {
-          console.error('[ship-clock advance failed]', err)
+          llmMinutes = elapsedMinutes
         }
+        const elapsed = mergeElapsedMinutes(deterministic, llmMinutes)
+        const next = current + elapsed
+        // Bounded: keep ~HH:MM token for ship-band round-trip. Open/subworld:
+        // band-only phrase (no sci-fi clock HUD in Classical Greece).
+        const { worldTime } = minutesToWorldTime(next, {
+          includeClockToken: isBounded,
+        })
+        await worlds.setShipClockMinutes(worldId, next)
+        await worlds.setWorldTime(worldId, worldTime)
+      } catch (err) {
+        console.error('[narrative-clock advance failed]', err)
+      }
 
+      // DURING-PLAY living tick (bounded worlds only). On a sealed ship ALL crew
+      // stay active every turn, so we advance the OFF-scene crew one tick of the
+      // pre-play sim machinery. Best-effort + fail-open. Open worlds keep the
+      // turn pipeline's off-scene skip optimisation untouched.
+      if (isBounded) {
         const livingTick = tickLivingWorld(
           {
             worldId,

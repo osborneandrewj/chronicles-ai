@@ -195,7 +195,7 @@ describe('SqliteWorldRepository.setShipClockMinutes', () => {
     expect(world?.ship_clock_minutes).toBe(3990)
   })
 
-  it('leaves an open world ship_clock_minutes null (byte-green)', async () => {
+  it('seeds open worlds with null ship_clock_minutes until first advance', async () => {
     const open = createOpenWorld({
       name: `open-${Math.random()}`,
       premise: 'A quiet village.',
@@ -205,9 +205,13 @@ describe('SqliteWorldRepository.setShipClockMinutes', () => {
         identity: 'A returning letter-writer.',
       },
     })
-    const world = await worlds.getWorld(open.id)
+    let world = await worlds.getWorld(open.id)
     expect(world?.spatial_mode).toBe('open')
     expect(world?.ship_clock_minutes).toBeNull()
+    // Open worlds may store narrative clock minutes (PR C — not ship-only).
+    await worlds.setShipClockMinutes(open.id, 480)
+    world = await worlds.getWorld(open.id)
+    expect(world?.ship_clock_minutes).toBe(480)
   })
 })
 
