@@ -16,6 +16,13 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.5.1',
+    date: '2026-08-10',
+    highlights: [
+      'Shared password login for the two-tester deploy — enter once, stay signed in for 30 days, with a Log out control on the home screen.',
+    ],
+  },
+  {
     version: '0.5.0',
     date: '2026-08-09',
     highlights: [

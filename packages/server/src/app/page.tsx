@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import pkg from '../../package.json'
+import { logoutAction } from '@/app/login/actions'
 import { ArchivedSection } from '@/components/ArchivedSection'
 import { WhatsNewDialog } from '@/components/release-notes/WhatsNewDialog'
 import { WorldRowMenu } from '@/components/WorldRowMenu'
@@ -41,14 +42,26 @@ export default async function Home() {
             {worlds.length} world{worlds.length === 1 ? '' : 's'}
           </p>
         </div>
-        <Link
-          href="/worlds/new"
-          aria-label="Create new world"
-          className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-amber-500 px-4 text-sm font-semibold text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-        >
-          <PlusIcon />
-          <span>New</span>
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {process.env.APP_PASSWORD ? (
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                className="inline-flex h-12 items-center rounded-full border border-neutral-700 px-3 text-sm font-medium text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
+              >
+                Log out
+              </button>
+            </form>
+          ) : null}
+          <Link
+            href="/worlds/new"
+            aria-label="Create new world"
+            className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-amber-500 px-4 text-sm font-semibold text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          >
+            <PlusIcon />
+            <span>New</span>
+          </Link>
+        </div>
       </header>
 
       {worlds.length === 0 ? (
