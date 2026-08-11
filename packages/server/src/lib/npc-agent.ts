@@ -13,6 +13,14 @@ import type {
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
 import type { OpenOrder } from '@/domain/services/open-order'
 import { isPlanEligible, isTransientServiceNpc, missingPlannedActions } from '@/domain/services/npc-promotion'
+import {
+  detectPrivateUtterance,
+  isAudience,
+  playerTextForNpc,
+  publicDigest,
+  redactedPlayerTextForNonAudience,
+  type PrivateUtterance,
+} from '@/domain/services/private-utterance'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { tolerateNulls } from '@/lib/llm-schema'
@@ -309,6 +317,7 @@ export async function runNpcAgentTick(
   playerInput: string,
   recentTurns: Array<{ role: 'user' | 'assistant'; content: string }>,
   openOrder: OpenOrder | null = null,
+  privateUtterance: PrivateUtterance | null = null,
 ): Promise<{
   patch: NpcAgentPatch
   plans: PlannedActionWithIntent[]
@@ -399,17 +408,37 @@ export async function runNpcAgentTick(
   const worldTime = cursor.world_time
   const settingRegion = (await worlds.getWorld(worldId))?.setting_region ?? null
 
-  const priorNarration = recentTurns
+  const rawPriorNarration = recentTurns
     .filter((t) => t.role === 'assistant')
     .slice(-1)
     .map((t) => t.content)
     .join('\n\n')
+
+  // Privacy partition for prior prose: if the *previous* user turn was private,
+  // agents share only a public digest — not the secret body as shared knowledge.
+  // Current-turn privacy is handled via per-NPC player_action_this_turn below.
+  const knownForPrivate = allChars.map((c) => ({
+    id: c.id,
+    name: c.name,
+    aliases: c.aliases,
+    is_player: c.is_player,
+    status: c.status,
+  }))
+  // recentTurns includes the just-inserted current user turn as the newest user
+  // entry — use the user turn *before* that for prior-private detection.
+  const userTurns = recentTurns.filter((t) => t.role === 'user')
+  const priorUser = userTurns.length >= 2 ? userTurns[userTurns.length - 2] : null
+  const priorPrivate = priorUser
+    ? detectPrivateUtterance(priorUser.content, knownForPrivate, tickTurnId)
+    : null
+  const priorNarration = publicDigest(rawPriorNarration, priorPrivate)
 
   // Skip the LLM tick for off-scene, looped, stationary NPCs not mentioned in
   // the prior narration — their continuity comes from the deterministic loop
   // line in the STATE block. `tickable` is the subset of plan-eligible NPCs we
   // actually send to the model, update, and stamp last_agent_tick on this turn.
   // Open-order targets are never skipped (S2).
+  // Use raw prior for skip matching so privacy redaction does not force ticks.
   const tickable = eligible.filter((a) => {
     if (openOrderTargetId != null && a.id === openOrderTargetId) return true
     return !shouldSkipRoutineTick(
@@ -419,7 +448,7 @@ export async function runNpcAgentTick(
         in_transit_to_place_id: a.in_transit_to_place_id,
         daily_loop: a.daily_loop,
       },
-      priorNarration,
+      rawPriorNarration,
     )
   })
   if (tickable.length === 0) return null
@@ -435,8 +464,12 @@ export async function runNpcAgentTick(
     outcomesByChar.set(a.id, await npcIntents.recentOutcomesForCharacter(a.id, 3))
   }
 
+  const activePrivate =
+    privateUtterance?.status === 'active' ? privateUtterance : null
+
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
+  // player_action_this_turn is audience-scoped when a private channel is active.
   const npcContext = tickable.map((a) => ({
     name: a.name,
     description: a.description,
@@ -479,7 +512,22 @@ export async function runNpcAgentTick(
       narrator_disposition: row.narrator_disposition,
       narrator_interpretation: row.narrator_interpretation,
     })),
+    // Audience-scoped player action for this turn (structure-first privacy).
+    player_action_this_turn: playerTextForNpc(playerInput, a.id, activePrivate),
+    hears_private_this_turn: activePrivate ? isAudience(a.id, activePrivate) : null,
   }))
+
+  const privateChannelLine =
+    activePrivate && activePrivate.audienceNames.length > 0
+      ? `PRIVATE CHANNEL THIS TURN: ${activePrivate.channel}; audience = ${activePrivate.audienceNames.join(', ')}. Non-audience NPCs must NOT plan reactions to private content or update beliefs from redacted material. They may notice a private exchange happened without knowing the words.`
+      : null
+
+  const playerAboutLine = activePrivate
+    ? [
+        `PLAYER IS ABOUT TO (non-audience / public view): ${redactedPlayerTextForNonAudience(activePrivate)}`,
+        `PRIVATE TO AUDIENCE ONLY (${activePrivate.audienceNames.join(', ')}): ${playerInput}`,
+      ].join('\n')
+    : `PLAYER IS ABOUT TO (this turn): ${playerInput}`
 
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
@@ -506,6 +554,7 @@ export async function runNpcAgentTick(
           openOrder && openOrder.status === 'pending'
             ? `OPEN ORDER (pending ${openOrder.kind}): ${openOrder.targetName} — at least one plan this turn MUST advance this result (arrive / concrete radio status / refuse / obstacle). "Monitors channel" alone is invalid while this order is outstanding.`
             : null,
+          privateChannelLine,
           '',
           'AGENT NPCs:',
           JSON.stringify(npcContext, null, 2),
@@ -515,7 +564,7 @@ export async function runNpcAgentTick(
           '',
           priorNarration ? `PRIOR NARRATION (what just happened — base your updates on this):\n${priorNarration}` : 'PRIOR NARRATION: (none — this is the first turn)',
           '',
-          `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
+          playerAboutLine,
           '',
           'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
         ]
@@ -561,6 +610,7 @@ export async function runNpcAgentTick(
             content: [
               `WORLD TIME: ${worldTime ?? '(unset)'}`,
               `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
+              privateChannelLine,
               '',
               'AGENT NPCs:',
               JSON.stringify(npcContext, null, 2),
@@ -572,7 +622,7 @@ export async function runNpcAgentTick(
                 ? `PRIOR NARRATION (what just happened):\n${priorNarration}`
                 : 'PRIOR NARRATION: (none — this is the first turn)',
               '',
-              `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
+              playerAboutLine,
               '',
               `These PRESENT agent NPCs have NO plan yet and EACH must get one concrete present-tense ` +
                 `move this turn: ${missing.join(', ')}. At least one should target the protagonist ` +

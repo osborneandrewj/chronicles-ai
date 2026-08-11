@@ -65,6 +65,16 @@ describe('narrator prompt — no option menus (A3)', () => {
   })
 })
 
+describe('narrator prompt — stay in fiction (no OOC policy refusal)', () => {
+  it('frames the work as fiction and forbids OOC refusal speech', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/fictional|interactive fiction|interactive story/i)
+    expect(p).toMatch(/never refuse out of character|never write policy disclaimers/i)
+    expect(p).toMatch(/I will not narrate|can't assist|crosses a line/i)
+    expect(p).toMatch(/combat|lethal|violence/i)
+  })
+})
+
 describe('prompt content guards', () => {
   it('narrator prompt is craft + hard and materially shorter than the old checklist', () => {
     const p = loadPrompt('narrator-system')

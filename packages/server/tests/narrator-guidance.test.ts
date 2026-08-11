@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
 import type { OpenOrder } from '@/domain/services/open-order'
+import type { PrivateUtterance } from '@/domain/services/private-utterance'
 
 function ctx(overrides: Partial<Parameters<typeof formatNarratorTurnGuidance>[0]> = {}) {
   return {
@@ -242,6 +243,67 @@ describe('open-order resolve cue (S2)', () => {
       }),
     )
     expect(out).toContain('OPEN ORDER')
+  })
+})
+
+describe('private-utterance audience cue', () => {
+  const privateWhisper: PrivateUtterance = {
+    channel: 'whisper',
+    audienceCharacterIds: [10],
+    audienceNames: ['Marcus'],
+    createdTurnId: 50,
+    mayOverhear: false,
+    status: 'active',
+  }
+
+  it('never sparse-aways private audience guidance when active', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I whisper to Marcus, "The letter is under the floorboard."',
+        recentTurns: [],
+        plannedActionCount: 0,
+        privateUtterance: privateWhisper,
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toContain('private this turn')
+    expect(out).toContain('Marcus')
+    expect(out!.toLowerCase()).toMatch(/non-audience|audience/)
+  })
+})
+
+describe('fiction-violence cue (no OOC refusal)', () => {
+  it('fires on lethal / armed player moves and forbids OOC refusal language', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I whip out my pistol and pull the trigger',
+        recentTurns: [],
+        plannedActionCount: 0,
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toMatch(/fictional combat|diegetic/)
+    expect(out!.toLowerCase()).toMatch(/ooc|will not narrate|policy/)
+    expect(out!.toLowerCase()).toMatch(/carried|items here|absence/)
+  })
+
+  it('does not fire on ordinary non-violent moves', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I pick up the mug and drink',
+        recentTurns: [
+          { role: 'assistant', content: 'The room is quiet. Marcus watches from the door.' },
+        ],
+        plannedActionCount: 0,
+      }),
+    )
+    // Sparse: no violence cue required (may be null entirely).
+    if (out) {
+      expect(out.toLowerCase()).not.toContain('fictional combat')
+    }
   })
 })
 

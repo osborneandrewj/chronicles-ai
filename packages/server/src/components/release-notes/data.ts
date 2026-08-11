@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.7.0',
+    date: '2026-08-11',
+    highlights: [
+      'Whispers, asides, texts, DMs, and private calls stay with the intended audience — other people in the room (or off-scene) no longer act as if they heard the secret, unless the story later transmits it.',
+      'The world tracks who was meant to hear private speech as a system fact, so co-present characters may notice a huddle without knowing the words.',
+    ],
+  },
+  {
     version: '0.6.1',
     date: '2026-08-11',
     highlights: [

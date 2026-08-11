@@ -93,6 +93,24 @@ describe('private-belief scoping (A2)', () => {
   })
 })
 
+describe('PRIVATE THIS TURN audience pin', () => {
+  it('renders channel + audience without restating secret body', () => {
+    const block = formatStateBlock(
+      baseState({}),
+      [],
+      [],
+      { byCharacter: new Map(), flaring: new Set() },
+      null,
+      { channel: 'whisper', audienceNames: ['Marcus'] },
+    )
+    expect(block).toContain('### PRIVATE THIS TURN (authoritative audience)')
+    expect(block).toContain('channel: whisper')
+    expect(block).toContain('audience: Marcus only')
+    expect(block).toContain('Non-audience present NPCs MUST NOT react')
+    expect(block).not.toContain('floorboard')
+  })
+})
+
 describe('off-scene loop continuity', () => {
   it('renders the routine line for a looped, stationary off-scene NPC', () => {
     const off = {

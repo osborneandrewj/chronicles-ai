@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { applyArchivistPatch as runApplyArchivistPatch } from '@/application/use-cases/apply-archivist-patch'
 import { getContainer } from '@/composition/container'
 import { sanitizeArchivistPatch } from '@/domain/services/patch-sanitizer'
+import type { PrivateUtterance } from '@/domain/services/private-utterance'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { isDescriptorName } from '@/lib/character-identity'
 import { coerceJsonObject, tolerateNulls } from '@/lib/llm-schema'
@@ -329,6 +330,7 @@ export async function extractPatch(
   occupancy: PlaceOccupancy | null = null,
   isOpening = false,
   bootstrapDossier = false,
+  privateUtterance: PrivateUtterance | null = null,
 ): Promise<{ patch: ArchivistPatch; usage: LanguageModelUsage }> {
   const transcript = recent
     .map((t) => `${t.role === 'user' ? 'PLAYER' : 'NARRATOR'}: ${t.content}`)
@@ -439,7 +441,7 @@ export async function extractPatch(
     ],
   })
 
-  return { patch: sanitizeArchivistPatch(prior, recent, object), usage }
+  return { patch: sanitizeArchivistPatch(prior, recent, object, privateUtterance), usage }
 }
 
 // v0.6.6 correction channel. The player is speaking to the archivist directly

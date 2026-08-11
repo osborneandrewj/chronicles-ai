@@ -49,12 +49,20 @@ export type OpenOrderRenderContext = {
   targetName?: string
 }
 
+/** Optional private-channel audience pin rendered into STATE (facts only). */
+export type PrivateUtteranceRenderContext = {
+  channel: string
+  /** Display names of characters allowed to know the private content. */
+  audienceNames: string[]
+}
+
 export function formatStateBlock(
   state: NarratorWorldState,
   plannedActions: NpcPlannedAction[] = [],
   recentNarratorProse: string[] = [],
   reveryCtx: ReverieRenderContext = { byCharacter: new Map(), flaring: new Set() },
   openOrderCtx: OpenOrderRenderContext | null = null,
+  privateUtteranceCtx: PrivateUtteranceRenderContext | null = null,
 ): string {
   const lines: string[] = [
     '## STATE',
@@ -280,6 +288,25 @@ export function formatStateBlock(
     for (const line of openOrderCtx.statusLines) {
       lines.push(`- ${line}`)
     }
+  }
+
+  // Private-channel audience pin — who may act on private speech this turn.
+  // Do not restate the secret body here (player action already has it).
+  if (privateUtteranceCtx && privateUtteranceCtx.audienceNames.length > 0) {
+    const audience =
+      privateUtteranceCtx.audienceNames.length === 1
+        ? `${privateUtteranceCtx.audienceNames[0]} only`
+        : privateUtteranceCtx.audienceNames.join(', ')
+    lines.push('', '### PRIVATE THIS TURN (authoritative audience)')
+    lines.push(`- channel: ${privateUtteranceCtx.channel}`)
+    lines.push(`- audience: ${audience}`)
+    lines.push(
+      '- Non-audience present NPCs MUST NOT react as if they heard the private content.',
+    )
+    lines.push('- Do not have off-scene NPCs reference it.')
+    lines.push(
+      '- The protagonist and audience may act on it; others only if later fiction transmits it.',
+    )
   }
 
   // Off-scene NPCs the narrator might reference this turn (phone calls,

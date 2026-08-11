@@ -34,6 +34,8 @@ export {
   formatPlaceGeo,
   formatStateBlock,
   type NpcPlannedAction,
+  type OpenOrderRenderContext,
+  type PrivateUtteranceRenderContext,
   type ReverieRenderContext,
 } from '@/server/render/state-block'
 

@@ -1149,6 +1149,51 @@ describe('sanitizeArchivistPatch', () => {
       ),
     ).toEqual({})
   })
+
+  it('drops non-audience observations_append under an active private utterance', async () => {
+    const { worldId } = seedWorld(`Sanitize-private-${Math.random()}`)
+    const setupTurn = insertTurn(worldId, 'assistant', 'Marcus and Kyle stand close.', null)
+    await applyArchivistPatch(worldId, setupTurn.id, {
+      scene: { action: 'open', title: 'At the bar', place_name: 'Tapped' },
+      characters: [
+        { name: 'Edith', is_player: true, current_place_name: 'Tapped' },
+        { name: 'Marcus', current_place_name: 'Tapped' },
+        { name: 'Kyle', current_place_name: 'Tapped' },
+      ],
+    })
+    const prior = await loadNarratorState(worldId)
+    const marcus = prior.knownCharacters.find((c) => c.name === 'Marcus')
+    expect(marcus).toBeDefined()
+
+    const patch: ArchivistPatch = {
+      characters: [
+        { name: 'Marcus', observations_append: 'heard the floorboard secret' },
+        { name: 'Kyle', observations_append: 'heard the floorboard secret' },
+      ],
+    }
+    const out = sanitizeArchivistPatch(
+      prior,
+      [
+        {
+          role: 'user',
+          content: 'I whisper to Marcus, "The letter is under the floorboard."',
+        },
+        { role: 'assistant', content: 'You lean in. Marcus listens. Kyle watches the door.' },
+      ],
+      patch,
+      {
+        channel: 'whisper',
+        audienceCharacterIds: [marcus!.id],
+        audienceNames: ['Marcus'],
+        createdTurnId: setupTurn.id,
+        mayOverhear: false,
+        status: 'active',
+      },
+    )
+    expect(out.characters).toEqual([
+      { name: 'Marcus', observations_append: 'heard the floorboard secret' },
+    ])
+  })
 })
 
 describe('applyArchivistPatch player-move scene invariant (A1)', () => {
