@@ -80,6 +80,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
     if (engagement) lines.push(engagement)
   }
 
+  // Pressure-stall: salient confront plans can keep L2 off while the scene
+  // circles on "speak / wait / judgment" without a legible next act (Sequence
+  // Vigil sanctum class). High priority — not suppressed by plan salience.
+  const clearHandle = pickClearHandleCue(ctx)
+  if (clearHandle) lines.push(clearHandle)
+
   // Craft beat cues — only when a risk heuristic fires (sparse).
   const beat = pickSparseBeatCue(ctx)
   if (beat) lines.push(beat)
@@ -152,6 +158,65 @@ function pickOpenOrderCue(ctx: GuidanceContext): string | null {
       : '') +
     'Dramatize the authoritative open-order status this turn — arrival, concrete report, refusal, or new obstacle. ' +
     'Do not only restate the protagonist waiting. Do not invent an off-scene relocation beyond STATE.'
+  )
+}
+
+/**
+ * Detect "pressure theater": recent narration ends on speak/judgment/wait demands
+ * without a concrete next act (follow, leave, hand over, strike, go to a place).
+ * Sequence Vigil sanctum: many turns of "Speak now… The chamber waits."
+ */
+function isPressureStalled(turns: RecentTurn[]): boolean {
+  const recent = turns
+    .filter((t) => t.role === 'assistant')
+    .slice(-3)
+    .map((t) => t.content)
+  if (recent.length < 2) return false
+
+  let demandOnly = 0
+  for (const text of recent) {
+    const tail = text.slice(-420).toLowerCase()
+    const demandsSpeechOrJudgment =
+      /\b(speak|answer|name|judgment|judge|choose|utter|silence|binding|waits?|waiting|render|seal holds|the stone)\b/.test(
+        tail,
+      )
+    // Concrete handles the player can act on (paths, objects, violence, exit).
+    const hasPathHandle =
+      /\b(follow|run|leave|flee|hand|give|take|bring|strike|kill|open|close|descend|climb|west|east|north|south|door|gate|path|road|court|tomb|temple|palace|stairs?|step back|step forward|drop|pick up|draw|put down)\b/.test(
+        tail,
+      )
+    if (demandsSpeechOrJudgment && !hasPathHandle) demandOnly += 1
+  }
+  return demandOnly >= 2
+}
+
+/**
+ * When the scene circles without a legible next act, force one character demand
+ * that the player can actually pursue — not a menu, one situation.
+ * Fires even when salient plans already suppress L2 (those plans are often the
+ * same confront loop that causes the stall).
+ */
+function pickClearHandleCue(ctx: GuidanceContext): string | null {
+  if (ctx.presentNpcCount < 1) return null
+
+  const stalled = isPressureStalled(ctx.recentTurns)
+  const idle = countTrailingIdleMoves(ctx) >= 1
+  // Multi-cast idle without stall text still often needs a handle; single idle
+  // engagement cue may already fire — clear-handle is for stall or crowded idle.
+  if (!stalled && !(idle && ctx.presentNpcCount >= 2)) return null
+
+  const primary = ctx.primaryPressureTitle?.trim()
+  return (
+    'The scene is circling without a clear next act for the protagonist. ' +
+    'Have a present character make ONE legible demand of what they want done next — ' +
+    'a concrete physical or social move (follow them now, hand over the sealed object, ' +
+    'leave by a named path, submit to a rite with a named first step, stand aside while they act). ' +
+    'Do not only restack “speak / answer / wait / the chamber waits.” ' +
+    'If the demand is refused or delayed, land a consequence this turn that changes the board ' +
+    '(someone leaves, someone takes the object, a path closes, a cost is paid).' +
+    (primary
+      ? ` Prefer advancing the live pressure "${primary}" over inventing a new ritual loop.`
+      : '')
   )
 }
 

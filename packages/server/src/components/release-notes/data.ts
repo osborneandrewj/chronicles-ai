@@ -16,6 +16,13 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.6.1',
+    date: '2026-08-11',
+    highlights: [
+      'When a scene circles on the same pressure (“speak,” “wait,” “the chamber waits”) without a clear next step, present characters push a concrete demand you can act on — follow, hand something over, leave a named path, or face a real consequence — instead of restacking atmosphere.',
+    ],
+  },
+  {
     version: '0.6.0',
     date: '2026-08-11',
     highlights: [
