@@ -279,13 +279,9 @@ Reveries are a fully-built pacing mechanism that **has never run in production**
 
 ---
 
-### B3 — Re-measure, then decide *(deliberately unspecified)*
+### B3 — Re-measure, then decide → **specified & largely shipped**
 
-With B1 and B2 landed, the pacing question should be re-asked against real turns rather than designed ahead of evidence. Candidate levers, in rough order of expected value — **do not build these blind:**
-
-- **Beat-structure adherence.** `domain/services/beat-gating.ts` and `narrator-guidance.ts` (458 lines) already shape turn structure. The observed 4-beat pattern (scene → info/dialogue → tension cue → choice prompt) is recorded in `memory/reference_grok_narrative_session.md`. Measure actual adherence before tightening.
-- **The repeat-detector's reach.** The Jaccard restatement-loop fix shipped in v0.6.21 and killed the "Two hours later" repeats. Whether it catches subtler structural repetition (same beat shape every turn) is unmeasured.
-- **`narrator-guidance.ts` at 458 lines** is the densest pacing-decision surface in the codebase and the natural place for a structural change — but it's also where the overfit constants were flagged. B1 first.
+Concrete specification landed as **`docs/plans/archive/narrator-craft-freedom.md`** (v0.6.0): story-motion S1/S2 (salient-plan intrusion budget + open-order / off-scene status) then sparse craft (Phase A system prompt + Phase B risk-gated guidance). Remaining from that plan: dual-world playtest gate, optional STATE budget (Phase C), optional planned-move soften (Phase D).
 
 ---
 

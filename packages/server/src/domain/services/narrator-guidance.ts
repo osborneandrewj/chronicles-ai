@@ -1,16 +1,41 @@
+// Soft turn director (narrator-craft-freedom Phase B + S1/S2).
+// Risk-gated craft cues only — hard rules live in narrator-system.md.
+// High-priority motion cues (open order, salient-plan-aware momentum) are never
+// sparse-awayed. Pure: no I/O.
+
+import {
+  hasSalientIntrusion,
+  summarizePlanSalience,
+  type OpenOrderForSalience,
+  type PlanForSalience,
+  type PlanSalienceSummary,
+} from '@/domain/services/plan-salience'
+import {
+  isExplicitTimeJump,
+  isYieldMove,
+  type OpenOrder,
+} from '@/domain/services/open-order'
+
 // Consecutive low-agency player moves before the narrator should make the world
 // act on its own (escalating momentum). Tunable.
 const MOMENTUM_IDLE_THRESHOLD = 2
 
 type RecentTurn = { role: 'user' | 'assistant'; content: string }
 
-type GuidanceContext = {
+export type GuidanceContext = {
   stance: string
   inputMode: string
   playerText: string
   recentTurns: RecentTurn[]
   presentNpcCount: number
+  /** Raw plan count — used only when plannedActions/planSalience are absent. */
   plannedActionCount: number
+  /** Structured plans for S1 salience (preferred over raw count). */
+  plannedActions?: PlanForSalience[]
+  /** Precomputed salience; when set, preferred over recomputing from plannedActions. */
+  planSalience?: PlanSalienceSummary
+  /** Pending open order for S2 resolve cue (never sparse-awayed). */
+  openOrder?: OpenOrder | null
   worldTime?: string | null
   activeObjectiveTitles?: string[]
   openClueTitles?: string[]
@@ -19,22 +44,24 @@ type GuidanceContext = {
   primaryPressureTitle?: string | null
 }
 
-export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
-  const lines: string[] = ['## TURN GUIDANCE']
-
+/**
+ * Risk-gated turn guidance. Returns null when no risk fires so the caller can
+ * omit the entire ## TURN GUIDANCE section (Phase B).
+ */
+export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null {
   if (ctx.inputMode !== 'in-character' || ctx.stance === 'meta') {
-    lines.push(
+    return [
+      '## TURN GUIDANCE',
       'Brief reply in the narrator voice — keep the fiction in place; do not advance the scene.',
-    )
-    return lines.join('\n')
+    ].join('\n')
   }
 
-  lines.push(
-    'Write the next beat with novelistic weight. Trust the fiction to set length and rhythm; vary the shape from recent turns.',
-  )
+  const lines: string[] = []
+  const salience = resolveSalience(ctx)
 
-  const beat = pickBeatCue(ctx)
-  if (beat) lines.push(beat)
+  // S2 — open order on yield/idle/time-jump: never sparse-away.
+  const openOrderCue = pickOpenOrderCue(ctx)
+  if (openOrderCue) lines.push(openOrderCue)
 
   if (isTimeCheckMove(ctx.playerText)) {
     lines.push(
@@ -42,6 +69,22 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
     )
   }
 
+  const continuity = pickContinuityNudge(ctx.recentTurns)
+  if (continuity) lines.push(continuity)
+
+  // L2 / L1 — S1 salient-plan gate (busywork does not suppress).
+  const momentum = pickMomentumCue(ctx, salience)
+  if (momentum) lines.push(momentum)
+  else {
+    const engagement = pickEngagementCue(ctx, salience)
+    if (engagement) lines.push(engagement)
+  }
+
+  // Craft beat cues — only when a risk heuristic fires (sparse).
+  const beat = pickSparseBeatCue(ctx)
+  if (beat) lines.push(beat)
+
+  // Investigative pressure only when open clues/objectives exist.
   if (isInvestigativeMove(ctx.playerText)) {
     const objHint = ctx.activeObjectiveTitles?.slice(0, 2).join('; ')
     const clueHint = ctx.openClueTitles?.slice(0, 3).join('; ')
@@ -50,31 +93,69 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string {
       if (objHint) parts.push(`objectives: ${objHint}`)
       if (clueHint) parts.push(`clues: ${clueHint}`)
       lines.push(
-        `Internal pressure only — do not name these to the player, never list them, never present them as goals or options; let at most one bend the scene through action or subtext if it fits naturally — ${parts.join(' | ')}.`,
+        `Internal pressure only — do not name these to the player; let at most one bend the scene through action or subtext if natural — ${parts.join(' | ')}.`,
       )
     }
   }
 
-  const continuity = pickContinuityNudge(ctx.recentTurns)
-  if (continuity) lines.push(continuity)
-
-  const momentum = pickMomentumCue(ctx)
-  if (momentum) lines.push(momentum)
-  else {
-    // Engagement is the softer tier-1 push below the L2 intrusion threshold, so
-    // it only fires when the L2 momentum cue did not (mutually exclusive).
-    const engagement = pickEngagementCue(ctx)
-    if (engagement) lines.push(engagement)
-  }
-
-  if (needsBranch(ctx)) {
-    lines.push('Leave at least one branch the player can pursue.')
-  }
-
-  return lines.join('\n')
+  if (lines.length === 0) return null
+  return ['## TURN GUIDANCE', ...lines].join('\n')
 }
 
-function pickBeatCue(ctx: GuidanceContext): string | null {
+function resolveSalience(ctx: GuidanceContext): PlanSalienceSummary {
+  if (ctx.planSalience) return ctx.planSalience
+  if (ctx.plannedActions && ctx.plannedActions.length > 0) {
+    return summarizePlanSalience(
+      ctx.plannedActions,
+      openOrderAsSalience(ctx.openOrder),
+    )
+  }
+  // No structured plans: treat raw count as all-busywork so S1 regression
+  // stays locked (raw plannedActionCount alone must not silence L2).
+  if (ctx.plannedActionCount > 0) {
+    return {
+      salientCount: 0,
+      busyworkCount: ctx.plannedActionCount,
+      advancesOpenOrder: false,
+    }
+  }
+  return { salientCount: 0, busyworkCount: 0, advancesOpenOrder: false }
+}
+
+function openOrderAsSalience(order: OpenOrder | null | undefined): OpenOrderForSalience {
+  if (!order || order.status !== 'pending') return null
+  return {
+    targetName: order.targetName,
+    targetCharacterId: order.targetCharacterId,
+    kind: order.kind,
+    status: order.status,
+  }
+}
+
+function pickOpenOrderCue(ctx: GuidanceContext): string | null {
+  const order = ctx.openOrder
+  if (!order || order.status !== 'pending') return null
+
+  const yieldish =
+    isYieldMove(ctx.playerText) ||
+    isExplicitTimeJump(ctx.playerText) ||
+    countTrailingIdleMoves(ctx) >= 1 ||
+    isLowAgencyMove(ctx.playerText)
+
+  if (!yieldish) return null
+
+  const timeJump = isExplicitTimeJump(ctx.playerText)
+  return (
+    `OPEN ORDER outstanding (${order.kind}): ${order.targetName}. ` +
+    (timeJump
+      ? 'Time has jumped — land a mandatory concrete outcome for this order this turn (success, partial, failure, or new cost). '
+      : '') +
+    'Dramatize the authoritative open-order status this turn — arrival, concrete report, refusal, or new obstacle. ' +
+    'Do not only restate the protagonist waiting. Do not invent an off-scene relocation beyond STATE.'
+  )
+}
+
+function pickSparseBeatCue(ctx: GuidanceContext): string | null {
   const text = ctx.playerText
 
   if (isChargedRecognitionMove(text)) {
@@ -86,39 +167,65 @@ function pickBeatCue(ctx: GuidanceContext): string | null {
   if (isChargedConfrontationMove(text)) {
     return 'This is a charged confrontation — let spacing, witnesses, silence, and reply carry the pressure.'
   }
-  if (isDangerMove(text) || isTransitionMove(text)) {
-    return 'Let the beat breathe — arrival, danger, or consequence can reveal layout, cost, witness, texture, or choice.'
-  }
   if (isMediaFeedMove(text)) {
     return 'This is a public information surface — put specific diegetic content on it; at least one concrete wider-world item that could recur.'
   }
   if (isInvestigativeMove(text)) {
     return 'The player is trying to learn something — return a concrete result, partial match, contradiction, named obstacle, or new lead.'
   }
+  if (isDangerMove(text) || isTransitionMove(text)) {
+    // Keep a short breathe cue only for arrival/danger — not every driving move.
+    return 'Let the beat breathe — arrival, danger, or consequence can reveal layout, cost, witness, texture, or choice.'
+  }
+
+  // Observe: only when recent establishing turns were short / empty — not every look.
   if (ctx.stance === 'observe' || isAttentionOnlyMove(text)) {
-    return (
-      'The protagonist is taking in the scene — render the surroundings in depth: lead with concrete, ' +
-      'multi-sensory specifics (light, sound, smell, temperature, terrain, distances, the people and ' +
-      'their bearing) so the world feels inhabited and particular, then surface at least one new handle ' +
-      '(a detail, offer, threat, contradiction, or lead). This is an establishing beat in the ' +
-      'medium-to-long band — do not answer a look-around with two or three sentences. If the scene was ' +
-      'already painted this richly on a recent turn, vary the focus or advance something rather than ' +
-      'repeating the same survey.'
-    )
-  }
-  if (ctx.stance === 'say') {
-    const language = detectMarkedSpokenLanguage(text)
-    if (language) {
-      return `Let audible dialogue be audible — write the words someone answers with, not a summary. The player marked their speech as ${language}; a light romanized touch keeps it audible while the meaning stays clear in English.`
+    if (recentEstablishingWasThin(ctx.recentTurns)) {
+      return (
+        'The protagonist is taking in the scene — render concrete multi-sensory specifics ' +
+        'and surface at least one new handle; if the scene was already painted richly, vary focus or advance something.'
+      )
     }
-    return 'Let audible dialogue be audible — write the words someone answers with, not a summary.'
+    return null
   }
+
+  // Say: only if last assistant turn summarized speech rather than quoting it.
+  if (ctx.stance === 'say') {
+    if (lastAssistantSummarizedSpeech(ctx.recentTurns)) {
+      const language = detectMarkedSpokenLanguage(text)
+      if (language) {
+        return `Let audible dialogue be audible — write the words someone answers with, not a summary. The player marked their speech as ${language}; a light romanized touch keeps it audible while the meaning stays clear in English.`
+      }
+      return 'Let audible dialogue be audible — write the words someone answers with, not a summary.'
+    }
+    return null
+  }
+
   return null
+}
+
+function recentEstablishingWasThin(turns: RecentTurn[]): boolean {
+  const recent = turns
+    .filter((t) => t.role === 'assistant')
+    .slice(-2)
+    .map((t) => t.content)
+  if (recent.length === 0) return true
+  // Thin = short survey or empty establishing.
+  return recent.every((c) => c.trim().length < 400)
+}
+
+function lastAssistantSummarizedSpeech(turns: RecentTurn[]): boolean {
+  const last = [...turns].reverse().find((t) => t.role === 'assistant')
+  if (!last) return true
+  const hasQuotedDialogue = /["“][^"”]{2,}["”]/.test(last.content)
+  const summaryShape =
+    /\b(replies?|answers?|says?|tells? you|responds?|agrees?|nods?)\b/i.test(last.content) &&
+    !hasQuotedDialogue
+  return summaryShape || !hasQuotedDialogue
 }
 
 function isLowAgencyMove(text: string): boolean {
   const compact = normalize(text)
-  // Short observation / waiting / bare continuation — the player is marking time.
   if (isAttentionOnlyMove(text)) return true
   return (
     compact.length <= 40 &&
@@ -129,7 +236,6 @@ function isLowAgencyMove(text: string): boolean {
 }
 
 function countTrailingIdleMoves(ctx: GuidanceContext): number {
-  // Current move + trailing player moves, newest-first, until a driving move.
   const priorPlayer = ctx.recentTurns
     .filter((t) => t.role === 'user')
     .map((t) => t.content)
@@ -143,18 +249,16 @@ function countTrailingIdleMoves(ctx: GuidanceContext): number {
   return count
 }
 
-function pickMomentumCue(ctx: GuidanceContext): string | null {
-  // When the NPC agent already supplied planned moves, those ARE this turn's
-  // intrusion (the narrator MUST stage them) — don't also tell it to invent a
-  // separate "world acts" intrusion, which would collide with the "one intrusion
-  // only" cap and tempt it to drop a planned move.
-  if (ctx.plannedActionCount > 0) return null
+function pickMomentumCue(
+  ctx: GuidanceContext,
+  salience: PlanSalienceSummary,
+): string | null {
+  // S1: only plot-salient plans consume the intrusion slot. Busywork does not.
+  if (hasSalientIntrusion(salience)) return null
   const idle = countTrailingIdleMoves(ctx)
   if (idle < MOMENTUM_IDLE_THRESHOLD) return null
   const threat = ctx.activeThreatTitles?.[0]
   const primary = ctx.primaryPressureTitle?.trim()
-  // Prefer threat, then primary A-plot pressure, so idle worlds reassert the
-  // abandoned quest rather than random ambience (PR D).
   const pressure = threat
     ? ` Draw the pressure from the active threat "${threat}".`
     : primary
@@ -169,16 +273,12 @@ function pickMomentumCue(ctx: GuidanceContext): string | null {
   )
 }
 
-// Tier-1 push, softer than the L2 "world acts" intrusion: on a single idle move
-// with a present NPC and no NPC action already planned this turn, license a
-// present character to take the initiative and press the protagonist directly.
-// Gated below MOMENTUM_IDLE_THRESHOLD so it never overlaps the L2 cue, on
-// plannedActionCount === 0 (a planned move already puts a character in motion),
-// and skipped on the opening beat (no prior turns) so an establishing turn is
-// not pre-empted.
-function pickEngagementCue(ctx: GuidanceContext): string | null {
+function pickEngagementCue(
+  ctx: GuidanceContext,
+  salience: PlanSalienceSummary,
+): string | null {
   if (ctx.presentNpcCount < 1) return null
-  if (ctx.plannedActionCount > 0) return null
+  if (hasSalientIntrusion(salience)) return null
   if (ctx.recentTurns.length === 0) return null
   const idle = countTrailingIdleMoves(ctx)
   if (idle < 1 || idle >= MOMENTUM_IDLE_THRESHOLD) return null
@@ -209,20 +309,6 @@ function pickContinuityNudge(turns: RecentTurn[]): string | null {
     return 'Recent narration is repeating its architecture. Change the shape — start in motion, lead with consequence, add dialogue, advance time, or land on a concrete new choice.'
   }
   return null
-}
-
-function needsBranch(ctx: GuidanceContext): boolean {
-  if (ctx.stance === 'say' || ctx.stance === 'observe') return true
-  const text = ctx.playerText
-  return (
-    isAttentionOnlyMove(text) ||
-    isInvestigativeMove(text) ||
-    isMediaFeedMove(text) ||
-    isTransitionMove(text) ||
-    isDangerMove(text) ||
-    isSpectacleMove(text) ||
-    isChargedConfrontationMove(text)
-  )
 }
 
 function isAttentionOnlyMove(text: string): boolean {
@@ -338,14 +424,6 @@ function detectMarkedSpokenLanguage(text: string): string | null {
   return language.charAt(0).toUpperCase() + language.slice(1)
 }
 
-// The dominant repetition failure (prod world 12): the narrator re-renders the
-// previous turn's opening sentence, per-character status lines, and ambient
-// closer almost verbatim, varying only the central action beat. Token-Jaccard
-// over the last two narrator turns catches this directly — the older
-// keyword/shape detectors miss it because the overlap is lexical, not a fixed
-// noun or a 2-paragraph shape. Thresholds are tuned high (real restatement
-// scores open≈1.0 / body≈0.78 / tail≈0.84; genuinely varied turns score <0.25)
-// so legitimate same-place continuation does not trip it.
 function restatesPriorTurn(turns: RecentTurn[]): boolean {
   const recent = turns
     .filter((t) => t.role === 'assistant')
@@ -413,8 +491,6 @@ function repeatedAmbientAnchors(turns: RecentTurn[]): string[] {
     { label: 'water', terms: ['water', 'sea'] },
     { label: 'streetlights', terms: ['streetlights'] },
     { label: 'fluorescents', terms: ['fluorescents'] },
-    // Period / cross-genre ambient anchors (genre-coupling audit) so repeated
-    // closers are caught outside the modern/temperate default set.
     { label: 'sand', terms: ['sand', 'dune', 'dunes'] },
     { label: 'palms', terms: ['palm', 'palms'] },
     { label: 'dust', terms: ['dust'] },

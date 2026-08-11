@@ -60,13 +60,37 @@ export function isTransientServiceNpc(c: {
 // not a one-shot service walk-on. This lets a newly-met co-located NPC get a
 // planned move on its FIRST encounter — closing the cold-open dead zone — without
 // lowering AUTO_PROMOTE_THRESHOLD or making transient walk-ons chatty.
+//
+// Open-order sibling (narrator-craft-freedom S2): a named target of a pending
+// retrieve/await order is plan-eligible even when off-scene and plain `npc`, so
+// the agent can advance retrieval / radio status / arrival rather than leaving
+// the load-bearing actor out of the tick.
 export function isPlanEligible(c: {
   agency_level: string
   present_with_protagonist: boolean
   is_transient_service: boolean
+  /** Character id of a pending open-order target, when any. */
+  openOrderTargetId?: number | null
+  characterId?: number
 }): boolean {
+  if (
+    c.openOrderTargetId != null &&
+    c.characterId != null &&
+    c.openOrderTargetId === c.characterId &&
+    !c.is_transient_service
+  ) {
+    return true
+  }
   if (c.agency_level !== 'npc') return true
   return c.present_with_protagonist && !c.is_transient_service
+}
+
+/** True when this character is the pending open-order target (force-tick). */
+export function isOpenOrderTarget(
+  characterId: number,
+  openOrderTargetId: number | null | undefined,
+): boolean {
+  return openOrderTargetId != null && characterId === openOrderTargetId
 }
 
 // Which present agent NPCs the model failed to plan a move for this turn. Pure

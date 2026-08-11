@@ -41,11 +41,20 @@ export type ReverieRenderContext = {
   flaring: Set<number>
 }
 
+/** Optional open-order STATUS lines rendered into STATE (facts only — S2). */
+export type OpenOrderRenderContext = {
+  /** e.g. "Andy Osborne — still at Administrative Wing" */
+  statusLines: string[]
+  kind?: string
+  targetName?: string
+}
+
 export function formatStateBlock(
   state: NarratorWorldState,
   plannedActions: NpcPlannedAction[] = [],
   recentNarratorProse: string[] = [],
   reveryCtx: ReverieRenderContext = { byCharacter: new Map(), flaring: new Set() },
+  openOrderCtx: OpenOrderRenderContext | null = null,
 ): string {
   const lines: string[] = [
     '## STATE',
@@ -259,12 +268,28 @@ export function formatStateBlock(
     }
   }
 
+  // Open-order status (S2) — system fact the narrator dramatizes; never invent
+  // off-scene relocation beyond these lines.
+  if (openOrderCtx && openOrderCtx.statusLines.length > 0) {
+    lines.push('', '### OPEN ORDER (authoritative status — dramatize this turn)')
+    if (openOrderCtx.targetName) {
+      lines.push(
+        `- pending ${openOrderCtx.kind ?? 'order'}: ${openOrderCtx.targetName}`,
+      )
+    }
+    for (const line of openOrderCtx.statusLines) {
+      lines.push(`- ${line}`)
+    }
+  }
+
   // Off-scene NPCs the narrator might reference this turn (phone calls,
   // messages, recollections, sudden arrivals). The NPC agent ticks them in
   // the background and writes last_known_situation + journey state. The
   // narrator must ground any off-scene NPC line in these facts and must
   // not teleport an NPC ahead of arrival_world_time.
+  // Open-order targets are always included even if plain `npc` / no situation.
   const presentIds = new Set(state.presentCharacters.map((c) => c.id))
+  const openOrderTargetName = openOrderCtx?.targetName?.toLowerCase() ?? null
   const offScene = state.knownCharacters
     .filter(
       (c) =>
@@ -273,13 +298,16 @@ export function formatStateBlock(
         !presentIds.has(c.id) &&
         (c.agency_level === 'local' ||
           c.agency_level === 'nearby' ||
-          c.agency_level === 'distant'),
+          c.agency_level === 'distant' ||
+          (openOrderTargetName != null &&
+            c.name.toLowerCase() === openOrderTargetName)),
     )
     .filter(
       (c) =>
         c.last_known_situation !== null ||
         c.current_place_id !== null ||
-        c.in_transit_to_place_id !== null,
+        c.in_transit_to_place_id !== null ||
+        (openOrderTargetName != null && c.name.toLowerCase() === openOrderTargetName),
     )
     .sort((a, b) => (b.last_seen_turn_id ?? 0) - (a.last_seen_turn_id ?? 0))
     .slice(0, 5)

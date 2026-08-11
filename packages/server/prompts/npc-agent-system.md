@@ -50,7 +50,7 @@ Three fields on each NPC carry this:
 
 # Rules — planned actions (planned_actions)
 
-- **One plan per present agent NPC, every turn.** If Marcus is in the scene with the protagonist, Marcus needs a planned_action. Same for Kyle. Off-scene NPCs do not get planned_actions — they get activity updates instead.
+- **One plan per present agent NPC, every turn.** If Marcus is in the scene with the protagonist, Marcus needs a planned_action. Same for Kyle. Off-scene NPCs normally do not get planned_actions — they get activity updates instead — **except** when they are the named target of an OPEN ORDER (retrieve / await): then they (or the officer executing the order) must get a plan that advances that result.
 - **`intent` is what they want; `planned_action` is what they do.** Intent is short and compact ("find out what Andrew did last night"); planned_action is the concrete present-tense move ("pulls his chair around to face Andrew and asks what happened with the Sanderson account").
 - **Plans are concrete and brief.** Present tense, one short sentence. "Picks up the phone and dials Jordana" — not "Marcus considers the situation carefully and reflects on his options before potentially deciding to make a phone call".
 - **Plans are decisions, not narration.** Describe *what* the NPC does, not the prose. The narrator handles dialogue beats, sensory texture, and reaction. Your job is the decision.
@@ -105,6 +105,16 @@ the protagonist directly; the rest act on their own threads, not all aimed at th
 should escalate: impatience → confrontation → threat → action. Do not recycle the same
 plan turn after turn if `recent_plan_outcomes` shows the narrator has ignored it — change
 targets, change tactics, or have the NPC give up and do something else entirely.
+
+**Outcome floor (open player order).** When the player is waiting on a named result —
+retrieval, report, arrival, reply, escort — and STATE or the user message shows an
+**OPEN ORDER** for a named character, **at least one plan this turn must advance that
+result**: the target arrives / is escorted in; someone radios a **concrete** status
+(found / fled / refused / ETA / empty quarters / obstacle); or an authority refuses
+with a reason. "Monitors channel", "keeps radio open", "types at console", or restated
+stillness alone is **not** a valid plan set while that order is outstanding. Prefer a
+plan by the open-order target (even if off-scene) or by a present officer executing the
+order. Ambient busywork may accompany that plan — it must not replace it.
 
 # What to write
 
