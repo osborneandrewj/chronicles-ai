@@ -4,8 +4,10 @@ import { getContainer } from '@/composition/container'
 import { applyArchivistPatch } from '@/lib/archivist'
 import { parseDailyLoop } from '@/lib/daily-loop'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
+import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
 import {
   applyNpcAgentPatch,
+  buildNpcAgentUserContent,
   NpcAgentPatchSchema,
   repairNpcAgentText,
   shouldSkipRoutineTick,
@@ -21,6 +23,7 @@ function npcAgentDeps(): NpcAgentDeps {
   const c = getContainer()
   return {
     characters: c.characters,
+    dossiers: c.dossiers,
     npcIntents: c.npcIntents,
     places: c.places,
     reveries: c.reveries,
@@ -385,5 +388,86 @@ describe('npc agent reverie authoring (append-only)', () => {
     })
     const row = db.prepare("SELECT daily_loop FROM characters WHERE world_id = ? AND name = 'Tomas'").get(worldId) as { daily_loop: string | null }
     expect(parseDailyLoop(row.daily_loop)?.morning?.activity).toBe('opens the shop')
+  })
+})
+
+describe('NPC story context (plot lifecycle)', () => {
+  it('includes closed objectives and active pressure in agent user content', async () => {
+    const storyContext = buildNpcStoryContext({
+      threads: [
+        {
+          id: 1,
+          world_id: 1,
+          title: 'Live quest',
+          kind: 'quest',
+          status: 'active',
+          summary: 'Still open',
+          stakes: null,
+          rewards: null,
+          consequences: null,
+          hidden: null,
+          relevance_tags_json: '[]',
+          source_turn_id: 1,
+          resolved_turn_id: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 2,
+          world_id: 1,
+          title: 'Done quest',
+          kind: 'quest',
+          status: 'resolved',
+          summary: 'Settled',
+          stakes: null,
+          rewards: null,
+          consequences: null,
+          hidden: null,
+          relevance_tags_json: '[]',
+          source_turn_id: 2,
+          resolved_turn_id: 9,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      clues: [],
+      objectives: [
+        {
+          id: 1,
+          world_id: 1,
+          thread_id: 2,
+          thread_title: 'Done quest',
+          title: 'Deliver manifests',
+          status: 'completed',
+          detail: 'Done at the quay',
+          blocker: null,
+          source_turn_id: 2,
+          completed_turn_id: 9,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      resources: [],
+      timeline: [],
+    })
+
+    const content = buildNpcAgentUserContent({
+      worldTime: 'Morning',
+      settingRegion: null,
+      protagonistPlace: 'Office',
+      openOrderLine: null,
+      privateChannelLine: null,
+      npcContext: [{ name: 'Marcus' }],
+      knownPlacesBlock: '- Office',
+      priorNarration: 'Marcus watches the door.',
+      playerAboutLine: 'PLAYER IS ABOUT TO (this turn): I wait.',
+      storyContext,
+    })
+
+    expect(content).toContain('STORY CONTEXT')
+    expect(content).toContain('Live quest')
+    expect(content).toContain('Done quest')
+    expect(content).toContain('Deliver manifests')
+    expect(content).toContain('recently_closed')
   })
 })

@@ -25,10 +25,11 @@ import {
   strongestAgencyLevel,
   strongestStatus,
 } from '@/domain/services/name-resolution'
+import { resolveThreadReference } from '@/domain/services/dossier-thread-reference'
+import { resolvePossession } from '@/domain/services/inventory-resolution'
 import {
   appendFactWithProvenance,
 } from '@/domain/services/memorable-fact-provenance'
-import { resolvePossession } from '@/domain/services/inventory-resolution'
 import { normalizeTransitPlacesInPatch } from '@/domain/services/patch-sanitizer'
 import { decideSceneTransition } from '@/domain/services/scene-transition'
 
@@ -309,19 +310,39 @@ export async function applyArchivistPatch(
     options: { preferQuest?: boolean } = {},
   ): Promise<number | null> {
     if (!threadTitle) return null
-    // A thread that carries playable objectives is a mission — surface it as a
-    // `quest` rather than leaving it under the catch-all `mystery` default the
-    // model reaches for. We only upgrade the soft kinds (`mystery`/`background`):
-    // a deliberately-set `threat` or `relationship` keeps its kind even when an
-    // objective attaches (a hostage standoff is a threat the player works, not a
-    // quest). New threads spawned by an objective reference open as quests.
-    if (options.preferQuest) {
-      const existing = await dossierWriter.threadByTitle(worldId, threadTitle)
-      if (!existing || existing.kind === 'mystery' || existing.kind === 'background') {
-        return upsertStoryThread({ title: threadTitle, kind: 'quest', status: 'active' })
-      }
+    // Child-row references (clues / objectives / timeline) must LINK without
+    // reopening resolved/failed/dormant parents. Lifecycle status changes only
+    // via explicit story_threads[] patches (upsertStoryThread). Soft kinds may
+    // still upgrade to quest while the thread is active.
+    const existing = await dossierWriter.threadByTitle(worldId, threadTitle)
+    const decision = resolveThreadReference(
+      existing
+        ? { id: existing.id, kind: existing.kind, status: existing.status }
+        : null,
+      options,
+    )
+    if (decision.action === 'create') {
+      return upsertStoryThread({
+        title: threadTitle,
+        kind: decision.kind,
+        status: decision.status,
+      })
     }
-    return upsertStoryThread({ title: threadTitle, status: 'active' })
+    if (decision.upgradeKindToQuest && existing) {
+      await dossierWriter.updateThread({
+        id: existing.id,
+        kind: 'quest',
+        status: existing.status,
+        summary: null,
+        stakes: null,
+        rewards: null,
+        consequences: null,
+        hidden: null,
+        relevance_tags_json: existing.relevance_tags_json,
+        resolved_turn_id: null,
+      })
+    }
+    return decision.id
   }
 
   async function upsertStoryClue(patch: StoryCluePatch): Promise<void> {

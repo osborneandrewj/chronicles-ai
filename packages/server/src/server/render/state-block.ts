@@ -8,6 +8,11 @@ import 'server-only'
 
 import type { Character, Place, Scene, StoryDossier } from '@/domain/entities'
 import {
+  CLOSED_DOSSIER_CAPS,
+  selectRecentlyClosedObjectives,
+  selectRecentlyClosedThreads,
+} from '@/domain/services/closed-dossier'
+import {
   pickPrimaryPressure,
   rankClues,
   rankObjectives,
@@ -551,6 +556,15 @@ export function formatDossierBlock(
   )
   const resources = rankResources(dossier.resources)
   const timeline = rankTimeline(dossier.timeline)
+  // Settled work: compact, capped, never primary pressure.
+  const closedThreads = selectRecentlyClosedThreads(
+    dossier.threads,
+    CLOSED_DOSSIER_CAPS.narratorThreads,
+  )
+  const closedObjectives = selectRecentlyClosedObjectives(
+    dossier.objectives,
+    CLOSED_DOSSIER_CAPS.narratorObjectives,
+  )
 
   if (
     activeQuests.length === 0 &&
@@ -558,7 +572,9 @@ export function formatDossierBlock(
     activeObjectives.length === 0 &&
     openClues.length === 0 &&
     resources.length === 0 &&
-    timeline.length === 0
+    timeline.length === 0 &&
+    closedThreads.length === 0 &&
+    closedObjectives.length === 0
   ) {
     return ''
   }
@@ -645,6 +661,25 @@ export function formatDossierBlock(
       lines.push(
         `- ${e.thread_title ? `[${e.thread_title}] ` : ''}${e.world_time ? `${e.world_time}: ` : ''}${e.title} — ${limit(e.summary, 180)}`,
       )
+    }
+  }
+
+  if (closedThreads.length > 0 || closedObjectives.length > 0) {
+    lines.push('', '### RECENTLY CLOSED')
+    lines.push(
+      'Treat these as settled; do not revive unless current fiction explicitly creates a new complication.',
+    )
+    for (const t of closedThreads) {
+      const turn =
+        t.resolved_turn_id != null ? ` [resolved t:${t.resolved_turn_id}]` : ''
+      const detail = t.summary ? ` — ${limit(t.summary, 160)}` : ''
+      lines.push(`- ${t.title} (${t.status})${detail}${turn}`)
+    }
+    for (const o of closedObjectives) {
+      const turn =
+        o.completed_turn_id != null ? ` [completed t:${o.completed_turn_id}]` : ''
+      const detail = o.detail ? ` — ${limit(o.detail, 160)}` : ''
+      lines.push(`- ${o.title} (${o.status})${detail}${turn}`)
     }
   }
 

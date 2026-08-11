@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import { applyArchivistPatch as runApplyArchivistPatch } from '@/application/use-cases/apply-archivist-patch'
 import { getContainer } from '@/composition/container'
+import { buildArchivistClosedDossier } from '@/domain/services/closed-dossier'
 import { sanitizeArchivistPatch } from '@/domain/services/patch-sanitizer'
 import type { PrivateUtterance } from '@/domain/services/private-utterance'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
@@ -323,6 +324,102 @@ export function buildArchivistUserContent(parts: {
   ].join('\n')
 }
 
+/**
+ * Pure prior-state object for the archivist LLM. Includes active pressure and a
+ * capped recently-closed set so the model can avoid reopening finished work.
+ */
+export function buildArchivistPriorState(prior: NarratorWorldState): Record<string, unknown> {
+  const closed = buildArchivistClosedDossier(prior.dossier)
+  return {
+    world_time: prior.worldTime,
+    current_scene: prior.currentScene
+      ? {
+          title: prior.currentScene.title,
+          scene_number: prior.currentScene.scene_number,
+          place: prior.currentPlace?.name ?? null,
+          scene_mood: prior.currentScene.scene_mood,
+          pace: prior.currentScene.pace,
+          focus: prior.currentScene.focus,
+        }
+      : null,
+    present_characters: prior.presentCharacters.map((c) => ({
+      name: c.name,
+      is_player: c.is_player === 1,
+      status: c.status,
+      descriptor_placeholder:
+        c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
+      current_place:
+        c.current_place_id && prior.currentPlace?.id === c.current_place_id
+          ? prior.currentPlace.name
+          : undefined,
+      memorable_facts:
+        c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
+      observations: c.is_player === 1 ? undefined : lastNLines(stripFactProvenance(c.observations), 2),
+    })),
+    known_characters: prior.knownCharacters.map((c) => ({
+      name: c.name,
+      is_player: c.is_player === 1,
+      status: c.status,
+      descriptor_placeholder:
+        c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
+      description: limit(c.description, 120),
+      memorable_facts:
+        c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
+    })),
+    known_places: prior.knownPlaces.map((p) => ({
+      name: p.name,
+      kind: p.kind,
+    })),
+    dossier: {
+      active_threads: prior.dossier.threads
+        .filter((t) => t.status === 'active')
+        .slice(0, 6)
+        .map((t) => ({
+          title: t.title,
+          kind: t.kind,
+          summary: limit(t.summary, 140),
+          stakes: limit(t.stakes, 120),
+          rewards: limit(t.rewards, 100),
+          consequences: limit(t.consequences, 120),
+        })),
+      open_clues: prior.dossier.clues
+        .filter((c) => c.status === 'open' || c.status === 'interpreted')
+        .slice(0, 8)
+        .map((c) => ({
+          title: c.title,
+          thread: c.thread_title,
+          detail: limit(c.detail, 140),
+          implication: limit(c.implication, 120),
+          status: c.status,
+        })),
+      current_objectives: prior.dossier.objectives
+        .filter((o) => o.status === 'active' || o.status === 'blocked')
+        .slice(0, 8)
+        .map((o) => ({
+          title: o.title,
+          thread: o.thread_title,
+          detail: limit(o.detail, 140),
+          blocker: limit(o.blocker, 120),
+          status: o.status,
+        })),
+      recently_closed_threads: closed.recently_closed_threads.map((t) => ({
+        title: t.title,
+        status: t.status,
+        kind: t.kind,
+        summary: limit(t.summary, 140),
+        resolved_turn_id: t.resolved_turn_id,
+      })),
+      recently_closed_objectives: closed.recently_closed_objectives.map((o) => ({
+        title: o.title,
+        status: o.status,
+        thread: o.thread_title,
+        detail: limit(o.detail, 140),
+        completed_turn_id: o.completed_turn_id,
+      })),
+    },
+  }
+}
+
 export async function extractPatch(
   premise: string,
   prior: NarratorWorldState,
@@ -338,84 +435,7 @@ export async function extractPatch(
 
   const occupancyBlock = formatOccupancyForArchivist(occupancy)
 
-  const priorBlock = JSON.stringify(
-    {
-      world_time: prior.worldTime,
-      current_scene: prior.currentScene
-        ? {
-            title: prior.currentScene.title,
-            scene_number: prior.currentScene.scene_number,
-            place: prior.currentPlace?.name ?? null,
-            scene_mood: prior.currentScene.scene_mood,
-            pace: prior.currentScene.pace,
-            focus: prior.currentScene.focus,
-          }
-        : null,
-      present_characters: prior.presentCharacters.map((c) => ({
-        name: c.name,
-        is_player: c.is_player === 1,
-        status: c.status,
-        descriptor_placeholder:
-          c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
-        current_place:
-          c.current_place_id && prior.currentPlace?.id === c.current_place_id
-            ? prior.currentPlace.name
-            : undefined,
-        memorable_facts:
-          c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
-        observations: c.is_player === 1 ? undefined : lastNLines(stripFactProvenance(c.observations), 2),
-      })),
-      known_characters: prior.knownCharacters.map((c) => ({
-        name: c.name,
-        is_player: c.is_player === 1,
-        status: c.status,
-        descriptor_placeholder:
-          c.is_player === 1 ? undefined : isDescriptorName(c.name) || undefined,
-        description: limit(c.description, 120),
-        memorable_facts:
-          c.is_player === 1 ? lastNLines(stripFactProvenance(c.memorable_facts), 5) : undefined,
-      })),
-      known_places: prior.knownPlaces.map((p) => ({
-        name: p.name,
-        kind: p.kind,
-      })),
-      dossier: {
-        active_threads: prior.dossier.threads
-          .filter((t) => t.status === 'active')
-          .slice(0, 6)
-          .map((t) => ({
-            title: t.title,
-            kind: t.kind,
-            summary: limit(t.summary, 140),
-            stakes: limit(t.stakes, 120),
-            rewards: limit(t.rewards, 100),
-            consequences: limit(t.consequences, 120),
-          })),
-        open_clues: prior.dossier.clues
-          .filter((c) => c.status === 'open' || c.status === 'interpreted')
-          .slice(0, 8)
-          .map((c) => ({
-            title: c.title,
-            thread: c.thread_title,
-            detail: limit(c.detail, 140),
-            implication: limit(c.implication, 120),
-            status: c.status,
-          })),
-        current_objectives: prior.dossier.objectives
-          .filter((o) => o.status === 'active' || o.status === 'blocked')
-          .slice(0, 8)
-          .map((o) => ({
-            title: o.title,
-            thread: o.thread_title,
-            detail: limit(o.detail, 140),
-            blocker: limit(o.blocker, 120),
-            status: o.status,
-          })),
-      },
-    },
-    null,
-    2,
-  )
+  const priorBlock = JSON.stringify(buildArchivistPriorState(prior), null, 2)
 
   const { object, usage } = await generateObject({
     model: anthropic(ARCHIVIST_MODEL),

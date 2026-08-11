@@ -72,6 +72,14 @@ this posture at every turn, especially when the scene is dangerous or stakes are
 Plan actions that advance those goals independent of what the player is doing. Most turns,
 some NPCs should be chasing their own threads with zero regard for the protagonist.
 
+**Respect plot lifecycle in STORY CONTEXT.** When the user message includes `STORY CONTEXT`
+with `recently_closed_threads` / `recently_closed_objectives`, revise `active_goal`,
+`current_focus`, or `long_term_agenda` when that closed state invalidates an old goal **and**
+the NPC plausibly knows the outcome (they were present, involved, or would have heard). Do
+**not** keep pursuing closed objectives unless the current player action introduces a new
+complication. Private beliefs still only change when the NPC actually learned the fact —
+lifecycle context is not omniscience.
+
 **NPCs interact with each other.** Set `target_npc_name` to another NPC, not always the
 player. A suspicious officer confronts a nervous colleague; an ambitious subordinate
 flatters a superior; two rivals talk past each other. The player overhears, intercedes, or

@@ -2,8 +2,10 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
+import type { StoryDossier } from '@/domain/entities'
 import type {
   CharacterRepository,
+  DossierRepository,
   NpcIntentRepository,
   PlaceRepository,
   ReverieRepository,
@@ -11,6 +13,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
+import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
 import type { OpenOrder } from '@/domain/services/open-order'
 import { isPlanEligible, isTransientServiceNpc, missingPlannedActions } from '@/domain/services/npc-promotion'
 import {
@@ -36,6 +39,7 @@ import { worldTimeBand } from '@/lib/world-time'
 // helper used to issue inline; under PERSISTENCE=mongo they hit the collections.
 export type NpcAgentDeps = {
   characters: CharacterRepository
+  dossiers: Pick<DossierRepository, 'forWorld'>
   npcIntents: NpcIntentRepository
   places: PlaceRepository
   reveries: ReverieRepository
@@ -310,6 +314,88 @@ export type PlannedActionWithIntent = PlannedAction & {
 // present agent NPC will do *this* turn. The narrator stages the plans.
 // `tickTurnId` is the player-turn id used for [t:N] provenance on activity
 // log entries — the narrator turn doesn't exist yet.
+/**
+ * Pure assembly of the NPC agent user message body (story_context + agents).
+ * Testable without a live LLM call.
+ */
+export function buildNpcAgentUserContent(parts: {
+  worldTime: string | null
+  settingRegion: string | null
+  protagonistPlace: string | null
+  openOrderLine: string | null
+  privateChannelLine: string | null
+  npcContext: unknown
+  knownPlacesBlock: string
+  priorNarration: string
+  playerAboutLine: string
+  storyContext: ReturnType<typeof buildNpcStoryContext> | null
+  planningOnlyNames?: string[]
+}): string {
+  const storyBlock =
+    parts.storyContext &&
+    (parts.storyContext.active_pressures.length > 0 ||
+      parts.storyContext.recently_closed_threads.length > 0 ||
+      parts.storyContext.recently_closed_objectives.length > 0)
+      ? [
+          '',
+          'STORY CONTEXT (authoritative plot lifecycle — revise obsolete goals when the NPC plausibly knows the outcome):',
+          JSON.stringify(parts.storyContext, null, 2),
+        ]
+      : []
+
+  if (parts.planningOnlyNames && parts.planningOnlyNames.length > 0) {
+    return [
+      `WORLD TIME: ${parts.worldTime ?? '(unset)'}`,
+      `PROTAGONIST IS AT: ${parts.protagonistPlace ?? '(unknown)'}`,
+      parts.privateChannelLine,
+      ...storyBlock,
+      '',
+      'AGENT NPCs:',
+      JSON.stringify(parts.npcContext, null, 2),
+      '',
+      'KNOWN PLACES (real-world facts are authoritative — do not contradict them):',
+      parts.knownPlacesBlock,
+      '',
+      parts.priorNarration
+        ? `PRIOR NARRATION (what just happened):\n${parts.priorNarration}`
+        : 'PRIOR NARRATION: (none — this is the first turn)',
+      '',
+      parts.playerAboutLine,
+      '',
+      `These PRESENT agent NPCs have NO plan yet and EACH must get one concrete present-tense ` +
+        `move this turn: ${parts.planningOnlyNames.join(', ')}. At least one should target the protagonist ` +
+        `directly. Return ONLY planned_actions — no npc_updates.`,
+    ]
+      .filter((line) => line !== null)
+      .join('\n')
+  }
+
+  return [
+    `WORLD TIME: ${parts.worldTime ?? '(unset)'}`,
+    `WORLD SETTING (real-world region): ${parts.settingRegion ?? '(not a real-world setting)'}`,
+    `PROTAGONIST IS AT: ${parts.protagonistPlace ?? '(unknown)'}`,
+    parts.openOrderLine,
+    parts.privateChannelLine,
+    ...storyBlock,
+    '',
+    'AGENT NPCs:',
+    JSON.stringify(parts.npcContext, null, 2),
+    '',
+    'KNOWN PLACES (real-world street/neighborhood facts are authoritative — do not contradict them):',
+    parts.knownPlacesBlock,
+    '',
+    parts.priorNarration
+      ? `PRIOR NARRATION (what just happened — base your updates on this):\n${parts.priorNarration}`
+      : 'PRIOR NARRATION: (none — this is the first turn)',
+    '',
+    parts.playerAboutLine,
+    '',
+    'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
+  ]
+    .filter((line) => line !== null)
+    .join('\n')
+}
+
 export async function runNpcAgentTick(
   deps: NpcAgentDeps,
   worldId: number,
@@ -324,7 +410,7 @@ export async function runNpcAgentTick(
   plans: PlannedActionWithIntent[]
   usage: LanguageModelUsage
 } | null> {
-  const { characters, npcIntents, places, reveries, worlds } = deps
+  const { characters, dossiers, npcIntents, places, reveries, worlds } = deps
 
   const knownPlaces = await places.forWorld(worldId)
   const placesByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
@@ -532,6 +618,38 @@ export async function runNpcAgentTick(
       ].join('\n')
     : `PLAYER IS ABOUT TO (this turn): ${playerInput}`
 
+  let storyDossier: StoryDossier = {
+    threads: [],
+    clues: [],
+    objectives: [],
+    resources: [],
+    timeline: [],
+  }
+  try {
+    storyDossier = await dossiers.forWorld(worldId)
+  } catch (err) {
+    console.error('[npc agent dossier load]', err)
+  }
+  const storyContext = buildNpcStoryContext(storyDossier)
+  const knownPlacesBlock = knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n')
+  const openOrderLine =
+    openOrder && openOrder.status === 'pending'
+      ? `OPEN ORDER (pending ${openOrder.kind}): ${openOrder.targetName} — at least one plan this turn MUST advance this result (arrive / concrete radio status / refuse / obstacle). "Monitors channel" alone is invalid while this order is outstanding.`
+      : null
+
+  const userContent = buildNpcAgentUserContent({
+    worldTime,
+    settingRegion,
+    protagonistPlace: player.current_place_name,
+    openOrderLine,
+    privateChannelLine,
+    npcContext,
+    knownPlacesBlock,
+    priorNarration,
+    playerAboutLine,
+    storyContext,
+  })
+
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
     schema: NpcAgentPatchSchema,
@@ -550,29 +668,7 @@ export async function runNpcAgentTick(
       },
       {
         role: 'user',
-        content: [
-          `WORLD TIME: ${worldTime ?? '(unset)'}`,
-          `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
-          `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
-          openOrder && openOrder.status === 'pending'
-            ? `OPEN ORDER (pending ${openOrder.kind}): ${openOrder.targetName} — at least one plan this turn MUST advance this result (arrive / concrete radio status / refuse / obstacle). "Monitors channel" alone is invalid while this order is outstanding.`
-            : null,
-          privateChannelLine,
-          '',
-          'AGENT NPCs:',
-          JSON.stringify(npcContext, null, 2),
-          '',
-          'KNOWN PLACES (real-world street/neighborhood facts are authoritative — do not contradict them):',
-          knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
-          '',
-          priorNarration ? `PRIOR NARRATION (what just happened — base your updates on this):\n${priorNarration}` : 'PRIOR NARRATION: (none — this is the first turn)',
-          '',
-          playerAboutLine,
-          '',
-          'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
-        ]
-          .filter((line) => line !== null)
-          .join('\n'),
+        content: userContent,
       },
     ],
   })
@@ -610,27 +706,19 @@ export async function runNpcAgentTick(
           },
           {
             role: 'user',
-            content: [
-              `WORLD TIME: ${worldTime ?? '(unset)'}`,
-              `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
+            content: buildNpcAgentUserContent({
+              worldTime,
+              settingRegion,
+              protagonistPlace: player.current_place_name,
+              openOrderLine: null,
               privateChannelLine,
-              '',
-              'AGENT NPCs:',
-              JSON.stringify(npcContext, null, 2),
-              '',
-              'KNOWN PLACES (real-world facts are authoritative — do not contradict them):',
-              knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n'),
-              '',
-              priorNarration
-                ? `PRIOR NARRATION (what just happened):\n${priorNarration}`
-                : 'PRIOR NARRATION: (none — this is the first turn)',
-              '',
+              npcContext,
+              knownPlacesBlock,
+              priorNarration,
               playerAboutLine,
-              '',
-              `These PRESENT agent NPCs have NO plan yet and EACH must get one concrete present-tense ` +
-                `move this turn: ${missing.join(', ')}. At least one should target the protagonist ` +
-                `directly. Return ONLY planned_actions — no npc_updates.`,
-            ].join('\n'),
+              storyContext,
+              planningOnlyNames: missing,
+            }),
           },
         ],
       })
