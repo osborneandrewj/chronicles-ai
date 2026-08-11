@@ -183,6 +183,30 @@ describe('recordAppearancesAndAutoPromote', () => {
 })
 
 describe('isPlanEligible (pure tick-eligibility rule)', () => {
+  it('forces open-order targets eligible even when off-scene plain npc (S2)', () => {
+    expect(
+      isPlanEligible({
+        agency_level: 'npc',
+        present_with_protagonist: false,
+        is_transient_service: false,
+        openOrderTargetId: 42,
+        characterId: 42,
+      }),
+    ).toBe(true)
+  })
+
+  it('does not force unrelated off-scene plain npc via open-order sibling', () => {
+    expect(
+      isPlanEligible({
+        agency_level: 'npc',
+        present_with_protagonist: false,
+        is_transient_service: false,
+        openOrderTargetId: 42,
+        characterId: 99,
+      }),
+    ).toBe(false)
+  })
+
   it('always admits an agent-tier NPC regardless of presence/transience', () => {
     for (const agency_level of ['local', 'nearby', 'distant', 'agent']) {
       expect(

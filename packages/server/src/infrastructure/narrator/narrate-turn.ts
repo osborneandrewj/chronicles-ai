@@ -27,7 +27,14 @@ import {
   resolveClockMinutes,
 } from '@/domain/services/narrative-clock'
 import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
+import {
+  deriveActiveOpenOrder,
+  formatOpenOrderStatusLine,
+  openOrderToMetadata,
+  type OpenOrder,
+} from '@/domain/services/open-order'
 import { eraFromGenreTags, parseGenreTags } from '@/domain/services/occupancy-sim'
+import { summarizePlanSalience } from '@/domain/services/plan-salience'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
 import { hasRichStorySignal, shouldBootstrapThread } from '@/domain/services/story-signal'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
@@ -150,6 +157,45 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const recentForAgents = allRecent.slice(-4)
   const priorHistory = allRecent.slice(0, -1)
 
+  // S2 — open order: derive from recent user content + current text (TTL + yield
+  // refresh). Durable write onto the player turn via mergeMetadata. Pre-stream
+  // so guidance + STATE + NPC agent all see the same pending order.
+  const presentIds = new Set(
+    postPromotionState.presentCharacters
+      .filter((c) => c.is_player !== 1)
+      .map((c) => c.id),
+  )
+  const knownForOrder = postPromotionState.knownCharacters.map((c) => ({
+    id: c.id,
+    name: c.name,
+    aliases: c.aliases,
+    is_player: c.is_player,
+    status: c.status,
+  }))
+  const recentUserTurns = allRecent
+    .filter((t) => t.role === 'user')
+    .map((t) => ({ id: t.id, content: t.content }))
+  // Ensure current player turn is represented (it was just inserted).
+  if (!recentUserTurns.some((t) => t.id === playerTurnId)) {
+    recentUserTurns.push({ id: playerTurnId, content: playerText })
+  }
+  let activeOpenOrder: OpenOrder | null = deriveActiveOpenOrder(
+    recentUserTurns,
+    knownForOrder,
+    {
+      currentPlayerTurnId: playerTurnId,
+      currentPlayerText: playerText,
+      presentCharacterIds: presentIds,
+    },
+  )
+  if (activeOpenOrder && activeOpenOrder.status !== 'expired') {
+    try {
+      await turns.mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder))
+    } catch (err) {
+      console.error('[open-order metadata]', err)
+    }
+  }
+
   // Classifier + (occupancy ∥ npc-agent) — occupancy has no dependency on plans
   // (Track A4). Classifier stays serial with the agent because the gate uses
   // stance; A6 speculative agent is deferred until write-safety is proven.
@@ -163,11 +209,14 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     inputMode: input_mode,
     presentCharacters: postPromotionState.presentCharacters,
   })
+  // Open-order targets force an agent tick even when no present agents (S2).
+  const forceAgentForOpenOrder =
+    activeOpenOrder?.status === 'pending' && activeOpenOrder.targetCharacterId != null
   const npcAgentDeps = { characters, npcIntents, places, reveries, unitOfWork, worlds }
   const era = eraFromGenreTags(parseGenreTags(world.genre_tags))
 
   const [npcAgentSettled, occupancySettled] = await Promise.all([
-    shouldRunNpcAgent
+    shouldRunNpcAgent || forceAgentForOpenOrder
       ? runNpcAgentTick(
           npcAgentDeps,
           worldId,
@@ -175,6 +224,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           world.premise,
           playerText,
           recentForAgents,
+          activeOpenOrder?.status === 'pending' ? activeOpenOrder : null,
         ).catch((err) => {
           console.error('[npc agent failed pre-narrator]', err)
           return { error: String(err) } as const
@@ -232,10 +282,81 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     console.error('[reverie-flare]', err)
   }
 
-  const stateBlock = formatStateBlock(narratorState, plans, recentNarratorProse, {
-    byCharacter: reveriesByCharacter,
-    flaring: new Set(flaringReverieIds),
-  })
+  // Pre-stream open-order STATUS (S2): system fact before streamText. Re-read
+  // the target after the agent tick so last_known_situation / transit land in
+  // STATE for this beat (living tick is post-stream and too late alone).
+  let openOrderRender: {
+    statusLines: string[]
+    kind?: string
+    targetName?: string
+  } | null = null
+  if (activeOpenOrder && activeOpenOrder.status === 'pending') {
+    const placeNameById = new Map(narratorState.knownPlaces.map((p) => [p.id, p.name]))
+    let target = narratorState.knownCharacters.find(
+      (c) => c.id === activeOpenOrder!.targetCharacterId,
+    )
+    try {
+      const fresh = await characters.findByExactLowerName(
+        worldId,
+        activeOpenOrder.targetName,
+      )
+      if (fresh) target = fresh
+    } catch (err) {
+      console.error('[open-order target re-read]', err)
+    }
+    const presentNow =
+      target != null &&
+      (presentIds.has(target.id) ||
+        (target.current_place_id != null &&
+          narratorState.currentPlace?.id === target.current_place_id))
+    const statusLine = formatOpenOrderStatusLine(
+      activeOpenOrder,
+      target
+        ? {
+            name: target.name,
+            current_place_name: target.current_place_id
+              ? placeNameById.get(target.current_place_id) ?? null
+              : null,
+            last_known_situation: target.last_known_situation,
+            in_transit_to_name: target.in_transit_to_place_id
+              ? placeNameById.get(target.in_transit_to_place_id) ?? null
+              : null,
+            arrival_world_time: target.arrival_world_time,
+            present_with_protagonist: presentNow,
+          }
+        : null,
+    )
+    if (statusLine) {
+      openOrderRender = {
+        statusLines: [statusLine],
+        kind: activeOpenOrder.kind,
+        targetName: activeOpenOrder.targetName,
+      }
+    }
+    if (presentNow && target) {
+      activeOpenOrder = {
+        ...activeOpenOrder,
+        status: 'resolved',
+        resolution: 'arrived',
+      }
+      try {
+        await turns.mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder))
+      } catch (err) {
+        console.error('[open-order resolve metadata]', err)
+      }
+    }
+  }
+
+  const stateBlock = formatStateBlock(
+    narratorState,
+    plans,
+    recentNarratorProse,
+    {
+      byCharacter: reveriesByCharacter,
+      flaring: new Set(flaringReverieIds),
+    },
+    openOrderRender,
+  )
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // OFF-SCREEN life (bounded worlds only). The during-play living tick runs
@@ -278,6 +399,23 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const primaryQuest = narratorState.dossier.threads.find(
     (t) => t.status === 'active' && t.kind === 'quest',
   )
+  const planSalience = summarizePlanSalience(
+    plans.map((p) => ({
+      intent: p.intent,
+      planned_action: p.planned_action,
+      intent_type: p.intent_type,
+      target_npc_name: p.target_npc_name,
+      target_place_name: p.target_place_name,
+    })),
+    activeOpenOrder?.status === 'pending'
+      ? {
+          targetName: activeOpenOrder.targetName,
+          targetCharacterId: activeOpenOrder.targetCharacterId,
+          kind: activeOpenOrder.kind,
+          status: activeOpenOrder.status,
+        }
+      : null,
+  )
   const turnGuidance = formatNarratorTurnGuidance({
     stance,
     inputMode: input_mode,
@@ -285,6 +423,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     recentTurns: priorHistory,
     presentNpcCount,
     plannedActionCount: plans.length,
+    plannedActions: plans.map((p) => ({
+      intent: p.intent,
+      planned_action: p.planned_action,
+      intent_type: p.intent_type,
+      target_npc_name: p.target_npc_name,
+      target_place_name: p.target_place_name,
+    })),
+    planSalience,
+    openOrder: activeOpenOrder,
     worldTime: narratorState.worldTime,
     activeObjectiveTitles,
     openClueTitles: narratorState.dossier.clues
@@ -332,9 +479,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // Premise used to live in the trailing user message (always a full miss on
   // the large state block). Pinning it on system keeps the shared prefix
   // reusable across turns of the same world.
+  // Phase B: omit empty TURN GUIDANCE entirely (no empty header).
+  const guidanceSection = turnGuidance ? `\n\n${turnGuidance}` : ''
   const trailingUser: ModelMessage = {
     role: 'user',
-    content: `${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}\n\n${turnGuidance}\n\nPLAYER ACTION:\n${playerText}`,
+    content: `${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}${guidanceSection}\n\nPLAYER ACTION:\n${playerText}`,
   }
   const modelMessages: ModelMessage[] = [
     { role: 'system', content: `${NARRATOR_BASE}\n\n${premiseBlock}` },

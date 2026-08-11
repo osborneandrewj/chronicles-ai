@@ -11,6 +11,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
+import type { OpenOrder } from '@/domain/services/open-order'
 import { isPlanEligible, isTransientServiceNpc, missingPlannedActions } from '@/domain/services/npc-promotion'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
@@ -307,6 +308,7 @@ export async function runNpcAgentTick(
   premise: string,
   playerInput: string,
   recentTurns: Array<{ role: 'user' | 'assistant'; content: string }>,
+  openOrder: OpenOrder | null = null,
 ): Promise<{
   patch: NpcAgentPatch
   plans: PlannedActionWithIntent[]
@@ -316,15 +318,57 @@ export async function runNpcAgentTick(
 
   const knownPlaces = await places.forWorld(worldId)
   const placesByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
+  const placeNameById = new Map(knownPlaces.map((p) => [p.id, p.name]))
 
   const allChars = await characters.forWorld(worldId)
   const playerChar = allChars.find((c) => c.is_player === 1) ?? null
   const playerPlaceId = playerChar?.current_place_id ?? null
 
-  const agents = await characters.agentNpcsForTick(worldId, tickTurnId, playerPlaceId)
+  const openOrderTargetId =
+    openOrder?.status === 'pending' ? openOrder.targetCharacterId : null
+
+  const agents = [...(await characters.agentNpcsForTick(worldId, tickTurnId, playerPlaceId))]
+
+  // S2: force-include a pending open-order target even when off-scene / plain npc
+  // (agentNpcsForTick would omit them). Map Character → AgentNpcRow shape.
+  if (openOrderTargetId != null && !agents.some((a) => a.id === openOrderTargetId)) {
+    const target = allChars.find((c) => c.id === openOrderTargetId && c.is_player !== 1)
+    if (target && target.status !== 'dead') {
+      agents.push({
+        id: target.id,
+        name: target.name,
+        description: target.description,
+        personal_goals: target.personal_goals,
+        current_focus: target.current_focus,
+        recent_activity: target.recent_activity,
+        private_beliefs: target.private_beliefs,
+        reveries: target.reveries,
+        relationship_to_player: target.relationship_to_player,
+        long_term_agenda: target.long_term_agenda,
+        tool_access: target.tool_access,
+        active_goal: target.active_goal,
+        current_attitude: target.current_attitude,
+        current_place_id: target.current_place_id,
+        current_place_name: target.current_place_id
+          ? placeNameById.get(target.current_place_id) ?? null
+          : null,
+        agency_level: target.agency_level,
+        last_agent_tick_turn_id: target.last_agent_tick_turn_id,
+        in_transit_to_place_id: target.in_transit_to_place_id,
+        in_transit_to_name: target.in_transit_to_place_id
+          ? placeNameById.get(target.in_transit_to_place_id) ?? null
+          : null,
+        arrival_world_time: target.arrival_world_time,
+        last_known_situation: target.last_known_situation,
+        daily_loop: target.daily_loop,
+      })
+    }
+  }
+
   // The widened query admits co-located npc-tier rows for the cold-open fix;
   // drop plan-INELIGIBLE candidates (transient service walk-ons). Agent-tier
   // rows are always eligible — the eligibility decision is the pure domain rule.
+  // Open-order targets are eligible even off-scene (S2).
   const eligible = agents.filter((a) =>
     isPlanEligible({
       agency_level: a.agency_level,
@@ -336,6 +380,8 @@ export async function runNpcAgentTick(
         personal_goals: a.personal_goals,
         current_focus: a.current_focus,
       }),
+      openOrderTargetId,
+      characterId: a.id,
     }),
   )
   if (eligible.length === 0) return null
@@ -363,18 +409,19 @@ export async function runNpcAgentTick(
   // the prior narration — their continuity comes from the deterministic loop
   // line in the STATE block. `tickable` is the subset of plan-eligible NPCs we
   // actually send to the model, update, and stamp last_agent_tick on this turn.
-  const tickable = eligible.filter(
-    (a) =>
-      !shouldSkipRoutineTick(
-        {
-          name: a.name,
-          present_with_protagonist: a.current_place_id !== null && a.current_place_id === playerPlaceId,
-          in_transit_to_place_id: a.in_transit_to_place_id,
-          daily_loop: a.daily_loop,
-        },
-        priorNarration,
-      ),
-  )
+  // Open-order targets are never skipped (S2).
+  const tickable = eligible.filter((a) => {
+    if (openOrderTargetId != null && a.id === openOrderTargetId) return true
+    return !shouldSkipRoutineTick(
+      {
+        name: a.name,
+        present_with_protagonist: a.current_place_id !== null && a.current_place_id === playerPlaceId,
+        in_transit_to_place_id: a.in_transit_to_place_id,
+        daily_loop: a.daily_loop,
+      },
+      priorNarration,
+    )
+  })
   if (tickable.length === 0) return null
 
   // Reveries now live in their own table (append-only). Batch-load them once so
@@ -456,6 +503,9 @@ export async function runNpcAgentTick(
           `WORLD TIME: ${worldTime ?? '(unset)'}`,
           `WORLD SETTING (real-world region): ${settingRegion ?? '(not a real-world setting)'}`,
           `PROTAGONIST IS AT: ${player.current_place_name ?? '(unknown)'}`,
+          openOrder && openOrder.status === 'pending'
+            ? `OPEN ORDER (pending ${openOrder.kind}): ${openOrder.targetName} — at least one plan this turn MUST advance this result (arrive / concrete radio status / refuse / obstacle). "Monitors channel" alone is invalid while this order is outstanding.`
+            : null,
           '',
           'AGENT NPCs:',
           JSON.stringify(npcContext, null, 2),
@@ -468,7 +518,9 @@ export async function runNpcAgentTick(
           `PLAYER IS ABOUT TO (this turn): ${playerInput}`,
           '',
           'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
-        ].join('\n'),
+        ]
+          .filter((line) => line !== null)
+          .join('\n'),
       },
     ],
   })
@@ -481,11 +533,16 @@ export async function runNpcAgentTick(
   // first-pass plans). Merge UPSTREAM of the single insert loop so ids allocate
   // through one code path (SQLite + Mongo parity).
   let mergedUsage = usage
-  const presentNames = tickable
-    .filter((a) => a.current_place_id !== null && a.current_place_id === playerPlaceId)
+  // Present agents must get plans; open-order targets (possibly off-scene) too (S2).
+  const mustPlanNames = tickable
+    .filter(
+      (a) =>
+        (a.current_place_id !== null && a.current_place_id === playerPlaceId) ||
+        (openOrderTargetId != null && a.id === openOrderTargetId),
+    )
     .map((a) => a.name)
   const planned = [...(object.planned_actions ?? [])]
-  const missing = missingPlannedActions(presentNames, planned)
+  const missing = missingPlannedActions(mustPlanNames, planned)
   if (missing.length > 0) {
     try {
       const { object: retry, usage: retryUsage } = await generateObject({

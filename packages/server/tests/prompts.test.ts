@@ -66,6 +66,19 @@ describe('narrator prompt — no option menus (A3)', () => {
 })
 
 describe('prompt content guards', () => {
+  it('narrator prompt is craft + hard and materially shorter than the old checklist', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/# Craft/i)
+    expect(p).toMatch(/# Hard constraints/i)
+    // Target ≤ ~1.5k words (pre-change was ~3k).
+    const words = p.trim().split(/\s+/).length
+    expect(words).toBeLessThanOrEqual(1500)
+    expect(words).toBeGreaterThan(200)
+    // Numeric length bands are not soft law.
+    expect(p).not.toMatch(/Medium \(300–500 words\)/)
+    expect(p).not.toMatch(/Long & rich \(550–850/)
+  })
+
   it('narrator prompt carries the historical-fidelity rule', () => {
     const p = loadPrompt('narrator-system').toLowerCase()
     expect(p).toContain('historical')
@@ -77,6 +90,13 @@ describe('prompt content guards', () => {
     expect(p).toContain('era-appropriate')
   })
 
+  it('npc-agent prompt carries the open-order outcome floor (S1)', () => {
+    const p = loadPrompt('npc-agent-system').toLowerCase()
+    expect(p).toMatch(/outcome floor/)
+    expect(p).toMatch(/open order/)
+    expect(p).toMatch(/monitors channel/)
+  })
+
   it('archivist prompt makes dossier emission a directive, not optional', () => {
     const p = loadPrompt('archivist-system').toLowerCase()
     expect(p).toContain('a memorable_fact is not a substitute for a thread')
@@ -84,7 +104,8 @@ describe('prompt content guards', () => {
 
   it('narrator prompt instructs the world to act when the player is passive', () => {
     const p = loadPrompt('narrator-system').toLowerCase()
-    expect(p).toContain('scenes must never stall')
+    // Craft layer: world momentum (no longer a long "scenes must never stall" essay).
+    expect(p).toMatch(/world momentum|marks time|something concrete can happen/)
   })
 
   it('time-passage prompt is genre-neutral (no starship-only framing)', () => {
@@ -109,18 +130,16 @@ describe('prompt content guards', () => {
 })
 
 describe('prompts — NPC initiation (P2/P4/P5)', () => {
-  it('narrator prompt MUST-stages the PLANNED MOVES block and exempts it from omit-by-default', () => {
+  it('narrator prompt MUST-stages the PLANNED MOVES block (compact hard constraint)', () => {
     const p = loadPrompt('narrator-system')
     expect(p).toContain('### PLANNED MOVES THIS TURN')
-    expect(p).toMatch(/MUST realize every planned move/)
-    expect(p).toMatch(/exempt from "No full-roster posture sweep"/i)
+    expect(p).toMatch(/realize every planned move/i)
   })
 
   it('narrator prompt licenses a present character to press the protagonist (not a menu)', () => {
     const p = loadPrompt('narrator-system')
-    expect(p).toMatch(/take the initiative with the protagonist/i)
-    expect(p).toMatch(/forbids a \*menu\*/i)
-    expect(p).toMatch(/does not forbid a character pressing the protagonist/i)
+    expect(p).toMatch(/present character may initiate|NPCs act from own goals/i)
+    expect(p).toMatch(/never present a menu of choices/i)
   })
 
   it('npc-agent prompt sets a single-NPC engagement floor toward the protagonist', () => {

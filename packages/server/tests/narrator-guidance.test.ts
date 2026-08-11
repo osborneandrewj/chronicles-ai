@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
+import type { OpenOrder } from '@/domain/services/open-order'
 
 function ctx(overrides: Partial<Parameters<typeof formatNarratorTurnGuidance>[0]> = {}) {
   return {
@@ -14,16 +15,40 @@ function ctx(overrides: Partial<Parameters<typeof formatNarratorTurnGuidance>[0]
   }
 }
 
-describe('narrator momentum ladder', () => {
+// Varied assistant prose so restatement detector does not fire on idle fixtures.
+const twoIdle = [
+  { role: 'user' as const, content: 'I look around' },
+  {
+    role: 'assistant' as const,
+    content: 'Fluorescent hum fills the wing. An officer taps a headset once, then returns to the map.',
+  },
+  { role: 'user' as const, content: 'I wait' },
+  {
+    role: 'assistant' as const,
+    content: 'Cold air spills from a vent. Somewhere down the hall a door latch clicks and stays shut.',
+  },
+]
+
+const busyworkPlans = [
+  { planned_action: 'keeps radio open, fingers on the console', intent_type: 'react' },
+  { planned_action: 'types at the headset terminal', intent_type: 'react' },
+  { planned_action: 'monitors the channel and watches the feed', intent_type: 'react' },
+]
+
+const pendingOrder: OpenOrder = {
+  targetCharacterId: 10,
+  targetName: 'Andy Osborne',
+  kind: 'retrieve',
+  createdTurnId: 1,
+  expiresAfterPlayerTurns: 4,
+  status: 'pending',
+}
+
+describe('narrator momentum ladder (S1 salient-plan gate)', () => {
   it('fires the L2 "world acts" cue after the idle threshold of passive moves', () => {
-    const recentTurns = [
-      { role: 'user' as const, content: 'I look around' },
-      { role: 'assistant' as const, content: 'The camp stirs.' },
-      { role: 'user' as const, content: 'we continue' },
-      { role: 'assistant' as const, content: 'You march on.' },
-    ]
-    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns }))
-    expect(out.toLowerCase()).toContain('world acts')
+    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns: twoIdle }))
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toContain('world acts')
   })
 
   it('does not fire L2 when the player is actively driving', () => {
@@ -34,101 +59,186 @@ describe('narrator momentum ladder', () => {
     const out = formatNarratorTurnGuidance(
       ctx({ stance: 'do', playerText: 'I charge the line', recentTurns }),
     )
-    expect(out.toLowerCase()).not.toContain('world acts')
+    // Sparse: driving move with no risk → empty
+    expect(out).toBeNull()
   })
 
   it('names an active threat thread as the pressure source when one exists', () => {
-    const recentTurns = [
-      { role: 'user' as const, content: 'I look around' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-      { role: 'user' as const, content: 'I wait' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-    ]
     const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns, activeThreatTitles: ['Ambush at the bend'] }),
+      ctx({ playerText: 'I wait', recentTurns: twoIdle, activeThreatTitles: ['Ambush at the bend'] }),
     )
     expect(out).toContain('Ambush at the bend')
   })
 
   it('prefers primary objective pressure when idle and no threat is listed', () => {
-    const recentTurns = [
-      { role: 'user' as const, content: 'I look around' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-      { role: 'user' as const, content: 'I wait' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-    ]
     const out = formatNarratorTurnGuidance(
       ctx({
         playerText: 'I wait',
-        recentTurns,
+        recentTurns: twoIdle,
         primaryPressureTitle: 'Secure the warehouse manifests',
       }),
     )
-    expect(out.toLowerCase()).toContain('world acts')
+    expect(out!.toLowerCase()).toContain('world acts')
     expect(out).toContain('Secure the warehouse manifests')
   })
 
-  it('stands down the L2 cue when planned NPC moves already exist (they are the intrusion)', () => {
-    const recentTurns = [
-      { role: 'user' as const, content: 'I look around' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-      { role: 'user' as const, content: 'I wait' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-    ]
+  it('does NOT stand down L2 for busywork-only plans (S1 regression — Threshold smoking gun)', () => {
     const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns, plannedActionCount: 2 }),
+      ctx({
+        playerText: 'I wait',
+        recentTurns: twoIdle,
+        plannedActionCount: 3,
+        plannedActions: busyworkPlans,
+      }),
     )
-    expect(out.toLowerCase()).not.toContain('world acts')
+    expect(out!.toLowerCase()).toContain('world acts')
+  })
+
+  it('stands down L2 when a salient plan advances the outcome', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns: twoIdle,
+        plannedActionCount: 1,
+        plannedActions: [
+          {
+            intent_type: 'escort',
+            planned_action: 'Andy enters with an escort',
+            target_npc_name: 'Andy Osborne',
+          },
+        ],
+        openOrder: pendingOrder,
+      }),
+    )
+    expect(out!.toLowerCase()).not.toContain('world acts')
+  })
+
+  it('raw plannedActionCount > 0 with only busywork still allows L2 (no structured plans)', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: twoIdle, plannedActionCount: 2 }),
+    )
+    expect(out!.toLowerCase()).toContain('world acts')
   })
 })
 
-describe('formatNarratorTurnGuidance', () => {
-  it('pushes spoken answers instead of summarized replies on say turns', () => {
+describe('open-order resolve cue (S2)', () => {
+  it('emits resolve-open-order on idle/continue with pending open order even with busywork plans', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'Continue',
+        recentTurns: twoIdle,
+        plannedActionCount: 3,
+        plannedActions: busyworkPlans,
+        openOrder: pendingOrder,
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toContain('open order')
+    expect(out).toContain('Andy Osborne')
+    expect(out!.toLowerCase()).toMatch(/dramatize|arrival|report|obstacle/)
+  })
+
+  it('emits mandatory outcome language on time-jump with pending open order', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: '10 minutes later',
+        recentTurns: twoIdle,
+        openOrder: pendingOrder,
+      }),
+    )
+    expect(out).toContain('OPEN ORDER')
+    expect(out!.toLowerCase()).toMatch(/time has jumped|mandatory|outcome/)
+  })
+
+  it('never sparse-aways open-order cue when pending + yield', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns: [],
+        openOrder: pendingOrder,
+        plannedActionCount: 0,
+      }),
+    )
+    expect(out).toContain('OPEN ORDER')
+  })
+})
+
+describe('sparse guidance matrix (Phase B)', () => {
+  it('returns empty for a normal driving in-character move with no risk', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I pick up the mug and drink',
+        recentTurns: [
+          { role: 'assistant', content: 'The room is quiet. Marcus watches from the door.' },
+        ],
+        presentNpcCount: 1,
+        plannedActionCount: 0,
+      }),
+    )
+    expect(out).toBeNull()
+  })
+
+  it('meta → non-empty, no world-acts', () => {
     const guidance = formatNarratorTurnGuidance({
-      stance: 'say',
-      inputMode: 'in-character',
-      playerText: 'I ask in Russian, "Is this Beluga vodka?"',
+      stance: 'meta',
+      inputMode: 'ooc',
+      playerText: '(ooc) pause',
       recentTurns: [],
       presentNpcCount: 1,
       plannedActionCount: 0,
     })
-
-    expect(guidance).toContain('Let audible dialogue be audible')
-    expect(guidance).toContain('answer')
-    expect(guidance).toContain('branch the player can pursue')
+    expect(guidance).toContain('keep the fiction in place')
+    expect(guidance!.toLowerCase()).not.toContain('world acts')
   })
 
-  it('nudges marked foreign-language dialogue toward romanized texture', () => {
+  it('time-check → clock line', () => {
     const guidance = formatNarratorTurnGuidance({
-      stance: 'say',
+      stance: 'observe',
       inputMode: 'in-character',
-      playerText:
-        'I look at Alexei and speak in Russian, "Alexei, my friend. Your father fought honorably in Chechnya."',
+      playerText: 'I look at the time on my watch.',
       recentTurns: [],
-      presentNpcCount: 2,
+      presentNpcCount: 0,
       plannedActionCount: 0,
+      worldTime: 'Tuesday, 8:17 AM',
     })
-
-    expect(guidance).toContain('marked their speech as Russian')
-    expect(guidance).toContain('light romanized touch')
-    expect(guidance).toContain('meaning stays clear in English')
+    expect(guidance).toContain('time-bearing device')
+    expect(guidance).toContain('Tuesday, 8:17 AM')
   })
 
-  it('detects observe-only moves and asks for new scene information', () => {
+  it('observe after thin recent establishing → survey cue', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'observe',
       inputMode: 'in-character',
       playerText: 'I look at them',
-      recentTurns: [],
+      recentTurns: [{ role: 'assistant', content: 'Short.' }],
       presentNpcCount: 2,
       plannedActionCount: 0,
     })
-
-    expect(guidance.toLowerCase()).toContain('render the surroundings')
-    expect(guidance).toContain('detail, offer, threat')
+    expect(guidance).not.toBeNull()
+    expect(guidance!.toLowerCase()).toMatch(/taking in the scene|multi-sensory/)
   })
 
-  it('pushes investigative tool commands toward results instead of processing beats', () => {
+  it('observe after a long recent establishing turn → no mandatory long-survey cue', () => {
+    const long =
+      'The chamber stretches under vaulted stone, incense thick in the air, torchlight crawling across mosaics of a forgotten king. ' +
+      'A scribe scratches at a wax tablet near the far pillar while two guards shift their weight, iron scent mingling with oil. ' +
+      'Somewhere deeper a door groans. Dust motes hang in a slant of light from the clerestory. The floor is cool underfoot. ' +
+      'You take in the whole of it — the weight of the place, the watching eyes, the unfinished business of whoever left the cup half-drunk.'
+    const guidance = formatNarratorTurnGuidance({
+      stance: 'observe',
+      inputMode: 'in-character',
+      playerText: 'I look around',
+      recentTurns: [{ role: 'assistant', content: long }],
+      presentNpcCount: 1,
+      plannedActionCount: 0,
+    })
+    // Sparse: no mandatory observation essay when scene was already painted.
+    expect(guidance == null || !guidance.toLowerCase().includes('multi-sensory')).toBe(true)
+  })
+
+  it('investigative + dossier pressure keeps internal-pressure line', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'say',
       inputMode: 'in-character',
@@ -139,32 +249,146 @@ describe('formatNarratorTurnGuidance', () => {
       activeObjectiveTitles: ['Identify the relay fragment'],
       openClueTitles: ['Stygies VIII batch mark'],
     })
-
     expect(guidance).toContain('trying to learn something')
-    expect(guidance).toContain('concrete result')
-    expect(guidance).toContain('new lead')
     expect(guidance).toContain('Identify the relay fragment')
-    expect(guidance).toContain('Stygies VIII batch mark')
-    expect(guidance).toContain('branch the player can pursue')
+    expect(guidance).toMatch(/internal pressure only/i)
   })
 
-  it('forces time-bearing devices to match the world clock', () => {
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'observe',
-      inputMode: 'in-character',
-      playerText: 'I look at the time on my watch.',
-      recentTurns: [],
-      presentNpcCount: 0,
-      plannedActionCount: 0,
-      worldTime: 'Tuesday, 8:17 AM',
-    })
+  it('spectacle / charged recognition still fire when heuristics match', () => {
+    const spectacle = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I do the same to the other squad cars and watch them crumple and burn.',
+        recentTurns: [],
+      }),
+    )
+    expect(spectacle).toContain('This is spectacle')
 
-    expect(guidance).toContain('time-bearing device')
-    expect(guidance).toContain('Tuesday, 8:17 AM')
-    expect(guidance).toContain('authoritative world clock exactly')
+    const recognition = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'think',
+        playerText:
+          "I listen for the sounds of approaching officers and take stock of my situation. I don't feel alarmed or stressed which is strange. I feel great actually. I look around for the gun, but then stop realizing that I don't need it. I am a weapon.",
+        recentTurns: [],
+      }),
+    )
+    expect(recognition).toContain('charged recognition beat')
+  })
+})
+
+describe('restatement loop (verbatim repetition)', () => {
+  const turn1387 =
+    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you with the silver brooch extended in her open palm, her woolen cloak the color of dried blood still against the morning air. Marcus shield remains angled at your left shoulder. The centurion vine staff stays raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
+  const turn1389 =
+    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you, her empty palm still extended, the silver brooch now resting in your fingers. Marcus shield stays angled at your left shoulder. The centurion vine staff remains raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
+
+  it('flags a near-verbatim restatement of the previous turn', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I slip the brooch into my pouch',
+        recentTurns: [
+          { role: 'assistant', content: turn1387 },
+          { role: 'user', content: 'I take the brooch' },
+          { role: 'assistant', content: turn1389 },
+        ],
+      }),
+    )
+    expect(out).toContain('restating itself')
+    expect(out).toContain('Do NOT re-establish the standing setting')
   })
 
-  it('treats public feeds and screens as wider-world surfaces', () => {
+  it('does not flag restatement on a genuinely varied pair', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I push open the door',
+        recentTurns: [
+          {
+            role: 'assistant',
+            content:
+              'You drive your fist into the door. Metal buckles. The man grins through blood.',
+          },
+          { role: 'user', content: 'I step over him' },
+          {
+            role: 'assistant',
+            content:
+              'Rain hammers the tin roof as Aldric slides the ledger across the table, ink still wet, his jaw tight with something he will not say.',
+          },
+        ],
+      }),
+    )
+    // No restatement and no other risk → sparse empty
+    expect(out == null || !out.includes('restating itself')).toBe(true)
+  })
+})
+
+describe('tier-1 engagement cue (P5 + S1)', () => {
+  const oneIdle = [
+    { role: 'user' as const, content: 'I charge the line' },
+    { role: 'assistant' as const, content: 'It strikes home.' },
+  ]
+
+  it('fires on a single idle move with a present NPC and no salient plan', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 1, plannedActionCount: 0 }),
+    )
+    expect(out!.toLowerCase()).toContain('take the initiative')
+  })
+
+  it('does not fire when a salient NPC action is already planned', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns: oneIdle,
+        plannedActionCount: 1,
+        plannedActions: [
+          {
+            intent_type: 'confront',
+            planned_action: 'steps forward and demands an answer from the protagonist',
+          },
+        ],
+      }),
+    )
+    expect(out == null || !out.toLowerCase().includes('take the initiative')).toBe(true)
+  })
+
+  it('still fires engagement when only busywork plans exist', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns: oneIdle,
+        presentNpcCount: 1,
+        plannedActionCount: 1,
+        plannedActions: [{ planned_action: 'types at the console quietly', intent_type: 'react' }],
+      }),
+    )
+    expect(out!.toLowerCase()).toContain('take the initiative')
+  })
+
+  it('does not fire when no NPC is present', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 0 }),
+    )
+    expect(out == null || !out.toLowerCase().includes('take the initiative')).toBe(true)
+  })
+
+  it('does not fire on the opening beat (no prior turns)', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'I wait', recentTurns: [], presentNpcCount: 1, plannedActionCount: 0 }),
+    )
+    expect(out == null || !out.toLowerCase().includes('take the initiative')).toBe(true)
+  })
+
+  it('escalates to the L2 world-acts cue (not the engagement cue) at the idle threshold', () => {
+    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns: twoIdle }))
+    expect(out!.toLowerCase()).toContain('world acts')
+    expect(out!.toLowerCase()).not.toContain('take the initiative')
+  })
+})
+
+describe('genre / media / dialogue cues (risk-gated)', () => {
+  it('treats public feeds as wider-world surfaces', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'observe',
       inputMode: 'in-character',
@@ -173,73 +397,7 @@ describe('formatNarratorTurnGuidance', () => {
       presentNpcCount: 0,
       plannedActionCount: 0,
     })
-
     expect(guidance).toContain('public information surface')
-    expect(guidance).toContain('specific diegetic content')
-    expect(guidance).toContain('could recur')
-  })
-
-  it('flags recent reaction-only narration loops', () => {
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'say',
-      inputMode: 'in-character',
-      playerText: 'I ask for a bottle of vodka.',
-      recentTurns: [
-        {
-          role: 'assistant',
-          content:
-            'The bartender pauses mid-pour, while the two men at the nearest table turn their heads. One of them sets his fork down slowly.',
-        },
-        {
-          role: 'user',
-          content: 'I look at them',
-        },
-        {
-          role: 'assistant',
-          content:
-            'The bartender holds the glass at an angle, his eyes narrowed on you, while the nearer of the two men leans back and the other keeps his fork on the plate.',
-        },
-      ],
-      presentNpcCount: 3,
-      plannedActionCount: 0,
-    })
-
-    expect(guidance).toContain('repeating its architecture')
-    expect(guidance).toContain('Change the shape')
-  })
-
-  it('cues movement beats to breathe without false-flagging varied prose as restatement', () => {
-    // Same two-paragraph "You [move] / Vox [scans]" shape but lexically distinct
-    // prose. The narrow shape detector that used to flag this only ever fired for
-    // tool-vocab worlds; it was removed. The beat cue still fires, and the
-    // similarity-based restatement check correctly stays silent (low overlap).
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'do',
-      inputMode: 'in-character',
-      playerText: 'I make my way into the city',
-      recentTurns: [
-        {
-          role: 'assistant',
-          content:
-            'You turn toward Vox and issue the order to trace the blast origin.\n\nVox extends its auspex-range across the pad, mapping residue before settling its beam on the crater.',
-        },
-        {
-          role: 'user',
-          content: 'I go to the crater',
-        },
-        {
-          role: 'assistant',
-          content:
-            "You cross the slick concrete to the crater at the blast wall's base.\n\nVox pivots its auspex-beam to track your movement, then swivels back to pulse-query the lander.",
-        },
-      ],
-      presentNpcCount: 0,
-      plannedActionCount: 0,
-    })
-
-    expect(guidance).toContain('Let the beat breathe')
-    expect(guidance).toContain('arrival')
-    expect(guidance).not.toContain('restating itself')
   })
 
   it('flags repeated ambient closers', () => {
@@ -266,212 +424,19 @@ describe('formatNarratorTurnGuidance', () => {
       presentNpcCount: 0,
       plannedActionCount: 0,
     })
-
     expect(guidance).toContain('ambient closer')
     expect(guidance).toContain('wheat')
-    expect(guidance).toContain('only if it changes')
   })
 
-  it('expands charged interior recognition beats instead of summarizing them', () => {
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'think',
-      inputMode: 'in-character',
-      playerText:
-        "I listen for the sounds of approaching officers and take stock of my situation. I don't feel alarmed or stressed which is strange. I feel great actually. I look around for the gun, but then stop realizing that I don't need it. I am a weapon.",
-      recentTurns: [],
-      presentNpcCount: 2,
-      plannedActionCount: 0,
-    })
-
-    expect(guidance).toContain('charged recognition beat')
-    expect(guidance).toContain('novelistic weight')
-    expect(guidance).toContain('object losing meaning')
-  })
-
-  it('expands cinematic spectacle and repeated power actions', () => {
+  it('cues movement beats to breathe', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'do',
       inputMode: 'in-character',
-      playerText: 'I do the same to the other squad cars and watch them crumple and burn.',
+      playerText: 'I make my way into the city',
       recentTurns: [],
-      presentNpcCount: 3,
+      presentNpcCount: 0,
       plannedActionCount: 0,
     })
-
-    expect(guidance).toContain('This is spectacle')
-    expect(guidance).toContain('unfold as a sequence')
-    expect(guidance).toContain('vary or escalate')
-  })
-
-  it('expands charged confrontations beyond line-reaction-closer shape', () => {
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'say',
-      inputMode: 'in-character',
-      playerText:
-        '"Kyle!" I smile and approach him. "Something tells me you are not being honest with me."',
-      recentTurns: [],
-      presentNpcCount: 2,
-      plannedActionCount: 0,
-    })
-
-    expect(guidance).toContain('charged confrontation')
-    expect(guidance).toContain('spacing, witnesses, silence')
-    expect(guidance).toContain('carry the pressure')
-  })
-
-  it('keeps meta guidance from advancing fiction', () => {
-    const guidance = formatNarratorTurnGuidance({
-      stance: 'meta',
-      inputMode: 'ooc',
-      playerText: '(ooc) pause',
-      recentTurns: [],
-      presentNpcCount: 1,
-      plannedActionCount: 0,
-    })
-
-    expect(guidance).toContain('keep the fiction in place')
-    expect(guidance).not.toContain('branch the player can pursue')
-  })
-
-  describe('dossier pressure is internal-only (A3)', () => {
-    it('labels dossier pressure as never-recite, never-list', () => {
-      const out = formatNarratorTurnGuidance({
-        stance: 'observe',
-        inputMode: 'in-character',
-        playerText: '"Vox, scan for the archives"',
-        recentTurns: [],
-        presentNpcCount: 0,
-        plannedActionCount: 0,
-        worldTime: 'Night',
-        activeObjectiveTitles: ['Reach the bridge'],
-        openClueTitles: ['Coordinates on the onionskin'],
-        activeThreatTitles: [],
-      })
-      expect(out).toMatch(/internal pressure only|do not name|never name these/i)
-      expect(out).not.toMatch(/Dossier pressure if it fits/)
-    })
-  })
-})
-
-describe('restatement loop (verbatim repetition)', () => {
-  // Drawn from prod world 12 turns 1387/1389: identical opening sentence and
-  // near-identical scaffolding, only the central action beat changes. None of
-  // the older keyword/shape detectors caught this; the similarity check must.
-  const turn1387 =
-    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you with the silver brooch extended in her open palm, her woolen cloak the color of dried blood still against the morning air. Marcus shield remains angled at your left shoulder. The centurion vine staff stays raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
-  const turn1389 =
-    'The bend curves ahead, the road narrowing where the drop falls away on the right and the pines press close from both sides. Brigha stands before you, her empty palm still extended, the silver brooch now resting in your fingers. Marcus shield stays angled at your left shoulder. The centurion vine staff remains raised, the century locked on the high ground while the curve ahead lies still. The river roar continues from downstream, the ferns along the bend motionless, the road itself waiting.'
-
-  it('flags a near-verbatim restatement of the previous turn', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({
-        stance: 'do',
-        playerText: 'I slip the brooch into my pouch',
-        recentTurns: [
-          { role: 'assistant', content: turn1387 },
-          { role: 'user', content: 'I take the brooch' },
-          { role: 'assistant', content: turn1389 },
-        ],
-      }),
-    )
-    expect(out).toContain('restating itself')
-    expect(out).toContain('Do NOT re-establish the standing setting')
-    expect(out).toContain('Two hours later')
-  })
-
-  it('does not flag restatement on a genuinely varied pair', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({
-        stance: 'do',
-        playerText: 'I push open the door',
-        recentTurns: [
-          {
-            role: 'assistant',
-            content:
-              'You drive your fist into the door. Metal buckles. The man grins through blood.',
-          },
-          { role: 'user', content: 'I step over him' },
-          {
-            role: 'assistant',
-            content:
-              'Rain hammers the tin roof as Aldric slides the ledger across the table, ink still wet, his jaw tight with something he will not say.',
-          },
-        ],
-      }),
-    )
-    expect(out).not.toContain('restating itself')
-  })
-})
-
-describe('observation depth', () => {
-  it('asks an orienting move to render the surroundings in depth, not just a handle', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ stance: 'observe', playerText: 'I look around', recentTurns: [] }),
-    )
-    expect(out.toLowerCase()).toContain('render the surroundings')
-    expect(out.toLowerCase()).toContain('multi-sensory')
-  })
-
-  it('does not apply the observation cue to a driving move', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ stance: 'do', playerText: 'I charge the line', recentTurns: [] }),
-    )
-    expect(out.toLowerCase()).not.toContain('render the surroundings')
-  })
-})
-
-describe('tier-1 engagement cue (P5)', () => {
-  // A single trailing idle move: current move is low-agency, the prior player
-  // move was a driving move, so countTrailingIdleMoves stops at 1.
-  const oneIdle = [
-    { role: 'user' as const, content: 'I charge the line' },
-    { role: 'assistant' as const, content: 'It strikes home.' },
-  ]
-
-  it('fires on a single idle move with a present NPC and no planned action', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 1, plannedActionCount: 0 }),
-    )
-    expect(out.toLowerCase()).toContain('take the initiative')
-  })
-
-  it('does not fire when an NPC action is already planned', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns: oneIdle, plannedActionCount: 1 }),
-    )
-    expect(out.toLowerCase()).not.toContain('take the initiative')
-  })
-
-  it('does not fire when no NPC is present', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 0 }),
-    )
-    expect(out.toLowerCase()).not.toContain('take the initiative')
-  })
-
-  it('does not fire on the opening beat (no prior turns)', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns: [], presentNpcCount: 1, plannedActionCount: 0 }),
-    )
-    expect(out.toLowerCase()).not.toContain('take the initiative')
-  })
-
-  it('escalates to the L2 world-acts cue (not the engagement cue) at the idle threshold', () => {
-    const twoIdle = [
-      { role: 'user' as const, content: 'I look around' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-      { role: 'user' as const, content: 'I wait' },
-      { role: 'assistant' as const, content: 'Quiet.' },
-    ]
-    const out = formatNarratorTurnGuidance(ctx({ playerText: 'I wait', recentTurns: twoIdle }))
-    expect(out.toLowerCase()).toContain('world acts')
-    expect(out.toLowerCase()).not.toContain('take the initiative')
-  })
-
-  it('does not fire when the player is actively driving', () => {
-    const out = formatNarratorTurnGuidance(
-      ctx({ stance: 'do', playerText: 'I charge the line', recentTurns: oneIdle }),
-    )
-    expect(out.toLowerCase()).not.toContain('take the initiative')
+    expect(guidance).toContain('Let the beat breathe')
   })
 })
