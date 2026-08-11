@@ -121,6 +121,87 @@ describe('narrator momentum ladder (S1 salient-plan gate)', () => {
   })
 })
 
+describe('clear-handle stall cue (pressure theater)', () => {
+  const sanctumStall = [
+    {
+      role: 'assistant' as const,
+      content:
+        'The priest trembles. "Speak now as one, or cease to be one." The crocodile mark remains fixed at your jaw. The opened papyrus waits in the torchlight. The chamber waits.',
+    },
+    { role: 'user' as const, content: 'I wait' },
+    {
+      role: 'assistant' as const,
+      content:
+        'Nefertiti holds the seal. "Render judgment—does the creature emerge, or does the law shatter?" The limestone listens. The chamber waits for what the voice will say next.',
+    },
+  ]
+
+  it('fires when recent turns end on speak/judgment/wait without a path handle', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I raise my hand and ask what we must do',
+        recentTurns: sanctumStall,
+        presentNpcCount: 4,
+        plannedActionCount: 3,
+        plannedActions: [
+          { intent_type: 'confront', planned_action: 'demands the name again' },
+          { intent_type: 'confront', planned_action: 'presses for judgment' },
+        ],
+        primaryPressureTitle: 'The Sealed Papyrus',
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toMatch(/clear next act|legible demand/)
+    expect(out).toContain('The Sealed Papyrus')
+    expect(out!.toLowerCase()).toMatch(/speak \/ answer|not only/)
+  })
+
+  it('does not fire on varied motion-rich recent turns', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I follow them west',
+        recentTurns: [
+          {
+            role: 'assistant',
+            content:
+              'Nefertiti seizes your wrist and hauls you toward the western path. "Run—the guards are almost on us. Follow me into the tombs or die here."',
+          },
+          { role: 'user', content: 'I hesitate' },
+          {
+            role: 'assistant',
+            content:
+              'Merit pulls the Lady through the gate and glances back. "Move into the shadow past those stones—now."',
+          },
+        ],
+        presentNpcCount: 3,
+        plannedActionCount: 0,
+      }),
+    )
+    expect(out == null || !out.toLowerCase().includes('clear next act')).toBe(true)
+  })
+
+  it('fires on crowded idle even without full stall text', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I wait',
+        recentTurns: [
+          { role: 'user', content: 'I charge the line' },
+          {
+            role: 'assistant',
+            content: 'The line breaks. Dust settles over the road.',
+          },
+        ],
+        presentNpcCount: 3,
+        plannedActionCount: 0,
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toMatch(/legible demand|clear next act|take the initiative/)
+  })
+})
+
 describe('open-order resolve cue (S2)', () => {
   it('emits resolve-open-order on idle/continue with pending open order even with busywork plans', () => {
     const out = formatNarratorTurnGuidance(
