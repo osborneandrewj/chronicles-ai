@@ -16,6 +16,16 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.6.0',
+    date: '2026-08-11',
+    highlights: [
+      'When you wait, continue, or skip ahead in time, the world is more likely to move on its own — characters press you, clocks bite, and scenes advance instead of restating the same stillness.',
+      'Busy background activity (typing, watching a screen) no longer pretends to be the whole turn’s drama; real plot pressure can still break through.',
+      'If you order someone brought, found, or waited on, the story tracks that open demand and works toward a concrete result — arrival, a report, a refusal, or a real obstacle.',
+      'Narration has more room to write like a novel: freer length and texture, with fewer always-on “how to write this beat” checklists, while place, gear, and your agency stay fixed by the world ledger.',
+    ],
+  },
+  {
     version: '0.5.1',
     date: '2026-08-10',
     highlights: [
