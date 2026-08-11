@@ -425,6 +425,7 @@ Key rules:
 - The narrator may use private NPC cognition to shape visible behavior, but must not expose database fields as narration.
 - Off-scene NPCs are grounded by `current_place_id`, `in_transit_to_place_id`, `arrival_world_time`, and `last_known_situation`; the narrator should not teleport them or invent unsupported addresses.
 - The archivist records the actual outcome after the narrator finishes. If the narrator stages an NPC plan differently than expected, the post-turn patch follows the prose because the prose is the append-only canonical book.
+- **Audience-scoped knowledge (private channels):** when the player whispers, speaks aside, texts, DMs, or privately calls a named character, the system detects a `PrivateUtterance`, stamps it on the player turn (`private_utterance` metadata), pins the audience in STATE (`### PRIVATE THIS TURN`), splits NPC-agent player-action context by audience membership, and filters archivist `observations_append` so non-audience rows never gain durable knowledge of the private content. Public room speech stays public; the player-facing transcript may still describe the whisper.
 
 This makes the relationship asymmetric: NPCs constrain and inform the narrator before a turn, while narrator prose determines what becomes canonical after the turn.
 

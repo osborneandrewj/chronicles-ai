@@ -11,6 +11,10 @@ import type { ArchivistPatch } from '@/lib/archivist'
 import type { NarratorWorldState } from '@/lib/world-state'
 import { playerPossesses } from '@/domain/services/inventory-resolution'
 import { extractItemMovements, extractObjectAcquisition } from '@/domain/services/object-acquisition'
+import {
+  filterArchivistKnowledgeForAudience,
+  type PrivateUtterance,
+} from '@/domain/services/private-utterance'
 import { shouldEscalateViolence } from '@/domain/services/violence-escalation'
 
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
@@ -135,6 +139,7 @@ export function sanitizeArchivistPatch(
   prior: NarratorWorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
   patch: ArchivistPatch,
+  privateUtterance: PrivateUtterance | null = null,
 ): ArchivistPatch {
   const latestNarrator = [...recent].reverse().find((t) => t.role === 'assistant')?.content ?? ''
   const latestPlayer = [...recent].reverse().find((t) => t.role === 'user')?.content ?? ''
@@ -181,7 +186,16 @@ export function sanitizeArchivistPatch(
     }
   }
 
-  return sanitized
+  // Private-channel knowledge partition: non-audience NPCs never persist
+  // observations about private speech (structure first; prompt is soft only).
+  const knownForAudience = prior.knownCharacters.map((c) => ({
+    id: c.id,
+    name: c.name,
+    aliases: c.aliases,
+    is_player: c.is_player,
+    status: c.status,
+  }))
+  return filterArchivistKnowledgeForAudience(sanitized, privateUtterance, knownForAudience)
 }
 
 function extractDestination(text: string): string | null {

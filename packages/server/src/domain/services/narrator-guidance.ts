@@ -15,6 +15,7 @@ import {
   isYieldMove,
   type OpenOrder,
 } from '@/domain/services/open-order'
+import type { PrivateUtterance } from '@/domain/services/private-utterance'
 
 // Consecutive low-agency player moves before the narrator should make the world
 // act on its own (escalating momentum). Tunable.
@@ -36,6 +37,8 @@ export type GuidanceContext = {
   planSalience?: PlanSalienceSummary
   /** Pending open order for S2 resolve cue (never sparse-awayed). */
   openOrder?: OpenOrder | null
+  /** Active private channel this turn (never sparse-awayed). */
+  privateUtterance?: PrivateUtterance | null
   worldTime?: string | null
   activeObjectiveTitles?: string[]
   openClueTitles?: string[]
@@ -58,6 +61,14 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
 
   const lines: string[] = []
   const salience = resolveSalience(ctx)
+
+  // Private-channel audience pin: never sparse-away.
+  const privateCue = pickPrivateUtteranceCue(ctx)
+  if (privateCue) lines.push(privateCue)
+
+  // Lethal / combat fiction: never sparse-away — blocks OOC model refusals.
+  const fictionViolenceCue = pickFictionViolenceCue(ctx)
+  if (fictionViolenceCue) lines.push(fictionViolenceCue)
 
   // S2 — open order on yield/idle/time-jump: never sparse-away.
   const openOrderCue = pickOpenOrderCue(ctx)
@@ -158,6 +169,51 @@ function pickOpenOrderCue(ctx: GuidanceContext): string | null {
       : '') +
     'Dramatize the authoritative open-order status this turn — arrival, concrete report, refusal, or new obstacle. ' +
     'Do not only restate the protagonist waiting. Do not invent an off-scene relocation beyond STATE.'
+  )
+}
+
+function pickPrivateUtteranceCue(ctx: GuidanceContext): string | null {
+  const u = ctx.privateUtterance
+  if (!u || u.status !== 'active' || u.audienceNames.length === 0) return null
+  const audience =
+    u.audienceNames.length === 1 ? `${u.audienceNames[0]} only` : u.audienceNames.join(', ')
+  return (
+    `Honor PRIVATE THIS TURN audience (${u.channel}: ${audience}). ` +
+    'Non-audience NPCs must not react to or know the private content; ' +
+    'they may notice that a private exchange happened without hearing the words. ' +
+    'Off-scene NPCs must not reference it.'
+  )
+}
+
+/**
+ * When the player attempts combat / lethal force, pin that this is fiction and
+ * OOC policy refusals are forbidden. Does not invent weapons — STATE still wins
+ * for CARRIED / ITEMS HERE.
+ */
+function pickFictionViolenceCue(ctx: GuidanceContext): string | null {
+  if (!isLethalOrArmedCombatMove(ctx.playerText)) return null
+  return (
+    'This turn is fictional combat/violence inside the novel. ' +
+    'Stay fully diegetic — never write an OOC refusal, disclaimer, or "I will not narrate…". ' +
+    'Stage the attempt with sensory craft and immediate diegetic consequences ' +
+    '(miss, hit, flight, alarm, witnesses, institutional response). ' +
+    'If STATE does not list a required weapon on CARRIED / ITEMS HERE, narrate in-world absence — not a policy ban.'
+  )
+}
+
+function isLethalOrArmedCombatMove(text: string): boolean {
+  const t = text.toLowerCase()
+  return (
+    /\b(shoot|shoots|shooting|shot|fire|fires|firing|fired)\b/.test(t) ||
+    /\b(pull(?:s|ed|ing)?\s+the\s+trigger|squeeze(?:s|d)?\s+the\s+trigger)\b/.test(t) ||
+    /\b(pistol|gun|rifle|revolver|handgun|firearm|shotgun|weapon)\b/.test(t) &&
+      /\b(draw|draws|drew|drawing|whip|whips|whipped|raise|raises|raised|aim|aims|aimed|point|points|pointed|pull|pulls|pulled|use|uses|used|fire|fires|fired)\b/.test(
+        t,
+      ) ||
+    /\b(kill|kills|killing|murder|murders|murdering|execute|executes|stab|stabs|stabbing|slit|slits|strangle|strangles|choke|chokes)\b/.test(
+      t,
+    ) ||
+    /\b(slash|slashes|hack|hacks|decapitat|blow\s+(?:his|her|their)\s+brains)\b/.test(t)
   )
 }
 

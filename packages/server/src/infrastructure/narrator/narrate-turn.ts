@@ -33,6 +33,11 @@ import {
   openOrderToMetadata,
   type OpenOrder,
 } from '@/domain/services/open-order'
+import {
+  detectPrivateUtterance,
+  privateUtteranceToMetadata,
+  type PrivateUtterance,
+} from '@/domain/services/private-utterance'
 import { eraFromGenreTags, parseGenreTags } from '@/domain/services/occupancy-sim'
 import { summarizePlanSalience } from '@/domain/services/plan-salience'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
@@ -196,6 +201,24 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     }
   }
 
+  // Private-channel audience: detect + durable stamp before agent / STATE / archivist.
+  const activePrivateUtterance: PrivateUtterance | null = detectPrivateUtterance(
+    playerText,
+    knownForOrder,
+    playerTurnId,
+  )
+  if (activePrivateUtterance) {
+    try {
+      await turns.mergeMetadata(
+        playerTurnId,
+        'private_utterance',
+        privateUtteranceToMetadata(activePrivateUtterance),
+      )
+    } catch (err) {
+      console.error('[private-utterance metadata]', err)
+    }
+  }
+
   // Classifier + (occupancy ∥ npc-agent) — occupancy has no dependency on plans
   // (Track A4). Classifier stays serial with the agent because the gate uses
   // stance; A6 speculative agent is deferred until write-safety is proven.
@@ -225,6 +248,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           playerText,
           recentForAgents,
           activeOpenOrder?.status === 'pending' ? activeOpenOrder : null,
+          activePrivateUtterance,
         ).catch((err) => {
           console.error('[npc agent failed pre-narrator]', err)
           return { error: String(err) } as const
@@ -347,6 +371,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     }
   }
 
+  const privateUtteranceRender =
+    activePrivateUtterance && activePrivateUtterance.status === 'active'
+      ? {
+          channel: activePrivateUtterance.channel,
+          audienceNames: activePrivateUtterance.audienceNames,
+        }
+      : null
   const stateBlock = formatStateBlock(
     narratorState,
     plans,
@@ -356,6 +387,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       flaring: new Set(flaringReverieIds),
     },
     openOrderRender,
+    privateUtteranceRender,
   )
   const premiseBlock = formatPremiseBlock(world.premise)
 
@@ -432,6 +464,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     })),
     planSalience,
     openOrder: activeOpenOrder,
+    privateUtterance: activePrivateUtterance,
     worldTime: narratorState.worldTime,
     activeObjectiveTitles,
     openClueTitles: narratorState.dossier.clues
@@ -725,6 +758,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         turnOccupancy,
         false,
         bootstrapDossier,
+        activePrivateUtterance,
       )
         .then(async ({ patch, usage: archivistUsage }) => {
           await applyArchivistPatch(worldId, narratorTurn.id, patch)
