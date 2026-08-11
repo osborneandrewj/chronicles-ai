@@ -16,6 +16,13 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.7.1',
+    date: '2026-08-11',
+    highlights: [
+      'If the storyteller briefly refuses out of character, later turns no longer stay stuck in that loop — de-escalating or walking away can continue as fiction again.',
+    ],
+  },
+  {
     version: '0.7.0',
     date: '2026-08-11',
     highlights: [

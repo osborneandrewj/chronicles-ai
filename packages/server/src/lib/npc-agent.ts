@@ -21,6 +21,7 @@ import {
   redactedPlayerTextForNonAudience,
   type PrivateUtterance,
 } from '@/domain/services/private-utterance'
+import { isOocPolicyRefusal } from '@/domain/services/ooc-refusal'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { tolerateNulls } from '@/lib/llm-schema'
@@ -408,11 +409,13 @@ export async function runNpcAgentTick(
   const worldTime = cursor.world_time
   const settingRegion = (await worlds.getWorld(worldId))?.setting_region ?? null
 
-  const rawPriorNarration = recentTurns
-    .filter((t) => t.role === 'assistant')
-    .slice(-1)
-    .map((t) => t.content)
-    .join('\n\n')
+  // Prefer the last diegetic narrator beat — skip OOC policy refusals so agents
+  // do not plan against "I will not narrate" as if it were story.
+  const rawPriorNarration =
+    [...recentTurns]
+      .reverse()
+      .find((t) => t.role === 'assistant' && !isOocPolicyRefusal(t.content))
+      ?.content ?? ''
 
   // Privacy partition for prior prose: if the *previous* user turn was private,
   // agents share only a public digest — not the secret body as shared knowledge.

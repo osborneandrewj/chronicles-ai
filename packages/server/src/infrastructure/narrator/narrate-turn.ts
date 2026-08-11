@@ -18,6 +18,10 @@ import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import { packNarratorHistory } from '@/domain/services/history-packer'
+import {
+  isOocPolicyRefusal,
+  sanitizeNarratorHistory,
+} from '@/domain/services/ooc-refusal'
 import { lucidityDelta, lucidityStage } from '@/domain/services/lucidity'
 import {
   estimateTurnMinutes,
@@ -547,6 +551,32 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       const narratorTurn = await turns.insert(worldId, 'assistant', trimmed, activeSceneId)
       narratorTurnId = narratorTurn.id
 
+      // OOC policy refusals are still shown in the chat log (what the model
+      // emitted), but they must not drive archivist / clock / living-world work
+      // and are redacted from *future* history packing via sanitizeNarratorHistory.
+      if (isOocPolicyRefusal(trimmed)) {
+        console.error(
+          `[ooc-refusal] world=${worldId} turn=${narratorTurn.id} — model broke character; skipping factual pipeline`,
+        )
+        try {
+          await turns.mergeMetadata(narratorTurn.id, 'narrator', {
+            model: NARRATOR_MODEL,
+            usage: narratorUsage,
+            ooc_refusal: true,
+          })
+          await turns.mergeMetadata(narratorTurn.id, 'classifier', {
+            model: classification.model,
+            method: classification.method,
+            classification: { stance, input_mode },
+            usage: classification.usage,
+            error: classification.error,
+          })
+        } catch (err) {
+          console.error('[ooc-refusal metadata]', err)
+        }
+        return
+      }
+
       // NARRATIVE CLOCK (any world). Deterministic estimate is primary; LLM
       // time-passage runs only on explicit jump language (max merge, never sum).
       // Bounded worlds still couple clock → living tick; open/subworld get clock
@@ -890,7 +920,10 @@ function formatSimArcBlock(arcs: SimArc[]): string {
 function compactHistory(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): ModelMessage[] {
-  const packed = packNarratorHistory(history, {
+  // Strip OOC policy refusals before packing so they cannot re-prime the model
+  // (sticky "I will not narrate" loops after a single safety refusal).
+  const sanitized = sanitizeNarratorHistory(history)
+  const packed = packNarratorHistory(sanitized, {
     fullTokenBudget: HISTORY_FULL_TOKEN_BUDGET,
     compactedChars: COMPACTED_TURN_CHARS,
   })
