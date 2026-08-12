@@ -488,6 +488,7 @@ export class MongoCharacterRepository implements CharacterRepository {
         arrival_world_time: c.arrival_world_time,
         last_known_situation: c.last_known_situation,
         daily_loop: c.daily_loop,
+        speech_register: c.speech_register,
       }
     })
   }
@@ -567,6 +568,23 @@ export class MongoCharacterRepository implements CharacterRepository {
     await this.ctx.models.Character.updateOne(
       { id: characterId, $or: [{ dailyLoop: null }, { dailyLoop: { $exists: false } }] },
       { $set: { dailyLoop, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  async setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void> {
+    const trimmed = speechRegister.trim()
+    if (!trimmed) return
+    await this.ctx.models.Character.updateOne(
+      {
+        id: characterId,
+        $or: [
+          { speechRegister: null },
+          { speechRegister: { $exists: false } },
+          { speechRegister: '' },
+        ],
+      },
+      { $set: { speechRegister: trimmed, updatedAt: new Date() } },
       { session: this.session },
     )
   }

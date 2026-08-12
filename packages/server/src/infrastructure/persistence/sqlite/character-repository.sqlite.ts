@@ -151,7 +151,7 @@ const setPlayersPlaceStmt = db.prepare<[number, number]>(
 const agentNpcsStmt = db.prepare<[number, number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
          c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
-         c.reveries, c.daily_loop,
+         c.reveries, c.daily_loop, c.speech_register,
          c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
          c.last_agent_tick_turn_id,
          c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
@@ -203,6 +203,10 @@ const setPrivateBeliefsStmt = db.prepare<[string, number]>(
 const setDailyLoopIfEmptyStmt = db.prepare<[string, number]>(
   `UPDATE characters SET daily_loop = ?, updated_at = datetime('now')
      WHERE id = ? AND (daily_loop IS NULL OR trim(daily_loop) = '')`,
+)
+const setSpeechRegisterIfEmptyStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET speech_register = ?, updated_at = datetime('now')
+     WHERE id = ? AND (speech_register IS NULL OR trim(speech_register) = '')`,
 )
 const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
   `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -431,6 +435,11 @@ export class SqliteCharacterRepository implements CharacterRepository {
 
   setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void> {
     setDailyLoopIfEmptyStmt.run(dailyLoopJson, characterId)
+    return Promise.resolve()
+  }
+
+  setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void> {
+    setSpeechRegisterIfEmptyStmt.run(speechRegister, characterId)
     return Promise.resolve()
   }
 }

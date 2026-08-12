@@ -16,6 +16,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.8.0',
+    date: '2026-08-12',
+    highlights: [
+      'Important characters develop a sticky way of speaking — clipped, warm, clinical, and so on — so dialogue feels less interchangeable.',
+      'Talk-heavy scenes favor shorter spoken lines, one clear pressure at a time, and less re-describing the same room between every exchange (easier to listen to as well as read).',
+      'When someone is about to speak, the story can stage how they deliver the line (interrupt, withhold, one hard question) without putting stage directions on the page.',
+    ],
+  },
+  {
     version: '0.7.2',
     date: '2026-08-11',
     highlights: [

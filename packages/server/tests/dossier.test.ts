@@ -237,6 +237,40 @@ describe('story dossier state', () => {
     expect(block).toContain('diegetic tools: can query field records and auspex logs')
   })
 
+  it('renders speech_register as voice: near attitude for present NPCs', async () => {
+    const { worldId, turnId } = seedWorld()
+    await applyArchivistPatch(worldId, turnId, {
+      characters: [
+        { name: 'Mara Vale', description: 'Field analyst.', current_place_name: 'Covenant Security' },
+      ],
+    })
+    db.prepare(
+      `UPDATE characters SET agency_level = 'local', speech_register = ?
+       WHERE world_id = ? AND name = 'Mara Vale'`,
+    ).run('clipped · formal under stress · default: counter-question', worldId)
+
+    const state = await loadNarratorState(worldId)
+    const block = formatStateBlock(state)
+    expect(block).toContain('voice: clipped · formal under stress')
+    expect(block).not.toMatch(/voice:.*player/i)
+  })
+
+  it('renders ephemeral speech_hint on planned moves', async () => {
+    const { worldId } = seedWorld()
+    const state = await loadNarratorState(worldId)
+    const block = formatStateBlock(state, [
+      {
+        npc_name: 'Marcus',
+        intent: 'test whether Andrew is lying',
+        planned_action: 'turns his chair to face Andrew',
+        speech_hint: 'cuts him off; one hard question; no softener',
+      },
+    ])
+    expect(block).toContain('### PLANNED MOVES THIS TURN')
+    expect(block).toContain('**Marcus**')
+    expect(block).toContain('speech: cuts him off; one hard question; no softener')
+  })
+
   it('marks the protagonist row as durable continuity in the narrator state block', async () => {
     const { worldId, turnId } = seedWorld()
     await applyArchivistPatch(worldId, turnId, {

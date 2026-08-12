@@ -39,6 +39,8 @@ export type NpcPlannedAction = {
   intent: string
   planned_action?: string
   intent_id?: number
+  /** Ephemeral delivery staging edge — not durable intent ledger. */
+  speech_hint?: string | null
 }
 
 export type ReverieRenderContext = {
@@ -226,6 +228,10 @@ export function formatStateBlock(
         if (c.current_focus) lines.push(`  - focus: ${limit(c.current_focus, 160)}`)
         if (c.active_goal) lines.push(`  - goal: ${limit(c.active_goal, 160)}`)
         if (c.current_attitude) lines.push(`  - attitude: ${limit(c.current_attitude, 160)}`)
+        // Sticky idiolect near delivery cues (not agenda/private canon).
+        if (c.speech_register) {
+          lines.push(`  - voice: ${limit(c.speech_register, 160)}`)
+        }
         const activity = stripFactProvenance(c.recent_activity)
         if (activity) {
           for (const line of activity.split('\n').filter((s) => s.trim().length > 0).slice(-2)) {
@@ -393,6 +399,9 @@ export function formatStateBlock(
       lines.push(`- **${p.npc_name}** — ${action}`)
       if (p.planned_action && p.intent && p.intent !== p.planned_action) {
         lines.push(`  - intent: ${limit(p.intent, 180)}`)
+      }
+      if (p.speech_hint) {
+        lines.push(`  - speech: ${limit(p.speech_hint, 160)}`)
       }
     }
   }

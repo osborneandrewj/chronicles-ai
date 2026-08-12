@@ -960,6 +960,15 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'genre_tags', 'TEXT')
     },
   },
+  {
+    // Dialogue depth: sticky how-they-talk fingerprint for agent NPCs.
+    // Nullable; authored once by the NPC agent (never by archivist default).
+    version: 34,
+    name: 'character_speech_register',
+    up: (db) => {
+      addColumnIfMissing(db, 'characters', 'speech_register', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

@@ -4,6 +4,14 @@ const XAI_ORIGIN = 'https://api.x.ai'
 // xAI's only prosody knob is `speed` (rate multiplier, range 0.7–1.5; default
 // 1.0). There is no stability/temperature parameter, so tone drift within a
 // single generation isn't tunable via the API — see v0.6.12 milestone Phase 0.
+//
+// TTS inventory (dialogue-depth Phase 4): this adapter is plain-text post-hoc
+// TTS. It does NOT consume SSML, speech tags, or stage directions
+// ([whispers], [pause], emphasis markup). Anything of that form in narrator
+// prose is spoken as literal words. Dialogue ear packing belongs in craft
+// guidance (speakable lines, thin scenic restatement), not invented tags.
+// Follow-up if xAI adds tag support: wire tags here, then allow a narrow set
+// in narrator craft — never invent tags before the pipeline can consume them.
 const TTS_SPEED_MIN = 0.7
 const TTS_SPEED_MAX = 1.5
 // Streaming latency optimization: smaller first audio chunk → lower TTFA.

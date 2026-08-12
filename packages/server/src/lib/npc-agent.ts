@@ -156,6 +156,14 @@ const NpcUpdateSchema = z.object({
         'Distinct from current_focus (mental). The narrator reads this when staging off-scene dialogue, ' +
         'phone calls, messages, or references. Overwrites prior value. Update every turn for off-scene NPCs.',
     ),
+  speech_register: z
+    .string()
+    .optional()
+    .describe(
+      'Author ONCE when speech_register is empty/null: a compact sticky how-they-talk fingerprint ' +
+        '(≤200 chars). E.g. "clipped · bureaucratic · no small talk · default: counter-question · never monologues". ' +
+        'Genre/era-appropriate. Ignored if already set — do not rewrite every turn. Stress bends delivery via attitude, not register.',
+    ),
 })
 
 const PlannedActionSchema = z.object({
@@ -203,6 +211,15 @@ const PlannedActionSchema = z.object({
     .describe(
       'Optional compact one-sentence private reason for the plan, stored for developer audit only. ' +
         'Do NOT use this as a hidden chain-of-thought transcript — keep it to motive or constraint.',
+    ),
+  speech_hint: z
+    .string()
+    .optional()
+    .describe(
+      'Optional staging edge for talk-shaped plans only — how they deliver, not the full line. ' +
+        'E.g. "cuts him off; one hard question; no softener; two clauses max". ' +
+        'Never write the full dialogue the character will say (narrator owns prose). ' +
+        'Ephemeral for this turn: not durable ledger state. Cap ~160 chars.',
     ),
 })
 
@@ -457,6 +474,7 @@ export async function runNpcAgentTick(
         arrival_world_time: target.arrival_world_time,
         last_known_situation: target.last_known_situation,
         daily_loop: target.daily_loop,
+        speech_register: target.speech_register,
       })
     }
   }
@@ -580,6 +598,8 @@ export async function runNpcAgentTick(
     current_focus: a.current_focus,
     active_goal: a.active_goal,
     current_attitude: a.current_attitude,
+    // Sticky voice fingerprint — null means agent should author once this tick.
+    speech_register: a.speech_register,
     current_place: a.current_place_name,
     present_with_protagonist:
       a.current_place_id !== null && a.current_place_id === player.current_place_id,
@@ -780,7 +800,15 @@ export async function runNpcAgentTick(
       privateRationale: plan.private_rationale ?? null,
       expectedVisibility: 'narrator' satisfies IntentVisibility,
     })
-    plansOut.push({ ...plan, intent_id: intentId, character_id: agent.id })
+    // speech_hint stays on the in-memory plan for STATE render only — not
+    // written to npc_intents (ephemeral; no second migration).
+    const speech_hint = sanitizeSpeechHint(plan.speech_hint) ?? undefined
+    plansOut.push({
+      ...plan,
+      speech_hint,
+      intent_id: intentId,
+      character_id: agent.id,
+    })
   }
 
   return { patch: object, plans: plansOut, usage: mergedUsage }
@@ -888,8 +916,35 @@ export async function applyNpcAgentPatch(
       if (u.daily_loop !== undefined) {
         await characters.setDailyLoopIfEmpty(existing.id, JSON.stringify(u.daily_loop))
       }
+      if (u.speech_register !== undefined) {
+        const capped = capSpeechRegister(u.speech_register)
+        if (capped) await characters.setSpeechRegisterIfEmpty(existing.id, capped)
+      }
     }
   })
+}
+
+/** Sticky register: trim + hard cap (author-once storage). */
+function capSpeechRegister(raw: string): string | null {
+  const trimmed = raw.replace(/\s+/g, ' ').trim()
+  if (!trimmed) return null
+  return trimmed.length > 200 ? trimmed.slice(0, 200) : trimmed
+}
+
+/**
+ * Ephemeral speech_hint for STATE only — never written to npc_intents.
+ * Strip accidental quoted monologues and hard-cap length.
+ */
+export function sanitizeSpeechHint(raw: string | undefined | null): string | null {
+  if (raw == null) return null
+  let t = raw.replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  // Drop long quoted dialogue dumps; keep staging edges only.
+  if (/["“][^"”]{40,}["”]/.test(t)) {
+    t = t.replace(/["“][^"”]{40,}["”]/g, '').replace(/\s+/g, ' ').trim()
+  }
+  if (!t) return null
+  return t.length > 160 ? t.slice(0, 160) : t
 }
 
 function formatKnownPlaceLine(p: {

@@ -1,7 +1,7 @@
 # Dialogue Depth & Character Voice — Implementation Plan
 
-**Status:** planned (not started)
-**Branch:** `feat/dialogue-depth-character-voice` (recommended)
+**Status:** implemented (Phases 0–4; Phase 5 deferred)
+**Branch:** `feat/dialogue-depth-character-voice`
 **Trigger:** co-tester reports that Grok app + Grok Voice Think Fast 1.0 feels substantially deeper in character and dialogue than Chronicles play sessions.
 
 ## Goal
@@ -264,7 +264,7 @@ Plans for confrontations routinely include speech_hint; narrator quotes feel sha
 
 ---
 
-## Phase 4 — Ear-aware dialogue (TTS soft path)
+## Phase 4 — Ear-aware dialogue (TTS soft path) — **done**
 
 **Goal:** When players listen, talk scenes should not sound like a dense audiobook paragraph dump.
 
@@ -273,19 +273,24 @@ Plans for confrontations routinely include speech_hint; narrator quotes feel sha
 - Chronicles TTS is **post-hoc** on finished prose (not S2S). Prosody is limited unless the TTS pipeline supports style tags.
 - Do not make the narrator write stage-direction soup (`[whispers]`) unless the TTS path can consume it.
 
-### Changes (soft, risk-gated)
+### Implemented
 
-1. Guidance cue when dialogue beat **and** (optional) a future `ttsLikely` flag, or simply always on dialogue beats as a light ear note:
-   - Prefer speakable lines; avoid re-describing the same static room between every exchange.
-   - One breath of physical tell between lines is enough.
+1. **Dialogue guidance ear packing** (`pickDialogueBeatCue`): on talk-shaped turns, always include ear packing — one short physical tell between lines; no static room re-paint; ban invented stage-direction / SSML tags (TTS would read them aloud).
+2. **Narrator craft** — speakable lines + explicit ban on `[whispers]` / SSML.
+3. **TTS inventory** (`lib/tts.ts` + `tts-request-body` test):
+   - Plain text → xAI `/v1/tts` (HTTP or WebSocket).
+   - Knobs: `text`, `voice_id`, `language`, `output_format`, optional `speed` (0.7–1.5), optional `optimize_streaming_latency`.
+   - **No** SSML, speech tags, emphasis, or style fields.
+   - Follow-up only if xAI adds tag support: wire tags in the adapter first, then allow a narrow craft set.
 
-2. Inventory current TTS adapter (`infrastructure/tts/`) for supported emphasis/pause tags. If none: **do not invent tags** in prose. Track a follow-up for tag-aware TTS separately.
+### Playtester note (Grok Voice vs Chronicles TTS)
 
-3. Document for playtesters: comparing Grok Voice S2S to Chronicles TTS will still favor Voice on raw presence; judge **written** dialogue quality first.
+Comparing Grok app Voice (native S2S) to Chronicles TTS will still favor Voice on raw presence (prosody, interruption, timing). Judge **written** dialogue quality and distinct NPC registers first; use listen-through only for fatigue / scenic thrash between quotes.
 
 ### Exit
 
-Listen-through of a 4-turn talk scene is less fatiguing; written quality not degraded for silent readers.
+- Guidance + prompt + TTS inventory tests green.
+- Listen-through of a 4-turn talk scene should feel less like audiobook scenery thrash; silent readers unchanged.
 
 ---
 
@@ -423,6 +428,17 @@ After PR1–3, co-tester re-scores the Phase 0 scenarios:
 2. **Should world-gen seed register?** Nice; not blocking.
 3. **Inspector UI for speech_register?** Optional; raw STATE visibility may be enough for testers.
 
+## Reviewer notes for Grok
+
+These are implementation-review notes to consider before starting code:
+
+1. **Phase 1 is the best first bet.** The existing narrator guidance service already has the sparse-cue structure this plan wants, plus a weak `stance === 'say'` branch. Adding a dialogue-beat cue there should be low-risk and likely to produce the fastest playtest signal.
+2. **Make `speech_hint` ephemerality explicit.** Planned actions are already persisted into the durable `npc_intents` ledger before narration. If PR3 keeps `speech_hint` ephemeral, that should mean: accept it in `PlannedActionSchema`, carry it through `plansOut`, render it in `state-block.ts`, but do not add it to `npc_intents`, reconciliation, or Mongo/SQLite persistence. Otherwise PR3 becomes a second schema migration.
+3. **Prefer the real `speech_register` column if Phase 2 ships.** The plan currently says "prefer no migration if possible" but then recommends a nullable column. The cleaner default is: no Phase 2 migration unless playtest shows the need; if Phase 2 ships, use a real nullable `speech_register` field rather than hiding voice inside `long_term_agenda` or `description`.
+4. **NPC agent tick reads must include `speech_register`.** The NPC agent cannot enforce "author once" unless its candidate row shape can see whether the field is already set. Include it in the agent NPC read surface, not only the full `Character` entity.
+5. **Render `voice:` sparingly.** Put it only under non-player present NPCs, cap around 140-160 chars, and place it near attitude/focus so it reads as delivery guidance rather than private canon or agenda.
+6. **Fix path shorthand when implementing.** Tests live under `packages/server/tests`, not a repo-root `tests/` directory. Prompts are correctly under `packages/server/prompts`.
+
 ## Related
 
 - `docs/plans/plot-lifecycle-continuity.md` — closed plot memory (orthogonal; ship separately)
@@ -434,12 +450,11 @@ After PR1–3, co-tester re-scores the Phase 0 scenarios:
 
 ## Implementation checklist (when starting code)
 
-- [ ] Phase 0 rubric + 2 baseline world/turn refs
-- [ ] Phase 1 narrator craft + dialogue guidance + tests
-- [ ] Playtest PR1
-- [ ] Phase 2 speech_register column + agent author-once + state-block
-- [ ] Playtest PR2
-- [ ] Phase 3 speech_hint on plans + render
-- [ ] Playtest PR3
-- [ ] Phase 4 only if TTS complaints remain
-- [ ] Archive this plan to `docs/plans/archive/` when shipped
+- [x] Phase 0 rubric (in plan scenarios above; co-tester scores after deploy)
+- [x] Phase 1 narrator craft + dialogue guidance + tests
+- [ ] Playtest after merge
+- [x] Phase 2 speech_register column + agent author-once + state-block
+- [x] Phase 3 speech_hint on plans + render (ephemeral; not npc_intents)
+- [x] Phase 4 ear packing + TTS inventory + playtester note
+- [ ] Phase 5 phone-call S2S (deferred — design only until presence gap remains after 1–4)
+- [ ] Archive this plan to `docs/plans/archive/` when shipped and playtested

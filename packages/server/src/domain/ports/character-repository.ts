@@ -106,6 +106,8 @@ export type AgentNpcRow = {
   arrival_world_time: string | null
   last_known_situation: string | null
   daily_loop: string | null
+  /** Sticky voice/idiolect; null until authored once. */
+  speech_register: string | null
 }
 
 // The NPC agent's per-character WRITE surface (applyAgentNpcFields). The use case
@@ -241,4 +243,9 @@ export interface CharacterRepository {
    * daily_loop is currently null/blank, mirroring the SQL WHERE guard.
    */
   setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void>
+  /**
+   * Author speech_register ONCE: writes only when the row's speech_register is
+   * currently null/blank. Sticky idiolect for dialogue depth (≤200 chars).
+   */
+  setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void>
 }
