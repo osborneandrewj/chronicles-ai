@@ -29,6 +29,7 @@ export type { Character, CharacterAgencyLevel, Place, Scene }
 // rendering concern, not domain). Re-exported here so existing importers of
 // `@/lib/world-state` keep working during the migration.
 export {
+  formatDirectorBlock,
   formatDossierBlock,
   formatOccupancyBlock,
   formatPlaceGeo,
@@ -114,7 +115,8 @@ export async function getNarratorWorldState(
   const [npcsInPlace, occupancyRow] = currentPlace
     ? await Promise.all([
         deps.characters.inPlace(worldId, currentPlace.id).then((rows) =>
-          rows.filter((c) => c.is_player === 0),
+          // Track M: en-route NPCs are not staged as present (left the room).
+          rows.filter((c) => c.is_player === 0 && c.in_transit_to_place_id == null),
         ),
         deps.occupancy.latestSnapshot(worldId, currentPlace.id),
       ])

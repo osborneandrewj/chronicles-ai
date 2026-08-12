@@ -1019,6 +1019,17 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'influence_packet_json', 'TEXT')
     },
   },
+  {
+    // Track M: structured journey authority. Free-text arrival_world_time remains
+    // as the dual-store render; arrival_minutes is the clock-law field used by
+    // resolveArrivals. journey_path_json holds remaining multi-hop place ids.
+    version: 37,
+    name: 'structured_journey_minutes',
+    up: (db) => {
+      addColumnIfMissing(db, 'characters', 'arrival_minutes', 'INTEGER')
+      addColumnIfMissing(db, 'characters', 'journey_path_json', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

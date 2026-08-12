@@ -6,12 +6,13 @@
 // (no behavior change); world-state.ts re-exports for back-compat.
 import 'server-only'
 
-import type { Character, Place, Scene, StoryDossier } from '@/domain/entities'
+import type { Character, Place, Scene, StoryDossier, StoryThread } from '@/domain/entities'
 import {
   CLOSED_DOSSIER_CAPS,
   selectRecentlyClosedObjectives,
   selectRecentlyClosedThreads,
 } from '@/domain/services/closed-dossier'
+import type { DirectorDecision } from '@/domain/services/director'
 import {
   pickPrimaryPressure,
   rankClues,
@@ -22,7 +23,7 @@ import {
   rankTimeline,
   type RankingContext,
 } from '@/domain/services/dossier-ranking'
-import { tryParseWorldTime } from '@/domain/services/narrative-clock'
+import { minutesToWorldTime, tryParseWorldTime } from '@/domain/services/narrative-clock'
 import { activityForBand, parseDailyLoop } from '@/lib/daily-loop'
 import { stripFactProvenance } from '@/lib/memorable-facts'
 import { type PlaceOccupancy } from '@/lib/place-population'
@@ -358,11 +359,21 @@ export function formatStateBlock(
         ? placeNameById.get(c.in_transit_to_place_id) ?? null
         : null
       const head = where ? `${c.name} at ${where}` : c.name
+      // Prefer structured arrival_minutes when present (Track M clock-law).
+      const etaLabel =
+        c.arrival_minutes != null && Number.isFinite(c.arrival_minutes)
+          ? minutesToWorldTime(c.arrival_minutes).worldTime
+          : c.arrival_world_time
       const journey =
         dest !== null
-          ? ` → ${dest}${c.arrival_world_time ? ` (ETA ${c.arrival_world_time})` : ''}`
+          ? ` → ${dest}${etaLabel ? ` (ETA ${etaLabel})` : ''}`
           : ''
       lines.push(`- ${head}${journey}`)
+      if (c.in_transit_to_place_id != null) {
+        lines.push(
+          '  - MUST NOT stage as present until world clock reaches ETA; radio/off-scene only while en route.',
+        )
+      }
       if (c.last_known_situation) {
         lines.push(`  - situation: ${limit(c.last_known_situation, 200)}`)
       }
@@ -528,6 +539,51 @@ export type FormatDossierOptions = {
   clockMinutes?: number | null
   /** Rendered world_time string — used to backfill ranking when minutes absent. */
   worldTime?: string | null
+  /**
+   * When set, heavy pressure is limited to these thread ids (+ foreground);
+   * other actives render as compact background one-liners (Track A Director).
+   */
+  heavyThreadIds?: number[]
+  backgroundThreadIds?: number[]
+}
+
+/**
+ * Soft ## DIRECTOR block from a pure Director decision (Track A1).
+ * Fail-open empty string when no guidance.
+ */
+export function formatDirectorBlock(
+  decision: DirectorDecision,
+  threads: StoryThread[],
+): string {
+  if (decision.guidanceLines.length === 0 && decision.foregroundThreadId == null) {
+    return ''
+  }
+  const byId = new Map(threads.map((t) => [t.id, t]))
+  const lines: string[] = [
+    '## DIRECTOR',
+    'Soft structural pressure — interpret in craft; do not invent mechanics or list as menu options.',
+  ]
+  if (decision.foregroundThreadId != null) {
+    const fg = byId.get(decision.foregroundThreadId)
+    if (fg) {
+      lines.push(
+        `- Foreground: ${fg.title} (${fg.kind}, phase ${decision.phase ?? 'rising'}, tension ${decision.tension.toFixed(2)})`,
+      )
+    }
+  }
+  for (const g of decision.guidanceLines) {
+    lines.push(`- ${g}`)
+  }
+  if (decision.backgroundThreadIds.length > 0) {
+    const bg = decision.backgroundThreadIds
+      .map((id) => byId.get(id)?.title)
+      .filter((t): t is string => Boolean(t))
+      .slice(0, 4)
+    if (bg.length > 0) {
+      lines.push(`- Background pressure (compact): ${bg.join('; ')}`)
+    }
+  }
+  return lines.join('\n')
 }
 
 function rankingContextFrom(options?: FormatDossierOptions): RankingContext {

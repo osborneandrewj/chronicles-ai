@@ -265,6 +265,8 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
         player_notes: null,
         in_transit_to_place_id: null,
         arrival_world_time: null,
+        arrival_minutes: null,
+        journey_path_json: null,
         last_known_situation: null,
         aliases: null,
         daily_loop: character.daily_loop,

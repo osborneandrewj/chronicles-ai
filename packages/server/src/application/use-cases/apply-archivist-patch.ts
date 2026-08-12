@@ -1,6 +1,7 @@
 import type { Character } from '@/domain/entities'
 import type {
   CharacterRepository,
+  DossierRepository,
   DossierWriter,
   PlaceRepository,
   ReverieRepository,
@@ -27,6 +28,7 @@ import {
 } from '@/domain/services/name-resolution'
 import { resolveThreadReference } from '@/domain/services/dossier-thread-reference'
 import { resolvePossession } from '@/domain/services/inventory-resolution'
+import { hygieneFromClosedRows } from '@/domain/services/lifecycle-hygiene'
 import {
   appendFactWithProvenance,
 } from '@/domain/services/memorable-fact-provenance'
@@ -64,6 +66,8 @@ export type ApplyArchivistPatchDeps = {
   scenes: SceneRepository
   worlds: WorldRepository
   dossierWriter: DossierWriter
+  /** Optional: when present, run Track A2 lifecycle hygiene after closes. */
+  dossiers?: DossierRepository
   timeline: TimelineWriter
   reveries: ReverieRepository
   unitOfWork: UnitOfWork
@@ -77,8 +81,19 @@ export async function applyArchivistPatch(
   { worldId, turnId: narratorTurnId, patch: inputPatch }: ApplyArchivistPatchInput,
   deps: ApplyArchivistPatchDeps,
 ): Promise<void> {
-  const { places, characters, scenes, worlds, dossierWriter, timeline, reveries, unitOfWork } =
-    deps
+  const {
+    places,
+    characters,
+    scenes,
+    worlds,
+    dossierWriter,
+    dossiers,
+    timeline,
+    reveries,
+    unitOfWork,
+  } = deps
+  const closedThreadIds: Array<{ id: number; status: 'resolved' | 'failed' }> = []
+  const completedObjectiveIds: Array<{ id: number; threadId: number | null }> = []
 
   // List characters in the same order the legacy `listCharactersForWorldStmt`
   // returned them (id ASC) so resolveCharacter's match selection is byte-
@@ -286,6 +301,9 @@ export async function applyArchivistPatch(
         relevance_tags_json: relevanceTagsJson,
         resolved_turn_id: resolvedTurnId,
       })
+      if (status === 'resolved' || status === 'failed') {
+        closedThreadIds.push({ id: existing.id, status })
+      }
       return existing.id
     }
 
@@ -302,6 +320,9 @@ export async function applyArchivistPatch(
       relevance_tags_json: relevanceTagsJson,
       source_turn_id: narratorTurnId,
     })
+    if (status === 'resolved' || status === 'failed') {
+      closedThreadIds.push({ id: row.id, status })
+    }
     return row.id
   }
 
@@ -384,9 +405,12 @@ export async function applyArchivistPatch(
         blocker: patch.blocker ?? null,
         completed_turn_id: completedTurnId,
       })
+      if (status === 'completed') {
+        completedObjectiveIds.push({ id: existing.id, threadId })
+      }
       return
     }
-    await dossierWriter.insertObjective({
+    const inserted = await dossierWriter.insertObjective({
       world_id: worldId,
       thread_id: threadId,
       title: patch.title,
@@ -395,6 +419,9 @@ export async function applyArchivistPatch(
       blocker: patch.blocker ?? null,
       source_turn_id: narratorTurnId,
     })
+    if (status === 'completed' && inserted?.id != null) {
+      completedObjectiveIds.push({ id: inserted.id, threadId })
+    }
   }
 
   // "protagonist" / "player" / "you" all denote the single is_player=1 row,
@@ -768,6 +795,50 @@ export async function applyArchivistPatch(
         await upsertStoryObjective(objective)
       }
     }
+
+    // Track A2: sibling/parent lifecycle hygiene after explicit closes.
+    if (
+      dossiers &&
+      (closedThreadIds.length > 0 || completedObjectiveIds.length > 0)
+    ) {
+      const dossier = await dossiers.forWorld(worldId)
+      const hygiene = hygieneFromClosedRows({
+        closedThreadIds,
+        completedObjectiveIds,
+        threads: dossier.threads,
+        objectives: dossier.objectives,
+        turnId: narratorTurnId,
+      })
+      for (const w of hygiene.threadWrites) {
+        const t = dossier.threads.find((x) => x.id === w.id)
+        if (!t || t.status !== 'active') continue
+        await dossierWriter.updateThread({
+          id: w.id,
+          kind: t.kind,
+          status: w.status,
+          summary: t.summary,
+          stakes: t.stakes,
+          rewards: t.rewards,
+          consequences: t.consequences,
+          hidden: t.hidden,
+          relevance_tags_json: t.relevance_tags_json,
+          resolved_turn_id: w.resolved_turn_id,
+        })
+      }
+      for (const w of hygiene.objectiveWrites) {
+        const o = dossier.objectives.find((x) => x.id === w.id)
+        if (!o || o.status === 'completed' || o.status === 'failed') continue
+        await dossierWriter.updateObjective({
+          id: w.id,
+          thread_id: o.thread_id,
+          status: w.status,
+          detail: o.detail,
+          blocker: w.blocker,
+          completed_turn_id: w.completed_turn_id,
+        })
+      }
+    }
+
     if (patch.story_resources) {
       for (const resource of patch.story_resources) {
         await upsertStoryResource(resource)

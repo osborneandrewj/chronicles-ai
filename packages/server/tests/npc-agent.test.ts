@@ -208,20 +208,22 @@ describe('applyNpcAgentPatch', () => {
     )
   })
 
-  it('relocates an agent NPC only when the place already exists', async () => {
-    // Pre-existing place — relocation should land.
+  it('starts a journey toward a known place instead of teleporting (Track M)', async () => {
+    // Pre-existing place — relocation becomes en-route, not instant present.
     await applyArchivistPatch(worldId, turnId, { places: [{ name: 'Breakroom' }] })
     const breakroomId = getPlacesForWorld(worldId).find((p) => p.name === 'Breakroom')!.id
+    const marcusBefore = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
 
     await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', current_place_name: 'Breakroom' }],
     })
-    expect(getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!.current_place_id).toBe(
-      breakroomId,
-    )
+    const marcus = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
+    // Still at origin until resolveArrivals lands them.
+    expect(marcus.current_place_id).toBe(marcusBefore.current_place_id)
+    expect(marcus.in_transit_to_place_id).toBe(breakroomId)
+    expect(marcus.arrival_minutes).not.toBeNull()
 
     // Unknown place — silently dropped (NPC agent doesn't create places).
-    const marcusBefore = getCharactersForWorld(worldId).find((c) => c.name === 'Marcus')!
     await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
       npc_updates: [{ name: 'Marcus', current_place_name: 'Mars Orbit' }],
     })

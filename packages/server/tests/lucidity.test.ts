@@ -15,6 +15,12 @@ describe('lucidityDelta', () => {
     expect(lucidityDelta('I talk to the captain', 'She nods.', 1)).toBe(0)
   })
 
+  it('v2 medium signals can leave 0 without exact magic phrases', () => {
+    expect(lucidityDelta('This whole place feels fake', '', 0)).toBe(1)
+    expect(lucidityDelta('', 'The wall flickers for a moment.', 0)).toBe(1)
+    expect(lucidityDelta('I open the admin console overlay', '', 0)).toBe(1)
+  })
+
   it('stops at the cap', () => {
     expect(lucidityDelta('the world bends', '', MAX_LUCIDITY)).toBe(0)
   })

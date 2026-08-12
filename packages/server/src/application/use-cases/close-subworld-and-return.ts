@@ -6,6 +6,8 @@ import type {
 import type {
   BackgroundTasks,
   CharacterRepository,
+  DossierRepository,
+  DossierWriter,
   PlaceRepository,
   SceneRepository,
   SessionRepository,
@@ -15,6 +17,7 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import { returnToHub } from '@/application/use-cases/return-to-hub'
+import { concludeSubworldDossier } from '@/domain/services/conclude-subworld-dossier'
 import { linkAntagonistCharacter } from '@/domain/services/link-antagonist'
 import {
   refreshPlayerModelFromReport,
@@ -52,6 +55,9 @@ export type CloseSubworldAndReturnDeps = {
   simRuns: SimRunRepository
   turns: TurnRepository
   backgroundTasks?: BackgroundTasks
+  /** Optional: when present, abandon active subworld dossier rows (Track A4). */
+  dossiers?: DossierRepository
+  dossierWriter?: DossierWriter
 }
 
 function parseGenreTags(raw: string | null): string[] {
@@ -116,6 +122,25 @@ export async function closeSubworldAndReturn(
 
   const report = await deps.simRuns.upsertByRun(stub)
 
+  // Track A4: abandon active subworld arcs so exit does not freeze eternals.
+  if (deps.dossiers && deps.dossierWriter) {
+    try {
+      await concludeSubworldDossierWrites({
+        subworldId,
+        exitKind: input.exitKind,
+        turnId: input.sourceTurnId,
+        subworldName: codename,
+        reportHeadline: report.headline,
+        dossiers: deps.dossiers,
+        dossierWriter: deps.dossierWriter,
+        hubWorldId,
+        hubWorlds: deps.worlds,
+      })
+    } catch (err) {
+      console.error('[conclude-subworld-dossier]', err)
+    }
+  }
+
   // Player model refresh (cheap deterministic).
   const hub = await deps.worlds.getWorld(hubWorldId)
   const priorModel = parsePlayerModel(hub?.player_model_json ?? null)
@@ -135,6 +160,80 @@ export async function closeSubworldAndReturn(
   const result = await returnToHub({ session }, deps)
   if (!result) return null
   return { ...result, reportId: report.id }
+}
+
+async function concludeSubworldDossierWrites(args: {
+  subworldId: number
+  exitKind: ExitKind
+  turnId: number | null
+  subworldName: string
+  reportHeadline: string
+  dossiers: DossierRepository
+  dossierWriter: DossierWriter
+  hubWorldId: number
+  hubWorlds: WorldRepository
+}): Promise<void> {
+  const dossier = await args.dossiers.forWorld(args.subworldId)
+  const plan = concludeSubworldDossier({
+    threads: dossier.threads,
+    objectives: dossier.objectives,
+    exitKind: args.exitKind,
+    turnId: args.turnId,
+    subworldName: args.subworldName,
+    reportHeadline: args.reportHeadline,
+  })
+
+  for (const w of plan.threadWrites) {
+    const t = dossier.threads.find((x) => x.id === w.id)
+    if (!t) continue
+    await args.dossierWriter.updateThread({
+      id: w.id,
+      kind: t.kind,
+      status: w.status,
+      summary: t.summary,
+      stakes: t.stakes,
+      rewards: t.rewards,
+      consequences: t.consequences,
+      hidden: t.hidden,
+      relevance_tags_json: t.relevance_tags_json,
+      resolved_turn_id: w.resolved_turn_id,
+    })
+  }
+  for (const w of plan.objectiveWrites) {
+    const o = dossier.objectives.find((x) => x.id === w.id)
+    if (!o) continue
+    await args.dossierWriter.updateObjective({
+      id: w.id,
+      thread_id: o.thread_id,
+      status: w.status,
+      detail: o.detail,
+      blocker: w.blocker,
+      completed_turn_id: w.completed_turn_id,
+    })
+  }
+
+  // Optional idempotent hub aftermath thread from the report.
+  if (plan.hubAftermathTitle) {
+    const hubDossier = await args.dossiers.forWorld(args.hubWorldId)
+    const exists = hubDossier.threads.some(
+      (t) => t.title.toLowerCase() === plan.hubAftermathTitle!.toLowerCase(),
+    )
+    if (!exists) {
+      await args.dossierWriter.insertThread({
+        world_id: args.hubWorldId,
+        title: plan.hubAftermathTitle,
+        kind: 'background',
+        status: 'active',
+        summary: plan.hubAftermathSummary,
+        stakes: null,
+        rewards: null,
+        consequences: null,
+        hidden: null,
+        relevance_tags_json: '[]',
+        source_turn_id: args.turnId,
+      })
+    }
+  }
 }
 
 async function ensureAntagonistLinked(

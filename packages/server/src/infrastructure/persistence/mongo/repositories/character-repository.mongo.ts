@@ -486,6 +486,8 @@ export class MongoCharacterRepository implements CharacterRepository {
             ? nameById.get(c.in_transit_to_place_id) ?? null
             : null,
         arrival_world_time: c.arrival_world_time,
+        arrival_minutes: c.arrival_minutes ?? null,
+        journey_path_json: c.journey_path_json ?? null,
         last_known_situation: c.last_known_situation,
         daily_loop: c.daily_loop,
         speech_register: c.speech_register,
@@ -544,6 +546,12 @@ export class MongoCharacterRepository implements CharacterRepository {
     }
     if (fields.arrival_world_time !== undefined) {
       set.arrivalWorldTime = fields.arrival_world_time
+    }
+    if (fields.arrival_minutes !== undefined) {
+      set.arrivalMinutes = fields.arrival_minutes
+    }
+    if (fields.journey_path_json !== undefined) {
+      set.journeyPathJson = fields.journey_path_json
     }
     if (fields.last_known_situation !== undefined) {
       set.lastKnownSituation = fields.last_known_situation

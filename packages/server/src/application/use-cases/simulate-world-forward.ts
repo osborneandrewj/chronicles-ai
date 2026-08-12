@@ -125,6 +125,7 @@ export async function simulateWorldForward(
   const connections = await placeConnections.forWorld(worldId)
   const graph = buildDeckGraph(connections)
   const neighborsOf = (placeId: number): number[] => neighbors(graph, placeId)
+  const adjacency = graph.adjacency
 
   // Relationship graph as a mutable working copy keyed by id; remember each
   // original valence so we persist a delta only for edges that actually drifted.
@@ -159,6 +160,7 @@ export async function simulateWorldForward(
           band,
           currentPlaceId: positions.get(npc.id) ?? null,
           neighborsOf,
+          adjacency,
         }),
       )
     }

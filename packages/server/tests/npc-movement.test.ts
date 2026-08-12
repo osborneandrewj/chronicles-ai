@@ -34,19 +34,29 @@ describe('nextPlaceId — routine drives movement', () => {
     expect(next).toBe(5)
   })
 
-  it('teleports directly to the loop target when it is not a neighbour', () => {
-    // From quarters(3) the engineer is due on the bridge(1); bridge is not a
-    // neighbour of quarters, so on a tiny ship we step straight there.
+  it('one-hops toward non-adjacent target via adjacency BFS (never long-jumps)', () => {
+    // From quarters(3) the engineer is due on the bridge(1); hop is corridor(2).
+    const next = nextPlaceId({
+      dailyLoop: { evening: 1 },
+      band: 'evening',
+      currentPlaceId: 3,
+      neighborsOf,
+      adjacency: ADJACENCY,
+    })
+    expect(next).toBe(2)
+  })
+
+  it('stays put when non-adjacent and no adjacency map (no teleport)', () => {
     const next = nextPlaceId({
       dailyLoop: { evening: 1 },
       band: 'evening',
       currentPlaceId: 3,
       neighborsOf,
     })
-    expect(next).toBe(1)
+    expect(next).toBe(3)
   })
 
-  it('never returns a place that is not current, a neighbour, or the target', () => {
+  it('never returns a place that is not current or a neighbour', () => {
     const target = 6
     const current = 2
     const next = nextPlaceId({
@@ -54,8 +64,9 @@ describe('nextPlaceId — routine drives movement', () => {
       band: 'night',
       currentPlaceId: current,
       neighborsOf,
+      adjacency: ADJACENCY,
     })
-    const allowed = new Set<number>([current, target, ...neighborsOf(current)])
+    const allowed = new Set<number>([current, ...neighborsOf(current)])
     expect(next).not.toBeNull()
     expect(allowed.has(next as number)).toBe(true)
   })
