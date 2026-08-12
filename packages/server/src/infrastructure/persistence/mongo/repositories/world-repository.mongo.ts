@@ -308,4 +308,34 @@ export class MongoWorldRepository implements WorldRepository {
       { session: this.ctx.currentSession ?? undefined },
     )
   }
+
+  async setPlayerModel(worldId: number, playerModelJson: string | null): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { playerModelJson } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
+  async setAntagonistCharacterId(
+    worldId: number,
+    characterId: number | null,
+  ): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { antagonistCharacterId: characterId } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
+  async setInfluencePacket(
+    worldId: number,
+    influencePacketJson: string | null,
+  ): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { influencePacketJson } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

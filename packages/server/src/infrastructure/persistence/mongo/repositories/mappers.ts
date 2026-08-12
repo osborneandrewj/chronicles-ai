@@ -87,6 +87,9 @@ export function mapWorld(d: WorldDoc): World {
     parent_world_id: d.parentWorldId ?? null,
     meta_story_json: d.metaStory ?? null,
     genre_tags: d.genreTags ?? null,
+    player_model_json: d.playerModelJson ?? null,
+    antagonist_character_id: d.antagonistCharacterId ?? null,
+    influence_packet_json: d.influencePacketJson ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }
@@ -149,6 +152,7 @@ export function mapCharacter(d: CharacterDoc): Character {
     aliases: d.aliases,
     daily_loop: d.dailyLoop ? JSON.stringify(d.dailyLoop) : null,
     speech_register: d.speechRegister ?? null,
+    clearance_level: (d.clearanceLevel as Character['clearance_level']) || 'public_crew',
     created_at: toSqliteDatetime(d.createdAt),
     updated_at: toSqliteDatetime(d.updatedAt),
   }

@@ -103,6 +103,9 @@ function fakeWorld(exists: boolean): WorldRepository {
     setLayer: async () => {},
     setMetaStory: async () => {},
     setGenreTags: async () => {},
+    setPlayerModel: async () => {},
+    setAntagonistCharacterId: async () => {},
+    setInfluencePacket: async () => {},
   }
 }
 

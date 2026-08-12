@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 
-import { returnToHub } from '@/application/use-cases/return-to-hub'
+import { closeSubworldAndReturn } from '@/application/use-cases/close-subworld-and-return'
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
 import { HubSimulationsMenu, type HubSimulationEntry } from '@/components/HubSimulationsMenu'
 import { getContainer } from '@/composition/container'
@@ -24,8 +24,18 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   if (!Number.isInteger(worldId) || worldId <= 0) notFound()
 
   const container = getContainer()
-  const { characters, decks, dossiers, occupancy, places, scenes, sessions, worlds, turns: turnRepo } =
-    container
+  const {
+    characters,
+    decks,
+    dossiers,
+    occupancy,
+    places,
+    scenes,
+    sessions,
+    simRuns,
+    worlds,
+    turns: turnRepo,
+  } = container
   const world = await worlds.getWorld(worldId)
   if (!world) notFound()
 
@@ -33,7 +43,7 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   // where the player actually is. If they died in the live simulation, awaken
   // them into the hub here — anchored on the authoritative `status: 'dead'`, not
   // fragile prose matching — then route to wherever they now are. Guarded by
-  // has_awoken so it runs exactly once.
+  // has_awoken so it runs exactly once. Idempotent close writes one SimRunReport.
   const session = await sessions.byWorld(worldId)
   if (session) {
     if (
@@ -44,9 +54,23 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       const cast = await characters.forWorld(worldId)
       const player = cast.find((c) => c.is_player === 1)
       if (player?.status === 'dead') {
-        const result = await returnToHub(
-          { session },
-          { worlds, places, scenes, characters, sessions, decks },
+        const result = await closeSubworldAndReturn(
+          {
+            session,
+            subworldId: worldId,
+            exitKind: 'death',
+            sourceTurnId: null,
+          },
+          {
+            worlds,
+            places,
+            scenes,
+            characters,
+            sessions,
+            decks,
+            simRuns,
+            turns: turnRepo,
+          },
         )
         const hubWorldId = result?.hubWorldId ?? session.hub_world_id
         // Item 4: the narrator takes the first hub turn — the awakening lands

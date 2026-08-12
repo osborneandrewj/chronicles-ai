@@ -63,6 +63,10 @@ export type WorldDoc = {
   // Genre signal (genre-coupling audit, Phase 4): JSON string array of era/tone
   // tags, or null. SQLite: genre_tags.
   genreTags: string | null
+  // Hub sim ops
+  playerModelJson: string | null
+  antagonistCharacterId: number | null
+  influencePacketJson: string | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -83,6 +87,9 @@ const WorldSchema = new Schema<WorldDoc>(
     parentWorldId: { type: Number, default: null },
     metaStory: { type: String, default: null },
     genreTags: { type: String, default: null },
+    playerModelJson: { type: String, default: null },
+    antagonistCharacterId: { type: Number, default: null },
+    influencePacketJson: { type: String, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },
@@ -156,6 +163,7 @@ export type CharacterDoc = {
   dailyLoop: Record<string, unknown> | null
   /** Sticky how-they-talk fingerprint; author-once. */
   speechRegister: string | null
+  clearanceLevel: string
   appearanceCount: number
   lastSeenTurnId: number | null
   lastAgentTickTurnId: number | null
@@ -198,6 +206,7 @@ const CharacterSchema = new Schema<CharacterDoc>(
     traits: { type: Schema.Types.Mixed, default: null },
     dailyLoop: { type: Schema.Types.Mixed, default: null },
     speechRegister: { type: String, default: null },
+    clearanceLevel: { type: String, default: 'public_crew' },
     appearanceCount: { type: Number, default: 0 },
     lastSeenTurnId: { type: Number, default: null },
     lastAgentTickTurnId: { type: Number, default: null },
@@ -886,6 +895,47 @@ const SimulationSessionSchema = new Schema<SimulationSessionDoc>(
 SimulationSessionSchema.index({ hubWorldId: 1 })
 SimulationSessionSchema.index({ subworldWorldId: 1 })
 
+// Hub sim run reports (compact intel artifacts; unique hub+subworld).
+export type SimRunReportDoc = {
+  _id: Types.ObjectId
+  id: number
+  hubWorldId: number
+  subworldId: number
+  codename: string
+  genreTags: string[]
+  status: string
+  headline: string
+  summary: string
+  outcomes: string[]
+  anomalies: string[]
+  personsOfInterest: string[]
+  minClearance: string
+  sourceTurnId: number | null
+  createdAt: Date
+}
+
+const SimRunReportSchema = new Schema<SimRunReportDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    hubWorldId: { type: Number, required: true },
+    subworldId: { type: Number, required: true },
+    codename: { type: String, required: true },
+    genreTags: { type: [String], default: [] },
+    status: { type: String, required: true },
+    headline: { type: String, required: true },
+    summary: { type: String, required: true },
+    outcomes: { type: [String], default: [] },
+    anomalies: { type: [String], default: [] },
+    personsOfInterest: { type: [String], default: [] },
+    minClearance: { type: String, default: 'operator' },
+    sourceTurnId: { type: Number, default: null },
+    createdAt: { type: Date, required: true },
+  },
+  { collection: 'sim_run_reports', minimize: false, versionKey: false },
+)
+SimRunReportSchema.index({ hubWorldId: 1, subworldId: 1 }, { unique: true })
+SimRunReportSchema.index({ hubWorldId: 1, id: -1 })
+
 export type MongoModels = {
   Counter: Model<CounterDoc>
   SimulationSession: Model<SimulationSessionDoc>
@@ -907,6 +957,7 @@ export type MongoModels = {
   OccupancySnapshot: Model<OccupancySnapshotDoc>
   TtsAudioCache: Model<TtsAudioCacheDoc>
   WorldCorrection: Model<WorldCorrectionDoc>
+  SimRunReport: Model<SimRunReportDoc>
 }
 
 // Bind one schema to a connection, reusing an already-compiled model so
@@ -952,5 +1003,6 @@ export function buildModels(connection: Connection): MongoModels {
     OccupancySnapshot: bind(connection, 'OccupancySnapshot', OccupancySnapshotSchema),
     TtsAudioCache: bind(connection, 'TtsAudioCache', TtsAudioCacheSchema),
     WorldCorrection: bind(connection, 'WorldCorrection', WorldCorrectionSchema),
+    SimRunReport: bind(connection, 'SimRunReport', SimRunReportSchema),
   }
 }

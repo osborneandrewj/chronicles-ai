@@ -30,6 +30,12 @@ export type World = {
   // captured at creation (e.g. '["roman","ancient","political"]'); null when no
   // genre was declared. Consumers treat null as "no signal" (current behavior).
   genre_tags: string | null
+  // Hub ops: compact PlayerModel JSON (antagonist intel). Null until first debrief.
+  player_model_json: string | null
+  // Hub ops: linked antagonist character id on this hub world.
+  antagonist_character_id: number | null
+  // Subworld ops: InfluencePacket JSON seeded at enter. Null when none.
+  influence_packet_json: string | null
   created_at: string
 }
 

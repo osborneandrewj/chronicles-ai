@@ -4,6 +4,13 @@
 
 export type CharacterAgencyLevel = 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
 
+/** Hub ops clearance. Subworld characters keep the default and ignore it. */
+export type ClearanceLevel =
+  | 'public_crew'
+  | 'operator'
+  | 'classified'
+  | 'antagonist'
+
 export type Character = {
   id: number
   world_id: number
@@ -36,6 +43,11 @@ export type Character = {
   daily_loop: string | null
   /** Sticky how-they-talk fingerprint; author-once, ≤200 chars. Null until set. */
   speech_register: string | null
+  /**
+   * Hub simulation-ops clearance (default public_crew). First-class projected
+   * field — not traits JSON. Ignored on subworlds.
+   */
+  clearance_level: ClearanceLevel
   created_at: string
   updated_at: string
 }

@@ -390,17 +390,19 @@ and two are post-stream factual (reconciler, archivist).
 
 ## 5. Context Assembly — What the Narrator Sees [ESSENTIAL]
 
-The narrator prompt is assembled from a **system message** + **compacted history** + **one trailing
-user message**. There is no token-counting budget enforcer in the shipped code (the documented 8K
-assembler is aspirational); instead, history is bounded by turn count and content is truncated
-field-by-field. A rebuild may add a real token budget, but must reproduce the *content and ordering*.
+The narrator prompt is assembled from a **system message** + **full prior history** (20 role rows) +
+**one trailing user message**. There is no token-counting budget enforcer that compacts those rows;
+history is bounded by role-row count after OOC sanitization. Authoritative STATE fields remain
+truncated field-by-field. A rebuild may reintroduce packing beyond this window, but must preserve
+ordering and the full short-term continuity buffer.
 
-### 5.1 History compaction [ESSENTIAL]
-- Load the last `NARRATOR_HISTORY_TURNS = 13` turns; the final one is the current action (handled
-  separately), leaving 12 of prior history.
-- Of those, the most recent `FULL_HISTORY_TURNS = 6` are included **verbatim** as role-tagged
-  messages; older ones are **compacted** to `[Earlier narrator/player turn, compacted: <first 320
-  chars>]`.
+### 5.1 History assembly [ESSENTIAL]
+- Load the last `NARRATOR_HISTORY_FETCH = 21` role rows (`NARRATOR_PRIOR_ROLE_ROWS = 20` prior +
+  the current user turn already inserted); drop the current user turn via `priorHistory =
+  allRecent.slice(0, -1)` so it is not duplicated with the pinned PLAYER ACTION message.
+- All 20 prior role rows are included **verbatim** as role-tagged messages after OOC / policy-
+  refusal sanitization. Budget-based compaction is **off** for this window (the pure
+  `history-packer` service remains available but is not used on the narrator path).
 
 ### 5.2 The trailing user message
 Concatenation, in order:
@@ -745,9 +747,10 @@ framework, and UI toolkit are free to differ.
 
 | Constant | Value | Where |
 |---|---|---|
-| `NARRATOR_HISTORY_TURNS` | 13 | history window |
-| `FULL_HISTORY_TURNS` | 6 | verbatim vs compacted boundary |
-| compaction excerpt | 320 chars | older-turn compaction |
+| `NARRATOR_PRIOR_ROLE_ROWS` | 20 | full prior role rows (uncompacted) |
+| `NARRATOR_HISTORY_FETCH` | 21 | prior + current user turn |
+| `MAX_ARCHIVIST_LAG_ASSISTANT_TURNS` | 2 | force LLM extract when lag ≥ this |
+| `ARCHIVIST_EXTRACT_WINDOW_ROLE_ROWS` | 8 | archivist recent-window cap |
 | narrator `stopWhen` | `stepCountIs(2)` | one tool round-trip |
 | `maxDuration` | 60s | chat route |
 | `MAX_REVERIES_PER_NPC` | 3 | reveries |

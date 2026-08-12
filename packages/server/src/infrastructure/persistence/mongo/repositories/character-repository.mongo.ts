@@ -588,4 +588,15 @@ export class MongoCharacterRepository implements CharacterRepository {
       { session: this.session },
     )
   }
+
+  async setClearanceLevel(
+    characterId: number,
+    clearance: import('@/domain/entities').ClearanceLevel,
+  ): Promise<void> {
+    await this.ctx.models.Character.updateOne(
+      { id: characterId },
+      { $set: { clearanceLevel: clearance, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
 }
