@@ -344,11 +344,12 @@ const insertWorldCorrectionStmt = db.prepare<
 // Scrollback for the inspector's Archivist tab. DESC by id so the newest row
 // is first; the UI reverses for chronological rendering. Bounded to keep
 // payloads small — older corrections are still in the table, just not
-// surfaced.
+// surfaced. `hidden = 0` likewise withholds operator-hidden rows without
+// deleting them: the table stays append-only (v35).
 const worldCorrectionsForWorldStmt = db.prepare<[number, number]>(
   `SELECT id, world_id, turn_id, player_text, archivist_reply, applied_patch, created_at
    FROM world_corrections
-   WHERE world_id = ?
+   WHERE world_id = ? AND hidden = 0
    ORDER BY id DESC
    LIMIT ?`,
 )

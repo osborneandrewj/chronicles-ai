@@ -831,6 +831,8 @@ export type WorldCorrectionDoc = {
   playerText: string
   archivistReply: string
   appliedPatch: string
+  /** Operator-set; withholds the row from the Archivist tab without deleting it. */
+  hidden: boolean
   createdAt: Date
 }
 
@@ -842,6 +844,7 @@ const WorldCorrectionSchema = new Schema<WorldCorrectionDoc>(
     playerText: { type: String, required: true },
     archivistReply: { type: String, required: true },
     appliedPatch: { type: String, required: true },
+    hidden: { type: Boolean, default: false },
     createdAt: { type: Date, required: true },
   },
   { collection: 'world_corrections', minimize: false, versionKey: false },

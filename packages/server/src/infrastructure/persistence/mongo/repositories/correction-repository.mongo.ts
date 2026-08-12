@@ -8,7 +8,8 @@ import { mapWorldCorrection, toSqliteDatetime } from './mappers'
 
 // Mongo WorldCorrectionRepository (spec §4.2) — append-only audit of
 // player→archivist corrections. `appliedPatch` is the serialized ArchivistPatch
-// JSON so a row is self-describing. Read newest-first.
+// JSON so a row is self-describing. Read newest-first, excluding
+// operator-hidden rows (v35) — hiding withholds, it never deletes.
 export class MongoCorrectionRepository implements CorrectionRepository {
   constructor(private readonly ctx: MongoContext) {}
 
@@ -48,7 +49,7 @@ export class MongoCorrectionRepository implements CorrectionRepository {
   }
 
   async forWorld(worldId: number, limit = 50): Promise<WorldCorrectionRow[]> {
-    const docs = await this.ctx.models.WorldCorrection.find({ worldId })
+    const docs = await this.ctx.models.WorldCorrection.find({ worldId, hidden: { $ne: true } })
       .sort({ id: -1 })
       .limit(Math.max(1, Math.min(200, limit)))
       .lean()

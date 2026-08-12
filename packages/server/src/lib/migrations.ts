@@ -969,6 +969,18 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'characters', 'speech_register', 'TEXT')
     },
   },
+  {
+    // Hideable correction scrollback. `world_corrections` stays append-only —
+    // rows are never deleted — but a hidden row is withheld from the
+    // inspector's Archivist tab. Set out-of-band by an operator; there is
+    // deliberately no in-app writer, so neither the narrator, the archivist,
+    // nor a stray route can flip it.
+    version: 35,
+    name: 'world_corrections_hidden',
+    up: (db) => {
+      addColumnIfMissing(db, 'world_corrections', 'hidden', 'INTEGER NOT NULL DEFAULT 0')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,
