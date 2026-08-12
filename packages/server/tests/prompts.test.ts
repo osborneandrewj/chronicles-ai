@@ -159,3 +159,20 @@ describe('prompts — NPC initiation (P2/P4/P5)', () => {
     expect(p).toMatch(/floor is ONE engaged NPC/i)
   })
 })
+
+describe('prompts — plot lifecycle continuity', () => {
+  it('archivist prompt locks closed-thread lifecycle and forbids implicit reopen', () => {
+    const p = loadPrompt('archivist-system').toLowerCase()
+    expect(p).toMatch(/lifecycle lock|closed threads stay closed/)
+    expect(p).toMatch(/recently_closed_threads/)
+    expect(p).toMatch(/explicit `?story_threads/)
+    expect(p).toMatch(/do not revive|not reopen|must \*\*not\*\* reopen|must not reopen/)
+  })
+
+  it('npc-agent prompt tells agents to drop obsolete goals when plot is closed', () => {
+    const p = loadPrompt('npc-agent-system').toLowerCase()
+    expect(p).toMatch(/plot lifecycle|story context/)
+    expect(p).toMatch(/recently_closed/)
+    expect(p).toMatch(/closed objectives|obsolete/)
+  })
+})

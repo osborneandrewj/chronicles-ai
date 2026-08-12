@@ -15,6 +15,7 @@ function npcAgentDeps(): NpcAgentDeps {
   const c = getContainer()
   return {
     characters: c.characters,
+    dossiers: c.dossiers,
     npcIntents: c.npcIntents,
     places: c.places,
     reveries: c.reveries,
@@ -87,6 +88,101 @@ describe('story dossier state', () => {
     expect(formatDossierBlock({ threads: [], clues: [], objectives: [], resources: [], timeline: [] })).toBe(
       '',
     )
+  })
+
+  it('renders recently closed threads and objectives without making them primary pressure', async () => {
+    const { worldId, turnId } = seedWorld()
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'Identify the relay fragment',
+          kind: 'quest',
+          status: 'active',
+          summary: 'Still open pressure.',
+        },
+        {
+          title: 'The Ledger Job',
+          kind: 'quest',
+          status: 'resolved',
+          summary: 'Manifests delivered last night.',
+        },
+      ],
+      story_objectives: [
+        {
+          title: 'Find the transmitter',
+          thread_title: 'Identify the relay fragment',
+          status: 'active',
+          detail: 'Follow the signal.',
+        },
+        {
+          title: 'Deliver the manifests',
+          thread_title: 'The Ledger Job',
+          status: 'completed',
+          detail: 'Handed over at the quay.',
+        },
+      ],
+    })
+
+    const state = await loadNarratorState(worldId)
+    const block = formatDossierBlock(state.dossier)
+
+    expect(block).toContain('### RECENTLY CLOSED')
+    expect(block).toContain('Treat these as settled')
+    expect(block).toContain('The Ledger Job')
+    expect(block).toContain('(resolved)')
+    expect(block).toContain('Deliver the manifests')
+    expect(block).toContain('(completed)')
+    // Active still first / primary.
+    expect(block).toContain('### ACTIVE QUESTS')
+    expect(block).toContain('Identify the relay fragment')
+    expect(block.indexOf('### ACTIVE QUESTS')).toBeLessThan(block.indexOf('### RECENTLY CLOSED'))
+    // Closed must not appear under active quests section lines as playable pressure title-only —
+    // primary pressure should be the active quest.
+    expect(block).toContain('### PRIMARY PRESSURE')
+    const primarySection = block.slice(
+      block.indexOf('### PRIMARY PRESSURE'),
+      block.indexOf('### ACTIVE QUESTS'),
+    )
+    expect(primarySection).toContain('Identify the relay fragment')
+    expect(primarySection).not.toContain('The Ledger Job')
+  })
+
+  it('renders closed-only dossier (no active pressure) with RECENTLY CLOSED', async () => {
+    const { worldId, turnId } = seedWorld()
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'The Ledger Job',
+          kind: 'quest',
+          status: 'resolved',
+          summary: 'Finished.',
+        },
+      ],
+    })
+    const state = await loadNarratorState(worldId)
+    const block = formatDossierBlock(state.dossier)
+    expect(block).toContain('## STORY DOSSIER')
+    expect(block).toContain('### RECENTLY CLOSED')
+    expect(block).toContain('The Ledger Job')
+    expect(block).not.toContain('### ACTIVE QUESTS')
+  })
+
+  it('caps recently closed threads to three', async () => {
+    const { worldId, turnId } = seedWorld()
+    const titles = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo']
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: titles.map((title) => ({
+        title,
+        kind: 'quest' as const,
+        status: 'resolved' as const,
+        summary: `${title} done`,
+      })),
+    })
+    const state = await loadNarratorState(worldId)
+    const block = formatDossierBlock(state.dossier)
+    const closedSection = block.slice(block.indexOf('### RECENTLY CLOSED'))
+    const closedTitles = titles.filter((t) => closedSection.includes(t))
+    expect(closedTitles.length).toBeLessThanOrEqual(3)
   })
 
   it('renders NPC cognition into the narrator state block', async () => {

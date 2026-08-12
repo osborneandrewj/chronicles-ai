@@ -45,7 +45,12 @@ import {
 import { eraFromGenreTags, parseGenreTags } from '@/domain/services/occupancy-sim'
 import { summarizePlanSalience } from '@/domain/services/plan-salience'
 import { selectBleedThreads } from '@/domain/services/select-bleed-threads'
-import { hasRichStorySignal, shouldBootstrapThread } from '@/domain/services/story-signal'
+import { countActiveDossierRows } from '@/domain/services/closed-dossier'
+import {
+  hasRichStorySignal,
+  shouldBootstrapThread,
+  shouldRunArchivistLlm,
+} from '@/domain/services/story-signal'
 import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
@@ -239,7 +244,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // Open-order targets force an agent tick even when no present agents (S2).
   const forceAgentForOpenOrder =
     activeOpenOrder?.status === 'pending' && activeOpenOrder.targetCharacterId != null
-  const npcAgentDeps = { characters, npcIntents, places, reveries, unitOfWork, worlds }
+  const npcAgentDeps = { characters, dossiers, npcIntents, places, reveries, unitOfWork, worlds }
   const era = eraFromGenreTags(parseGenreTags(world.genre_tags))
 
   const [npcAgentSettled, occupancySettled] = await Promise.all([
@@ -753,7 +758,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       }
 
       const deterministicPatch = extractDeterministicPatch(priorState, playerText, trimmed)
-      const runArchivistLlm = shouldRunArchivistLlm(playerText, trimmed, !!deterministicPatch)
+      const activeDossierCount = countActiveDossierRows(priorState.dossier)
+      const runArchivistLlm = shouldRunArchivistLlm(
+        playerText,
+        trimmed,
+        !!deterministicPatch,
+        activeDossierCount,
+      )
 
       if (!runArchivistLlm && deterministicPatch) {
         await applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
@@ -934,19 +945,6 @@ function compactHistory(
           content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${turn.content}]`,
         }
       : { role: turn.role, content: turn.content },
-  )
-}
-
-function shouldRunArchivistLlm(
-  playerText: string,
-  narratorText: string,
-  hasDeterministicPatch: boolean,
-): boolean {
-  if (hasRichStorySignal(playerText, narratorText)) return true
-  const text = `${playerText}\n${narratorText}`.toLowerCase()
-  return (
-    !hasDeterministicPatch &&
-    /\b(leave|left|arrive|arrives|enter|entered|go to|drive to|walk to)\b/.test(text)
   )
 }
 

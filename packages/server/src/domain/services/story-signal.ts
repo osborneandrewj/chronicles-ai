@@ -6,6 +6,11 @@
 // word "message" in "leave a message" used to fire a full Haiku extract. Those
 // false positives burned tokens without changing state. Prefer structured
 // signals (named intro, acquisition, injury, quoted dialogue, explicit travel).
+//
+// Resolution language is a *separate* helper so bootstrap / general extract stay
+// precision-biased while outcome turns with active dossier rows still reach the
+// archivist (plot-lifecycle-continuity).
+
 export function hasRichStorySignal(playerText: string, narratorText: string): boolean {
   const combined = `${playerText}\n${narratorText}`
   const text = combined.toLowerCase()
@@ -63,6 +68,53 @@ export function hasRichStorySignal(playerText: string, narratorText: string): bo
   return false
 }
 
+/**
+ * Outcome / closure language — used only when the world already has active
+ * dossier rows, so ambient uses of "clear" / "reveal" don't burn Haiku tokens
+ * on empty-dossier worlds.
+ */
+export function hasResolutionStorySignal(playerText: string, narratorText: string): boolean {
+  const text = `${playerText}\n${narratorText}`.toLowerCase()
+
+  // Completion / resolution verbs (prefer multi-word / story-shaped where easy).
+  if (
+    /\b(complet(?:e|ed|es|ing)|finish(?:ed|es|ing)?|resolv(?:e|ed|es|ing)|settl(?:e|ed|es|ing)|deliver(?:ed|s|ing)?|secur(?:e|ed|es|ing)|recover(?:ed|s|ing)?|defeat(?:ed|s|ing)?|escap(?:e|ed|es|ing)|confess(?:ed|es|ing)?|prov(?:e|ed|es|ing)|fail(?:ed|s|ing)?)\b/.test(
+      text,
+    )
+  ) {
+    return true
+  }
+
+  // Pay / clear in mission-shaped phrases (avoid bare "pay attention", "clear the table").
+  if (
+    /\b(pay(?:s|ed|ing)?\s+(the\s+)?(debt|ransom|fee|bribe|toll)|debt\s+paid|paid\s+in\s+full)\b/.test(
+      text,
+    ) ||
+    /\b(clear(?:s|ed|ing)?\s+(your\s+|his\s+|her\s+|their\s+|the\s+)?(name|debt|charges?|record))\b/.test(
+      text,
+    )
+  ) {
+    return true
+  }
+
+  // Reveal / prove in evidence-shaped phrases.
+  if (
+    /\b(reveal(?:s|ed|ing)?\s+(the\s+)?(truth|secret|name|identity|plan|evidence))\b/.test(text) ||
+    /\b(proof|proven|case\s+closed|job\s+(is\s+)?done|objective\s+complete|mission\s+complete|mission\s+accomplished)\b/.test(
+      text,
+    )
+  ) {
+    return true
+  }
+
+  // Missed deadline / failure clock.
+  if (/\b(miss(?:ed|es|ing)?\s+(the\s+)?deadline|deadline\s+(passed|missed)|too\s+late)\b/.test(text)) {
+    return true
+  }
+
+  return false
+}
+
 // Pure gate for the focused thread-bootstrap fallback: run it only when a
 // bootstrap was warranted (empty dossier + story signal, decided by the caller)
 // AND, after the main archivist patch was applied this turn, the world STILL has
@@ -74,4 +126,27 @@ export function shouldBootstrapThread(args: {
   hasActiveThreadAfterApply: boolean
 }): boolean {
   return args.bootstrapWarranted && !args.hasActiveThreadAfterApply
+}
+
+/**
+ * Whether the archivist LLM should run this turn.
+ * - Rich story signal → always.
+ * - Active dossier + resolution language → run (so closures get marked).
+ * - Travel language without deterministic patch → run (existing fallback).
+ */
+export function shouldRunArchivistLlm(
+  playerText: string,
+  narratorText: string,
+  hasDeterministicPatch: boolean,
+  activeDossierCount = 0,
+): boolean {
+  if (hasRichStorySignal(playerText, narratorText)) return true
+  if (activeDossierCount > 0 && hasResolutionStorySignal(playerText, narratorText)) {
+    return true
+  }
+  const text = `${playerText}\n${narratorText}`.toLowerCase()
+  return (
+    !hasDeterministicPatch &&
+    /\b(leave|left|arrive|arrives|enter|entered|go to|drive to|walk to)\b/.test(text)
+  )
 }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   applyArchivistPatch,
+  buildArchivistPriorState,
   buildArchivistUserContent,
   extractDeterministicPatch,
   normalizeTransitPlaceName,
@@ -54,6 +55,58 @@ describe('buildArchivistUserContent (opening bootstrap, A)', () => {
     expect(content).toContain(base.priorBlock)
     expect(content).toContain(base.transcript)
     expect(content.trimEnd().endsWith('Return the patch.')).toBe(true)
+  })
+})
+
+describe('buildArchivistPriorState', () => {
+  it('includes recently closed threads and objectives', async () => {
+    const { worldId, turnId } = seedWorld(`Prior-${Math.random()}`)
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'Live Thread',
+          kind: 'quest',
+          status: 'active',
+          summary: 'Still going',
+        },
+        {
+          title: 'Closed Thread',
+          kind: 'quest',
+          status: 'resolved',
+          summary: 'Done work',
+        },
+      ],
+      story_objectives: [
+        {
+          title: 'Live Obj',
+          thread_title: 'Live Thread',
+          status: 'active',
+        },
+        {
+          title: 'Closed Obj',
+          thread_title: 'Closed Thread',
+          status: 'completed',
+          detail: 'Finished',
+        },
+      ],
+    })
+    const prior = await loadNarratorState(worldId)
+    const state = buildArchivistPriorState(prior) as {
+      dossier: {
+        active_threads: Array<{ title: string }>
+        current_objectives: Array<{ title: string }>
+        recently_closed_threads: Array<{ title: string; status: string }>
+        recently_closed_objectives: Array<{ title: string; status: string }>
+      }
+    }
+    expect(state.dossier.active_threads.some((t) => t.title === 'Live Thread')).toBe(true)
+    expect(state.dossier.recently_closed_threads.some((t) => t.title === 'Closed Thread')).toBe(
+      true,
+    )
+    expect(
+      state.dossier.recently_closed_objectives.some((o) => o.title === 'Closed Obj'),
+    ).toBe(true)
+    expect(state.dossier.current_objectives.some((o) => o.title === 'Live Obj')).toBe(true)
   })
 })
 
@@ -229,6 +282,135 @@ describe('applyArchivistPatch', () => {
     expect(threads.find((t) => t.title === 'The Dead Forge')!.kind).toBe('quest')
     // A deliberate threat keeps its kind even with an objective attached.
     expect(threads.find((t) => t.title === 'The Hostage Standoff')!.kind).toBe('threat')
+  })
+
+  it('does not reopen a resolved thread when a completed objective references it', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'The Ledger Job',
+          kind: 'quest',
+          status: 'resolved',
+          summary: 'Manifests delivered.',
+        },
+      ],
+    })
+    expect(getStoryDossierForWorld(worldId).threads[0].status).toBe('resolved')
+
+    await applyArchivistPatch(worldId, turnId, {
+      story_objectives: [
+        {
+          title: 'Deliver the manifests',
+          thread_title: 'The Ledger Job',
+          status: 'completed',
+          detail: 'Handed over at the quay.',
+        },
+      ],
+    })
+
+    const dossier = getStoryDossierForWorld(worldId)
+    expect(dossier.threads.find((t) => t.title === 'The Ledger Job')!.status).toBe('resolved')
+    expect(dossier.objectives[0].status).toBe('completed')
+    expect(dossier.objectives[0].thread_title).toBe('The Ledger Job')
+  })
+
+  it('does not reopen a failed thread when a timeline event references it', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'The Ransom Clock',
+          kind: 'threat',
+          status: 'failed',
+          summary: 'Deadline passed without payment.',
+        },
+      ],
+    })
+    await applyArchivistPatch(worldId, turnId, {
+      timeline_events: [
+        {
+          title: 'Deadline missed',
+          thread_title: 'The Ransom Clock',
+          summary: 'The clock ran out.',
+          importance: 4,
+        },
+      ],
+    })
+    expect(getStoryDossierForWorld(worldId).threads[0].status).toBe('failed')
+  })
+
+  it('does not reopen a dormant thread when a clue references it', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'The Quiet Debt',
+          kind: 'background',
+          status: 'dormant',
+          summary: 'Old money, no current pressure.',
+        },
+      ],
+    })
+    await applyArchivistPatch(worldId, turnId, {
+      story_clues: [
+        {
+          title: 'Torn ledger page',
+          thread_title: 'The Quiet Debt',
+          detail: 'A name half-scratched out.',
+        },
+      ],
+    })
+    const dossier = getStoryDossierForWorld(worldId)
+    expect(dossier.threads[0].status).toBe('dormant')
+    expect(dossier.clues[0].thread_title).toBe('The Quiet Debt')
+  })
+
+  it('still opens a brand-new thread as active when an objective references a new title', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_objectives: [
+        { title: 'Find the courier', thread_title: 'The Missing Courier' },
+      ],
+    })
+    const thread = getStoryDossierForWorld(worldId).threads.find(
+      (t) => t.title === 'The Missing Courier',
+    )!
+    expect(thread.status).toBe('active')
+    expect(thread.kind).toBe('quest')
+  })
+
+  it('still upgrades an active mystery to quest when an objective references it', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        { title: 'Strange Lights', kind: 'mystery', status: 'active', summary: 'Lights over the bay.' },
+      ],
+    })
+    await applyArchivistPatch(worldId, turnId, {
+      story_objectives: [
+        { title: 'Investigate the lights', thread_title: 'Strange Lights' },
+      ],
+    })
+    const thread = getStoryDossierForWorld(worldId).threads.find((t) => t.title === 'Strange Lights')!
+    expect(thread.status).toBe('active')
+    expect(thread.kind).toBe('quest')
+  })
+
+  it('does not upgrade a resolved mystery to quest via objective reference', async () => {
+    await applyArchivistPatch(worldId, turnId, {
+      story_threads: [
+        {
+          title: 'Strange Lights',
+          kind: 'mystery',
+          status: 'resolved',
+          summary: 'Just marsh gas.',
+        },
+      ],
+    })
+    await applyArchivistPatch(worldId, turnId, {
+      story_objectives: [
+        { title: 'Write the report', thread_title: 'Strange Lights', status: 'completed' },
+      ],
+    })
+    const thread = getStoryDossierForWorld(worldId).threads.find((t) => t.title === 'Strange Lights')!
+    expect(thread.status).toBe('resolved')
+    expect(thread.kind).toBe('mystery')
   })
 
   it('inserts a new character with description and place', async () => {
