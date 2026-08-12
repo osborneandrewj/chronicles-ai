@@ -17,7 +17,12 @@ import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
-import { packNarratorHistory } from '@/domain/services/history-packer'
+import {
+  ARCHIVIST_EXTRACT_WINDOW_ROLE_ROWS,
+  assistantTurnsSinceLastSuccessfulArchivist,
+  selectArchivistExtractWindow,
+  shouldRunArchivistLlmWithLag,
+} from '@/domain/services/archivist-run-policy'
 import {
   isOocPolicyRefusal,
   sanitizeNarratorHistory,
@@ -87,15 +92,11 @@ import {
 // source stream drains, which happens after onFinish has persisted the turn);
 // the background-task registration of the archivist promise (drain on SIGTERM).
 
-// How many recent turns to pull as candidates for the narrator's history. The
-// budget packer below decides how many of these stay full vs. get compacted.
-const NARRATOR_HISTORY_TURNS = 16
-// Token budget for FULL-content history messages (≈4–5K of the narrator's 8K
-// input). Narration is canonical, so full narrator turns are packed newest-first
-// up to this budget before any get compacted (A5). ~4 chars ≈ 1 token.
-const HISTORY_FULL_TOKEN_BUDGET = 4200
-// Older turns that don't fit the full budget are compacted to this many chars.
-const COMPACTED_TURN_CHARS = 600
+// Prior role rows the narrator sees as full prose (user + assistant). The
+// current player turn is included in the fetch and then dropped via
+// priorHistory = allRecent.slice(0, -1), so fetch limit is prior + 1.
+const NARRATOR_PRIOR_ROLE_ROWS = 20
+const NARRATOR_HISTORY_FETCH = NARRATOR_PRIOR_ROLE_ROWS + 1
 // How many prior off-screen sim beats to surface as the soft fallback advisory
 // when no developing subplot is detected.
 const OFF_SCREEN_BEATS = 2
@@ -103,6 +104,10 @@ const OFF_SCREEN_BEATS = 2
 // so a multi-beat subplot (a forming conspiracy) can be detected and promoted
 // rather than dropped after 2 loose beats (A7).
 const SIM_ARC_WINDOW = 14
+// Role-row lookback for lag math + extract-window truncation detection.
+// Wider than ARCHIVIST_EXTRACT_WINDOW_ROLE_ROWS so we can see since-last-success
+// overflow and stamp window_truncated rather than silently drop deferred prose.
+const ARCHIVIST_LAG_LOOKBACK_ROLE_ROWS = 20
 
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
@@ -166,8 +171,10 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     )
   }
 
-  // One recent-turns fetch for agent + narrator history (Track A5).
-  const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_TURNS)
+  // One recent-turns fetch for agent + narrator history.
+  // Fetch includes the just-inserted current user turn; priorHistory drops it
+  // so it is not duplicated with the pinned PLAYER ACTION message.
+  const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_FETCH)
   const recentForAgents = allRecent.slice(-4)
   const priorHistory = allRecent.slice(0, -1)
 
@@ -429,7 +436,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         })
     : ''
 
-  const historyMessages = compactHistory(priorHistory)
+  const historyMessages = buildHistoryMessages(priorHistory)
   const presentNpcCount = narratorState.presentCharacters.filter((c) => c.is_player !== 1).length
   const activeObjectiveTitles = narratorState.dossier.objectives
     .filter((o) => o.status === 'active' || o.status === 'blocked')
@@ -759,35 +766,63 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
       const deterministicPatch = extractDeterministicPatch(priorState, playerText, trimmed)
       const activeDossierCount = countActiveDossierRows(priorState.dossier)
-      const runArchivistLlm = shouldRunArchivistLlm(
+      const signal = shouldRunArchivistLlm(
         playerText,
         trimmed,
         !!deterministicPatch,
         activeDossierCount,
       )
 
-      if (!runArchivistLlm && deterministicPatch) {
+      // Lag is computed after this narrator turn is inserted and before its
+      // archivist block is written. Missing archivist metadata still counts.
+      const recentForLag = await turns.recentTurns(worldId, ARCHIVIST_LAG_LOOKBACK_ROLE_ROWS)
+      const assistantRows = recentForLag.filter((t) => t.role === 'assistant')
+      let lagBefore = 0
+      let lastSuccessTurnId: number | null = null
+      if (assistantRows.length > 0) {
+        const minId = assistantRows[0].id
+        const maxIdExclusive = assistantRows[assistantRows.length - 1].id + 1
+        const metaRows = await turns.assistantMetadataInRange(worldId, minId, maxIdExclusive)
+        const metaById = new Map(metaRows.map((m) => [m.id, m.metadata]))
+        const lagResult = assistantTurnsSinceLastSuccessfulArchivist(
+          assistantRows.map((t) => ({
+            id: t.id,
+            metadata: metaById.get(t.id) ?? {},
+          })),
+        )
+        lagBefore = lagResult.lag
+        lastSuccessTurnId = lagResult.lastSuccessTurnId
+      }
+      const decision = shouldRunArchivistLlmWithLag({ signal, lag: lagBefore })
+
+      if (!decision.run && deterministicPatch) {
         await applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
         await turns.mergeMetadata(narratorTurn.id, 'archivist', {
           model: 'deterministic-archivist',
           patch: deterministicPatch,
+          lag_before: lagBefore,
         })
         runDupDetector(characters, worldId)
         return
       }
-      if (!runArchivistLlm) {
+      if (!decision.run) {
         await turns.mergeMetadata(narratorTurn.id, 'archivist', {
           model: ARCHIVIST_MODEL,
           skipped: true,
           reason: 'no_state_change_signal',
+          lag_before: lagBefore,
         })
         return
       }
 
-      const archivistRecent = (await turns.recentTurns(worldId, 4)).map((t) => ({
-        role: t.role,
-        content: t.content,
-      }))
+      // Since-last-success window (capped). recentForLag is wide enough to
+      // detect truncation beyond ARCHIVIST_EXTRACT_WINDOW_ROLE_ROWS.
+      const extractSelection = selectArchivistExtractWindow({
+        recentTurns: recentForLag,
+        lastSuccessTurnId,
+        cap: ARCHIVIST_EXTRACT_WINDOW_ROLE_ROWS,
+      })
+      const archivistRecent = extractSelection.window
       const activeThreadCount = priorState.dossier.threads.filter(
         (t) => t.status === 'active',
       ).length
@@ -803,11 +838,23 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       )
         .then(async ({ patch, usage: archivistUsage }) => {
           await applyArchivistPatch(worldId, narratorTurn.id, patch)
-          await turns.mergeMetadata(narratorTurn.id, 'archivist', {
+          const archivistMeta: Record<string, unknown> = {
             model: ARCHIVIST_MODEL,
             usage: archivistUsage,
             patch,
-          })
+            run_reason: decision.reason,
+            lag_before: lagBefore,
+          }
+          if (extractSelection.windowTruncated) {
+            archivistMeta.window_truncated = true
+            if (extractSelection.windowStartTurnId != null) {
+              archivistMeta.window_start_turn_id = extractSelection.windowStartTurnId
+            }
+            if (extractSelection.lastSuccessTurnId != null) {
+              archivistMeta.last_success_turn_id = extractSelection.lastSuccessTurnId
+            }
+          }
+          await turns.mergeMetadata(narratorTurn.id, 'archivist', archivistMeta)
 
           // Thread-bootstrap fallback (C): Haiku reliably omits story_threads, so
           // when a bootstrap was warranted and the world STILL has no active
@@ -850,9 +897,12 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           runDupDetector(characters, worldId)
         })
         .catch(async (err) => {
+          // Error does not reset lag; next turn may force via max_lag again.
           await turns.mergeMetadata(narratorTurn.id, 'archivist', {
             model: ARCHIVIST_MODEL,
             error: String(err),
+            lag_before: lagBefore,
+            run_reason: decision.reason,
           })
           console.error('[archivist patch failed]', err)
         })
@@ -928,24 +978,16 @@ function formatSimArcBlock(arcs: SimArc[]): string {
   return `\n${lines.join('\n')}`
 }
 
-function compactHistory(
+/**
+ * Build narrator history messages: OOC/policy sanitization only, full content.
+ * Compaction is intentionally off for the 20-prior-role-row window
+ * (`history-packer` remains available for other callers / later re-enable).
+ */
+function buildHistoryMessages(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): ModelMessage[] {
-  // Strip OOC policy refusals before packing so they cannot re-prime the model
-  // (sticky "I will not narrate" loops after a single safety refusal).
   const sanitized = sanitizeNarratorHistory(history)
-  const packed = packNarratorHistory(sanitized, {
-    fullTokenBudget: HISTORY_FULL_TOKEN_BUDGET,
-    compactedChars: COMPACTED_TURN_CHARS,
-  })
-  return packed.map((turn) =>
-    turn.compacted
-      ? {
-          role: turn.role,
-          content: `[Earlier ${turn.role === 'assistant' ? 'narrator' : 'player'} turn, compacted: ${turn.content}]`,
-        }
-      : { role: turn.role, content: turn.content },
-  )
+  return sanitized.map((turn) => ({ role: turn.role, content: turn.content }))
 }
 
 function limitText(value: string, max: number): string {

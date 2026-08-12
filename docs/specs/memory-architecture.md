@@ -117,21 +117,20 @@ Player submits action
 │  4. Load scene + active characters      │  ~300-500 tk  [P3]
 │  5. Load player character (DB: chars)   │  ~200 tokens  [P3]
 │  6. Load NPC relationship anchors       │  ~200-500 tk  [P5]
-│  7. Load recent turns (DB: turns        │  ~2500-4000 tk [P8, truncated oldest-first]
-│     WHERE world_id = X                  │
-│     ORDER BY created_at DESC            │
-│     LIMIT 20)                           │
+│  7. Load recent turns (DB: turns        │  ~5k–12k+ tk  [P8, 20 prior role rows FULL]
+│     WHERE world_id = X                  │  uncompacted after OOC sanitize;
+│     ORDER BY id DESC LIMIT 21)          │  current user dropped from history msgs
 │  8. Append player action                │  ~100-300 tk  [P9, never truncated]
 │                                          │
-│  Worst-case total:                       │  ~5,800 tokens
-│  Hard cap:                               │  8,000 tokens
+│  Typical total:                          │  varies with prose length
+│  Continuity buffer:                      │  20 full prior role rows (no packer)
 └─────────────────────────────────────────┘
   │
   ▼
 Narrator Agent receives assembled context
 ```
 
-**Why this works for MVP**: With a context window of ~20 turns, a typical story session of 40-60 turns means the narrator "remembers" roughly the last 30-45 minutes of play. Early events drop out of context, but the story remains coherent within the active window. The authoritative state block keeps current reality stable even when older prose falls out of context. Relationship anchors keep major NPCs from forgetting who the player is after the raw turn where they met falls out of context. This degradation is the explicit trigger for seeded knowledge in Phase 2 and live semantic retrieval in Phase 3.
+**Why this works for MVP**: The narrator sees the last **20 prior role rows** as full prose (not budget-compacted). A typical story session of 40-60 turns still drops early events out of context, but short-term continuity is stronger and the authoritative state block keeps current reality stable when older prose falls out. Relationship anchors keep major NPCs from forgetting who the player is after the raw turn where they met falls out of context. The archivist stays signal-gated with a **max lag of 2 assistant turns**, extracting over a since-last-success window (capped ~8 role rows) so soft state does not drift indefinitely on ambient play. This degradation is the explicit trigger for seeded knowledge in Phase 2 and live semantic retrieval in Phase 3.
 
 ### 3.1.1 Relationship Anchors
 

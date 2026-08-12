@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.9.0',
+    date: '2026-08-11',
+    highlights: [
+      'The storyteller keeps the last twenty turns of conversation as full prose, so short-term continuity holds better across a scene.',
+      'Quiet “look around / wait” beats no longer let the world-state extract fall more than two turns behind — ambient play still stays cheap, but soft facts catch up.',
+    ],
+  },
+  {
     version: '0.8.0',
     date: '2026-08-12',
     highlights: [
