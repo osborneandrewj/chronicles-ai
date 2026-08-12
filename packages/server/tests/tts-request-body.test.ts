@@ -6,6 +6,21 @@ import {
   resolveStreamingLatency,
 } from '../src/lib/tts'
 
+describe('TTS surface inventory (dialogue-depth Phase 4)', () => {
+  it('request body is plain text + voice + optional speed only — no SSML/style tags', () => {
+    const body = buildTtsRequestBody('She whispers, "Wait."', 'eve', 1.0)
+    expect(body.text).toBe('She whispers, "Wait."')
+    expect(body).not.toHaveProperty('ssml')
+    expect(body).not.toHaveProperty('style')
+    expect(body).not.toHaveProperty('emphasis')
+    expect(body).not.toHaveProperty('speech_tags')
+    // Only known knobs: text, voice_id, language, output_format, optional speed/latency.
+    expect(Object.keys(body).sort()).toEqual(
+      ['language', 'optimize_streaming_latency', 'output_format', 'speed', 'text', 'voice_id'].sort(),
+    )
+  })
+})
+
 describe('buildTtsRequestBody', () => {
   it('builds the base body with default streaming latency and no speed when unset', () => {
     const body = buildTtsRequestBody('Hello there.', 'eve', undefined)

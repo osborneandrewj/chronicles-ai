@@ -148,6 +148,7 @@ export function mapCharacter(d: CharacterDoc): Character {
     last_known_situation: d.lastKnownSituation,
     aliases: d.aliases,
     daily_loop: d.dailyLoop ? JSON.stringify(d.dailyLoop) : null,
+    speech_register: d.speechRegister ?? null,
     created_at: toSqliteDatetime(d.createdAt),
     updated_at: toSqliteDatetime(d.updatedAt),
   }

@@ -102,8 +102,15 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
   const clearHandle = pickClearHandleCue(ctx)
   if (clearHandle) lines.push(clearHandle)
 
+  // Dialogue-heavy beats: interactional craft (never sparse-away on stance=say
+  // with present NPCs). Replaces the weak "summarized speech only" branch in
+  // pickSparseBeatCue so we do not stack two full dialogue paragraphs.
+  const dialogue = pickDialogueBeatCue(ctx)
+  if (dialogue) lines.push(dialogue)
+
   // Craft beat cues — only when a risk heuristic fires (sparse).
-  const beat = pickSparseBeatCue(ctx)
+  // Skip the old say-branch when dialogue cue already fired.
+  const beat = pickSparseBeatCue(ctx, { skipSay: dialogue != null })
   if (beat) lines.push(beat)
 
   // Investigative pressure only when open clues/objectives exist.
@@ -295,7 +302,61 @@ function pickClearHandleCue(ctx: GuidanceContext): string | null {
   )
 }
 
-function pickSparseBeatCue(ctx: GuidanceContext): string | null {
+/**
+ * Dialogue-beat craft cue (dialogue-depth Phase 1). Fires on talk-shaped turns
+ * with present NPCs so interactional depth is not left to chance.
+ */
+function pickDialogueBeatCue(ctx: GuidanceContext): string | null {
+  if (ctx.presentNpcCount < 1) return null
+
+  const talkShaped =
+    ctx.stance === 'say' ||
+    isSpeechyPlayerText(ctx.playerText) ||
+    (isLowAgencyMove(ctx.playerText) && isPressureStalled(ctx.recentTurns))
+
+  if (!talkShaped) return null
+
+  // Always on stance=say with present NPCs (dialogue is the point of the turn).
+  // For speechy do/other stances, still fire — someone is talking.
+  const language = detectMarkedSpokenLanguage(ctx.playerText)
+  const languageNote = language
+    ? ` The player marked their speech as ${language}; a light romanized touch keeps it audible while the meaning stays clear in English.`
+    : ''
+
+  return (
+    'Dialogue beat: stage present NPCs with distinct spoken lines. Prefer one hard question or demand per speaker. ' +
+    'Allow interruption, silence, or withhold when it fits goals. Do not summarize what someone “explains” — write the words. ' +
+    'Keep scenic restatement thin unless the room or bodies change; prefer speakable lines over dense monologue blocks. ' +
+    // Phase 4 ear packing: post-hoc TTS has no style tags — shape the prose for listening.
+    'Ear packing: one short physical tell between spoken lines is enough; do not re-paint a static room between every exchange. ' +
+    'Do not invent stage-direction tags ([whispers], [pause], SSML) — they are not rendered by TTS and will be read aloud as text.' +
+    languageNote
+  )
+}
+
+function isSpeechyPlayerText(text: string): boolean {
+  const compact = normalize(text)
+  if (/["“][^"”]{2,}["”]/.test(text)) return true
+  if (
+    /\b(say|says|said|ask|asks|asked|tell|tells|told|reply|replies|whisper|whispers|shout|shouts|speak|speaks|answer|answers)\b/.test(
+      compact,
+    )
+  ) {
+    return true
+  }
+  // Bare in-world question the protagonist would ask aloud (classifier often marks say).
+  if (/\?/.test(text) && compact.length <= 160 && !isMetaishQuestion(compact)) return true
+  return false
+}
+
+function isMetaishQuestion(compact: string): boolean {
+  return /\b(how (do|does|can) i|what (should|can) i|is this a game|who are you)\b/.test(compact)
+}
+
+function pickSparseBeatCue(
+  ctx: GuidanceContext,
+  opts: { skipSay?: boolean } = {},
+): string | null {
   const text = ctx.playerText
 
   if (isChargedRecognitionMove(text)) {
@@ -329,8 +390,9 @@ function pickSparseBeatCue(ctx: GuidanceContext): string | null {
     return null
   }
 
-  // Say: only if last assistant turn summarized speech rather than quoting it.
-  if (ctx.stance === 'say') {
+  // Legacy say branch: only when dialogue cue did not already fire, and only if
+  // last assistant summarized speech rather than quoting it.
+  if (!opts.skipSay && ctx.stance === 'say') {
     if (lastAssistantSummarizedSpeech(ctx.recentTurns)) {
       const language = detectMarkedSpokenLanguage(text)
       if (language) {

@@ -75,6 +75,24 @@ describe('narrator prompt — stay in fiction (no OOC policy refusal)', () => {
   })
 })
 
+describe('prompts — dialogue depth & character voice', () => {
+  it('narrator craft includes dialogue craft and speech staging edges', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/dialogue craft/i)
+    expect(p).toMatch(/one pressure or question per NPC/i)
+    expect(p).toMatch(/speech:/i)
+    expect(p).toMatch(/speakable lines|whispers|SSML|physical tell/i)
+  })
+
+  it('npc-agent authors speech_register once and uses speech_hint on talk plans', () => {
+    const p = loadPrompt('npc-agent-system')
+    expect(p).toMatch(/speech_register once/i)
+    expect(p).toMatch(/do not rewrite/i)
+    expect(p).toMatch(/speech_hint/i)
+    expect(p).toMatch(/never write the full line/i)
+  })
+})
+
 describe('prompt content guards', () => {
   it('narrator prompt is craft + hard and materially shorter than the old checklist', () => {
     const p = loadPrompt('narrator-system')

@@ -34,6 +34,8 @@ export type Character = {
   last_known_situation: string | null
   aliases: string | null
   daily_loop: string | null
+  /** Sticky how-they-talk fingerprint; author-once, ≤200 chars. Null until set. */
+  speech_register: string | null
   created_at: string
   updated_at: string
 }

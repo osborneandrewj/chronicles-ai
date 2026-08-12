@@ -10,6 +10,7 @@ import {
   buildNpcAgentUserContent,
   NpcAgentPatchSchema,
   repairNpcAgentText,
+  sanitizeSpeechHint,
   shouldSkipRoutineTick,
   type NpcAgentDeps,
 } from '@/lib/npc-agent'
@@ -388,6 +389,86 @@ describe('npc agent reverie authoring (append-only)', () => {
     })
     const row = db.prepare("SELECT daily_loop FROM characters WHERE world_id = ? AND name = 'Tomas'").get(worldId) as { daily_loop: string | null }
     expect(parseDailyLoop(row.daily_loop)?.morning?.activity).toBe('opens the shop')
+  })
+
+  it('authors speech_register once and does not overwrite it later', async () => {
+    const { worldId, turnId } = seedWorld('speech-register-author')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
+    promoteToLocal(worldId, 'Tomas')
+
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
+      npc_updates: [
+        {
+          name: 'Tomas',
+          speech_register: 'clipped · bureaucratic · default: counter-question · never monologues',
+        },
+      ],
+    })
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', speech_register: 'florid · warm · monologues often' }],
+    })
+    const row = db
+      .prepare("SELECT speech_register FROM characters WHERE world_id = ? AND name = 'Tomas'")
+      .get(worldId) as { speech_register: string | null }
+    expect(row.speech_register).toContain('clipped')
+    expect(row.speech_register).not.toContain('florid')
+  })
+
+  it('caps speech_register at 200 characters on author', async () => {
+    const { worldId, turnId } = seedWorld('speech-register-cap')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
+    promoteToLocal(worldId, 'Tomas')
+    const long = 'x'.repeat(250)
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', speech_register: long }],
+    })
+    const row = db
+      .prepare("SELECT speech_register FROM characters WHERE world_id = ? AND name = 'Tomas'")
+      .get(worldId) as { speech_register: string | null }
+    expect(row.speech_register?.length).toBe(200)
+  })
+})
+
+describe('speech_hint schema (ephemeral)', () => {
+  it('accepts optional speech_hint on planned_actions', () => {
+    const parsed = NpcAgentPatchSchema.safeParse({
+      planned_actions: [
+        {
+          npc_name: 'Marcus',
+          intent: 'test whether Andrew is lying',
+          planned_action: 'turns his chair to face Andrew',
+          intent_type: 'confront',
+          speech_hint: 'cuts him off; one hard question; no softener',
+        },
+      ],
+    })
+    expect(parsed.success).toBe(true)
+    expect(parsed.success && parsed.data.planned_actions?.[0]?.speech_hint).toContain('one hard question')
+  })
+
+  it('allows omitting speech_hint', () => {
+    const parsed = NpcAgentPatchSchema.safeParse({
+      planned_actions: [
+        {
+          npc_name: 'Marcus',
+          intent: 'leave',
+          planned_action: 'walks out without a word',
+        },
+      ],
+    })
+    expect(parsed.success).toBe(true)
+  })
+})
+
+describe('sanitizeSpeechHint', () => {
+  it('caps and strips long quoted monologues', () => {
+    expect(sanitizeSpeechHint('cuts off; one question')).toBe('cuts off; one question')
+    expect(sanitizeSpeechHint(null)).toBeNull()
+    const dumped =
+      'says "This is a very long monologue that the model should not dump into a staging edge field at all, really."'
+    const out = sanitizeSpeechHint(dumped)
+    expect(out == null || !out.includes('very long monologue')).toBe(true)
+    expect(sanitizeSpeechHint('x'.repeat(200))?.length).toBe(160)
   })
 })
 

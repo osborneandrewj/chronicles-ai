@@ -265,6 +265,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
         last_known_situation: null,
         aliases: null,
         daily_loop: character.daily_loop,
+        speech_register: null,
         created_at: '',
         updated_at: '',
       })
@@ -302,6 +303,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     },
     async applyAgentNpcFields() {},
     async setDailyLoopIfEmpty() {},
+    async setSpeechRegisterIfEmpty() {},
   }
 
   const relationships: CreateBoundedWorldDeps['relationships'] = {

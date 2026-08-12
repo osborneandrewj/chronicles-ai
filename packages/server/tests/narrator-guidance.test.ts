@@ -530,6 +530,75 @@ describe('tier-1 engagement cue (P5 + S1)', () => {
   })
 })
 
+describe('dialogue beat cue (dialogue-depth Phase 1)', () => {
+  it('fires on stance=say with present NPCs', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'say',
+        playerText: 'What happened last night?',
+        presentNpcCount: 2,
+        recentTurns: [
+          {
+            role: 'assistant',
+            content: 'Marcus watches you from the doorway, jaw tight.',
+          },
+        ],
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out!.toLowerCase()).toContain('dialogue beat')
+    expect(out!.toLowerCase()).toContain('one hard question')
+  })
+
+  it('does not fire on observe/travel without speech and without present NPCs', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'observe',
+        playerText: 'I look around the empty hall',
+        presentNpcCount: 0,
+      }),
+    )
+    expect(out == null || !out.toLowerCase().includes('dialogue beat')).toBe(true)
+  })
+
+  it('does not fire on meta / OOC stance', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'meta',
+        inputMode: 'out-of-character',
+        playerText: 'What should I do next in the game?',
+        presentNpcCount: 2,
+      }),
+    )
+    expect(out).toContain('Brief reply')
+    expect(out!.toLowerCase()).not.toContain('dialogue beat')
+  })
+
+  it('fires on speechy player text even when stance is do', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'I ask Marcus what he saw at the dock',
+        presentNpcCount: 1,
+      }),
+    )
+    expect(out!.toLowerCase()).toContain('dialogue beat')
+  })
+
+  it('includes ear packing and bans invented TTS stage-direction tags', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'say',
+        playerText: '"What did you see?"',
+        presentNpcCount: 1,
+      }),
+    )
+    expect(out!.toLowerCase()).toContain('ear packing')
+    expect(out!.toLowerCase()).toContain('stage-direction')
+    expect(out).toMatch(/\[whispers\]|ssml/i)
+  })
+})
+
 describe('genre / media / dialogue cues (risk-gated)', () => {
   it('treats public feeds as wider-world surfaces', () => {
     const guidance = formatNarratorTurnGuidance({

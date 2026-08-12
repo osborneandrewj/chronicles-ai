@@ -92,6 +92,7 @@ function character(overrides: Partial<Character>): Character {
     last_known_situation: null,
     aliases: null,
     daily_loop: null,
+    speech_register: null,
     created_at: '',
     updated_at: '',
     ...overrides,
@@ -219,6 +220,7 @@ function buildFakes(roster: Character[], rels: CharacterRelationship[]): Fakes {
     findAgentNpcByName: async () => null,
     applyAgentNpcFields: async () => {},
     setDailyLoopIfEmpty: async () => {},
+    setSpeechRegisterIfEmpty: async () => {},
   }
   const placeConnections: PlaceConnectionRepository = {
     forWorld: async () => connections,
