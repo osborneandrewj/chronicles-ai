@@ -257,8 +257,13 @@ describe('link antagonist', () => {
     antagonist: 'Director Hale will burn the subject to stay hidden',
   } as MetaStoryBible
 
-  it('extracts a name hint from prose', () => {
-    expect(extractAntagonistNameHint(bible.antagonist)).toBe('Director Hale')
+  it('extracts a name hint from prose (strips leading titles)', () => {
+    expect(extractAntagonistNameHint(bible.antagonist)).toBe('Hale')
+    expect(
+      extractAntagonistNameHint(
+        'Deputy Director Lira Voss, who will purge any crew member whose bleed threatens the final extraction window.',
+      ),
+    ).toBe('Lira Voss')
   })
 
   it('is idempotent when already linked', () => {
@@ -299,6 +304,32 @@ describe('link antagonist', () => {
     })
     expect(d.action).toBe('match_existing')
     if (d.action === 'match_existing') expect(d.characterId).toBe(8)
+  })
+
+  it('creates a named antagonist when the cast has no match (does not promote seniors)', () => {
+    const chars = [
+      {
+        id: 21,
+        name: 'Dana Noel',
+        is_player: 0,
+        clearance_level: 'public_crew',
+        status: 'active',
+        agency_level: 'local',
+      },
+    ] as Character[]
+    const d = linkAntagonistCharacter({
+      bible: {
+        antagonist:
+          'Deputy Director Lira Voss, who will purge any crew member whose bleed threatens the window.',
+      } as MetaStoryBible,
+      hubCharacters: chars,
+      existingAntagonistId: null,
+    })
+    expect(d).toEqual({
+      action: 'create',
+      name: 'Lira Voss',
+      description: expect.stringContaining('Lira Voss'),
+    })
   })
 })
 

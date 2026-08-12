@@ -19,6 +19,8 @@ export type {
 } from './sim-ops'
 // ClearanceLevel is exported from './character' only (sim-ops re-exports for convenience)
 export type { WorldCorrectionRow } from './correction'
+export type { DirectorBeat, DirectorPhase } from './director-beat'
+export { emptyDirectorBeat } from './director-beat'
 export type {
   InsertNpcIntent,
   IntentDisposition,

@@ -14,7 +14,12 @@ import type {
 import { isHighStakesBeat, shouldEmitBeat } from '@/domain/services/beat-gating'
 import type { CharacterPosition } from '@/domain/services/colocation'
 import { coLocatedGroups } from '@/domain/services/colocation'
+import {
+  applyArrivalsToCharacters,
+  computeArrivalPatches,
+} from '@/domain/services/apply-arrivals'
 import { buildDeckGraph, neighbors } from '@/domain/services/deck-graph'
+import { resolveClockMinutes } from '@/domain/services/narrative-clock'
 import { nextPlaceId, type ResolvedDailyLoop } from '@/domain/services/npc-movement'
 import {
   applyDrift,
@@ -131,6 +136,11 @@ export async function tickLivingWorld(
   const cursor = await worlds.cursor(worldId)
   const worldTime = cursor.world_time
   const band = worldTimeBand(worldTime)
+  const worldRow = await worlds.getWorld(worldId)
+  const clockMinutes = resolveClockMinutes({
+    storedMinutes: worldRow?.ship_clock_minutes,
+    worldTime,
+  })
 
   // Room manifest → place_id → name (for beat input + readable timeline events).
   const placeRows = await places.forWorld(worldId)
@@ -138,7 +148,28 @@ export async function tickLivingWorld(
 
   // NPCs only (drop the player). Each carries its starting room + parsed loop, plus
   // the enrichment a drama beat reasons over: name, role (current_focus) and goal.
-  const roster = await characters.forWorld(worldId)
+  let roster = await characters.forWorld(worldId)
+
+  // Track M: same arrival resolver as pre-stream narrate path.
+  const arrivalPatches = computeArrivalPatches({
+    characters: roster,
+    clockMinutes,
+    includeClockToken: true,
+  })
+  if (arrivalPatches.length > 0) {
+    for (const p of arrivalPatches) {
+      await characters.applyAgentNpcFields(p.characterId, {
+        current_place_id: p.current_place_id,
+        in_transit_to_place_id: p.in_transit_to_place_id,
+        arrival_minutes: p.arrival_minutes,
+        arrival_world_time: p.arrival_world_time,
+        journey_path_json: p.journey_path_json,
+        last_known_situation: p.last_known_situation ?? undefined,
+      })
+    }
+    roster = applyArrivalsToCharacters(roster, arrivalPatches)
+  }
+
   const npcs = roster
     .filter((c) => c.is_player === 0)
     .map((c) => ({
@@ -148,6 +179,7 @@ export async function tickLivingWorld(
       goal: c.active_goal,
       dailyLoop: parseDailyLoop(c.daily_loop),
       startPlaceId: c.current_place_id,
+      inTransit: c.in_transit_to_place_id != null,
     }))
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
 
@@ -155,6 +187,7 @@ export async function tickLivingWorld(
   const connections = await placeConnections.forWorld(worldId)
   const graph = buildDeckGraph(connections)
   const neighborsOf = (placeId: number): number[] => neighbors(graph, placeId)
+  const adjacency = graph.adjacency
 
   // Relationship graph as a mutable working copy keyed by id; remember each
   // original valence so we persist a delta only for edges that actually drifted.
@@ -168,10 +201,13 @@ export async function tickLivingWorld(
 
   // OFF-SCENE crew only: anyone NOT in the player's room. Crew present with the
   // player are the narrator/archivist's job — never double-moved here.
-  const offScene = npcs.filter((npc) => npc.startPlaceId !== playerPlaceId)
+  // En-route NPCs stay on their journey (resolver owns landing).
+  const offScene = npcs.filter(
+    (npc) => npc.startPlaceId !== playerPlaceId && !npc.inTransit,
+  )
 
   // In-memory positions seeded from each off-scene NPC's current room. ONE tick:
-  // move each toward its band target (no skip — all off-scene crew move).
+  // one hop toward band target — never long-jump teleport (Track M).
   const positions = new Map<number, number | null>()
   let movedCount = 0
   for (const npc of offScene) {
@@ -180,9 +216,11 @@ export async function tickLivingWorld(
       band,
       currentPlaceId: npc.startPlaceId,
       neighborsOf,
+      adjacency,
     })
     positions.set(npc.id, next)
-    if (next !== npc.startPlaceId) {
+    if (next !== npc.startPlaceId && next != null) {
+      // Adjacent hop this tick: land immediately (one corridor walk per living tick).
       await characters.setPlace(npc.id, next)
       movedCount += 1
     }

@@ -104,6 +104,8 @@ export type AgentNpcRow = {
   in_transit_to_place_id: number | null
   in_transit_to_name: string | null
   arrival_world_time: string | null
+  arrival_minutes: number | null
+  journey_path_json: string | null
   last_known_situation: string | null
   daily_loop: string | null
   /** Sticky voice/idiolect; null until authored once. */
@@ -126,6 +128,8 @@ export type AgentNpcFields = {
   tool_access?: string
   in_transit_to_place_id?: number | null
   arrival_world_time?: string | null
+  arrival_minutes?: number | null
+  journey_path_json?: string | null
   last_known_situation?: string
 }
 

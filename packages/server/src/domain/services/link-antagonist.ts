@@ -10,16 +10,40 @@ export type AntagonistLinkDecision =
   | { action: 'create'; name: string; description: string }
   | { action: 'none' }
 
-/** Extract a likely proper name from bible antagonist prose (first Capitalized run). */
+/** Role/title tokens that are not personal names in bible antagonist prose. */
+const ANTAGONIST_TITLE_TOKEN =
+  /^(?:Deputy|Director|Dr|Doctor|Commander|Colonel|Captain|Agent|Professor|Chief|Officer|Lt|Lieutenant)$/i
+
+/**
+ * Extract a likely proper name from bible antagonist prose.
+ * Strips leading titles so "Deputy Director Lira Voss, who…" → "Lira Voss".
+ */
 export function extractAntagonistNameHint(prose: string): string | null {
   const cleaned = prose.replace(/\s+/g, ' ').trim()
   if (!cleaned) return null
-  // Prefer "Name Surname" patterns early in the string.
-  const m = cleaned.match(
-    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b/,
-  )
-  if (m?.[1] && m[1].length >= 2 && m[1].length <= 40) return m[1]
-  // Fallback: first 40 chars as display label if short enough
+
+  // Drop leading title stack, then take up to two Capitalized name tokens.
+  const deTitled = cleaned
+    .replace(
+      /^(?:(?:Deputy|Director|Dr\.?|Doctor|Commander|Colonel|Captain|Agent|Professor|Chief)\s+)+/i,
+      '',
+    )
+    .trim()
+
+  const m = deTitled.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/)
+  if (m?.[1] && m[1].length >= 2 && m[1].length <= 40 && !ANTAGONIST_TITLE_TOKEN.test(m[1])) {
+    return m[1]
+  }
+
+  // Fallback: first non-title "Name Surname" anywhere in the string.
+  for (const hit of cleaned.matchAll(/\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/g)) {
+    const a = hit[1]!
+    const b = hit[2]!
+    if (ANTAGONIST_TITLE_TOKEN.test(a) || ANTAGONIST_TITLE_TOKEN.test(b)) continue
+    const full = `${a} ${b}`
+    if (full.length <= 40) return full
+  }
+
   if (cleaned.length <= 40 && !/[,.;:]/.test(cleaned)) return cleaned
   return null
 }
@@ -59,7 +83,8 @@ export function linkAntagonistCharacter(args: {
     if (exact) {
       return { action: 'match_existing', characterId: exact.id, name: exact.name }
     }
-    // Partial: name appears in character name or description
+    // Partial: full hint appears in character name or description (avoid short
+    // single-token false hits like "Hale" inside unrelated words when possible).
     const partial = args.hubCharacters.find((c) => {
       if (c.is_player === 1) return false
       const hay = `${c.name} ${c.description ?? ''}`.toLowerCase()
@@ -68,9 +93,16 @@ export function linkAntagonistCharacter(args: {
     if (partial) {
       return { action: 'match_existing', characterId: partial.id, name: partial.name }
     }
+    // Named in the bible but not cast — create them. Do NOT promote a random
+    // senior crew member (Meridian would have stamped Dana Noel as Lira Voss).
+    return {
+      action: 'create',
+      name: hint,
+      description: clip(`Hub antagonist / program face. ${prose}`, 400),
+    }
   }
 
-  // Senior role-compatible: distant/local agency with agenda language
+  // No extractable name: prefer an existing senior face, else generic create.
   const senior = [...args.hubCharacters]
     .filter((c) => c.is_player !== 1 && c.status === 'active')
     .sort((a, b) => {
@@ -82,11 +114,9 @@ export function linkAntagonistCharacter(args: {
     return { action: 'match_existing', characterId: senior.id, name: senior.name }
   }
 
-  // Create once
-  const name = hint ?? 'Program Director'
   return {
     action: 'create',
-    name,
+    name: 'Program Director',
     description: clip(`Hub antagonist / program face. ${prose}`, 400),
   }
 }

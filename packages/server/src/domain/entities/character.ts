@@ -38,6 +38,17 @@ export type Character = {
   player_notes: string | null
   in_transit_to_place_id: number | null
   arrival_world_time: string | null
+  /**
+   * Authoritative narrative-clock minute when the next hop / final arrival is
+   * due (Track M). Null when stationary. Free-text `arrival_world_time` is the
+   * dual-store render; prefer this field for resolveArrivals.
+   */
+  arrival_minutes: number | null
+  /**
+   * JSON array of remaining place ids on a multi-hop journey (including final
+   * dest, excluding current). Null when stationary or open-world single leg.
+   */
+  journey_path_json: string | null
   last_known_situation: string | null
   aliases: string | null
   daily_loop: string | null

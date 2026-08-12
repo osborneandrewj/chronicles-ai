@@ -127,6 +127,8 @@ const TurnSchema = new Schema<TurnDoc>(
 // recent/latest/before-seq pagination relies on (worldId, seq) ordering
 TurnSchema.index({ worldId: 1, seq: 1 })
 TurnSchema.index({ seq: 1 }, { unique: true })
+// Daily budget / usage scans filter today's turns by createdAt (Track C3).
+TurnSchema.index({ createdAt: 1 })
 
 // ---------------------------------------------------------------------------
 // characters — heavily-mutated entity; daily_loop / traits embedded; lists arrays
@@ -142,6 +144,8 @@ export type CharacterDoc = {
   currentPlaceId: number | null
   inTransitToPlaceId: number | null
   arrivalWorldTime: string | null
+  arrivalMinutes: number | null
+  journeyPathJson: string | null
   status: 'active' | 'inactive' | 'dead'
   agencyLevel: 'npc' | 'local' | 'nearby' | 'distant' | 'dormant'
   memorableFacts: string | null
@@ -182,6 +186,8 @@ const CharacterSchema = new Schema<CharacterDoc>(
     currentPlaceId: { type: Number, default: null },
     inTransitToPlaceId: { type: Number, default: null },
     arrivalWorldTime: { type: String, default: null },
+    arrivalMinutes: { type: Number, default: null },
+    journeyPathJson: { type: String, default: null },
     status: { type: String, enum: ['active', 'inactive', 'dead'], default: 'active' },
     agencyLevel: {
       type: String,

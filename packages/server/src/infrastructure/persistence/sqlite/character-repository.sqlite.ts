@@ -154,7 +154,8 @@ const agentNpcsStmt = db.prepare<[number, number, number, number, number]>(`
          c.reveries, c.daily_loop, c.speech_register,
          c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
          c.last_agent_tick_turn_id,
-         c.in_transit_to_place_id, c.arrival_world_time, c.last_known_situation,
+         c.in_transit_to_place_id, c.arrival_world_time, c.arrival_minutes, c.journey_path_json,
+         c.last_known_situation,
          (SELECT name FROM places WHERE id = c.current_place_id) AS current_place_name,
          (SELECT name FROM places WHERE id = c.in_transit_to_place_id) AS in_transit_to_name
     FROM characters c
@@ -225,6 +226,12 @@ const setInTransitToStmt = db.prepare<[number | null, number]>(
 )
 const setArrivalWorldTimeStmt = db.prepare<[string | null, number]>(
   `UPDATE characters SET arrival_world_time = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setArrivalMinutesStmt = db.prepare<[number | null, number]>(
+  `UPDATE characters SET arrival_minutes = ?, updated_at = datetime('now') WHERE id = ?`,
+)
+const setJourneyPathJsonStmt = db.prepare<[string | null, number]>(
+  `UPDATE characters SET journey_path_json = ?, updated_at = datetime('now') WHERE id = ?`,
 )
 const setLastKnownSituationStmt = db.prepare<[string, number]>(
   `UPDATE characters SET last_known_situation = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -429,6 +436,12 @@ export class SqliteCharacterRepository implements CharacterRepository {
     }
     if (fields.arrival_world_time !== undefined) {
       setArrivalWorldTimeStmt.run(fields.arrival_world_time, characterId)
+    }
+    if (fields.arrival_minutes !== undefined) {
+      setArrivalMinutesStmt.run(fields.arrival_minutes, characterId)
+    }
+    if (fields.journey_path_json !== undefined) {
+      setJourneyPathJsonStmt.run(fields.journey_path_json, characterId)
     }
     if (fields.last_known_situation !== undefined) {
       setLastKnownSituationStmt.run(fields.last_known_situation, characterId)

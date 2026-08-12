@@ -54,6 +54,28 @@ export async function assertReplicaSet(connection: Connection): Promise<void> {
 }
 
 /**
+ * Resolve the Mongo database name. Production URLs often omit a path (Atlas
+ * defaults to `test`); we always pin a real name so app data never lands in
+ * the accidental default. Override with MONGO_DB_NAME when needed (e.g. temporary
+ * `test` until a manual Atlas cutover).
+ */
+export function resolveMongoDbName(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): string {
+  const raw = env.MONGO_DB_NAME?.trim()
+  return raw && raw.length > 0 ? raw : 'chronicles'
+}
+
+/**
+ * Connection options always applied by connectMongo (exported for unit tests).
+ */
+export function mongoConnectionOptions(
+  env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
+): { dbName: string } {
+  return { dbName: resolveMongoDbName(env) }
+}
+
+/**
  * Connect to Mongo and return the shared connection. Idempotent: a second call
  * returns the cached connection. During the Next build phase this is a no-op
  * that throws if anything actually tries to use the (absent) connection — the
@@ -76,7 +98,7 @@ export async function connectMongo(databaseUrl: string): Promise<Connection> {
     throw new Error('connectMongo requires a DATABASE_URL connection string')
   }
 
-  const connection = mongoose.createConnection(databaseUrl)
+  const connection = mongoose.createConnection(databaseUrl, mongoConnectionOptions())
   await connection.asPromise()
   await assertReplicaSet(connection)
   cachedConnection = connection

@@ -14,8 +14,13 @@ import type {
 } from '@/domain/ports'
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
 import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
+import { resolveClockMinutes } from '@/domain/services/narrative-clock'
 import type { OpenOrder } from '@/domain/services/open-order'
-import { isPlanEligible, isTransientServiceNpc, missingPlannedActions } from '@/domain/services/npc-promotion'
+import { missingPlannedActions } from '@/domain/services/npc-promotion'
+import {
+  journeyToCharacterFields,
+  startJourney,
+} from '@/domain/services/travel'
 import {
   detectPrivateUtterance,
   isAudience,
@@ -472,6 +477,8 @@ export async function runNpcAgentTick(
           ? placeNameById.get(target.in_transit_to_place_id) ?? null
           : null,
         arrival_world_time: target.arrival_world_time,
+        arrival_minutes: target.arrival_minutes,
+        journey_path_json: target.journey_path_json,
         last_known_situation: target.last_known_situation,
         daily_loop: target.daily_loop,
         speech_register: target.speech_register,
@@ -483,22 +490,26 @@ export async function runNpcAgentTick(
   // drop plan-INELIGIBLE candidates (transient service walk-ons). Agent-tier
   // rows are always eligible — the eligibility decision is the pure domain rule.
   // Open-order targets are eligible even off-scene (S2).
-  const eligible = agents.filter((a) =>
-    isPlanEligible({
+  // Track B3: hard cap plan-eligible cast so Haiku prompt stays lean.
+  const { selectPlanEligibleCast } = await import('@/domain/services/plan-cast')
+  const castPick = selectPlanEligibleCast({
+    candidates: agents.map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
       agency_level: a.agency_level,
-      present_with_protagonist: a.current_place_id !== null && a.current_place_id === playerPlaceId,
-      is_transient_service: isTransientServiceNpc({
-        name: a.name,
-        description: a.description,
-        active_goal: a.active_goal,
-        personal_goals: a.personal_goals,
-        current_focus: a.current_focus,
-      }),
-      openOrderTargetId,
-      characterId: a.id,
-    }),
-  )
-  if (eligible.length === 0) return null
+      present_with_protagonist:
+        a.current_place_id !== null && a.current_place_id === playerPlaceId,
+      active_goal: a.active_goal,
+      personal_goals: a.personal_goals,
+      current_focus: a.current_focus,
+      in_transit_to_place_id: a.in_transit_to_place_id,
+    })),
+    openOrderTargetId,
+  })
+  if (castPick.length === 0) return null
+  const eligibleIds = new Set(castPick.map((e) => e.id))
+  const eligible = agents.filter((a) => eligibleIds.has(a.id))
 
   const playerPlaceName =
     playerPlaceId != null
@@ -825,12 +836,25 @@ export async function applyNpcAgentPatch(
   const updates = patch.npc_updates ?? []
   if (updates.length === 0) return
 
-  const { characters, places, reveries, unitOfWork } = deps
+  const { characters, places, reveries, unitOfWork, worlds } = deps
 
   // Resolve place-name → id once (findPlaceByNameStmt matched ANY place in the
   // world by lower-name). The agent only relocates within the known set.
   const knownPlaces = await places.forWorld(worldId)
   const placeIdByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
+  const knownPlaceIds = new Set(knownPlaces.map((p) => p.id))
+  const worldRow = await worlds.getWorld(worldId)
+  const cursor = await worlds.cursor(worldId)
+  const clockMinutes = resolveClockMinutes({
+    storedMinutes: worldRow?.ship_clock_minutes,
+    worldTime: cursor.world_time,
+  })
+  const spatialMode = worldRow?.spatial_mode === 'bounded' ? 'bounded' : 'open'
+  // Need current_place for journey conversion (findAgentNpcByName is id-only).
+  const roster = await characters.forWorld(worldId)
+  const placeByCharId = new Map(
+    roster.map((c) => [c.id, c.current_place_id] as const),
+  )
 
   // Single transaction boundary (mirrors the SQLite db.transaction the patch
   // applier used to wrap the whole loop). The Mongo sibling threads a session.
@@ -865,7 +889,39 @@ export async function applyNpcAgentPatch(
       }
       if (u.current_place_name !== undefined) {
         const placeId = placeIdByLower.get(u.current_place_name.toLowerCase())
-        if (placeId !== undefined) fields.current_place_id = placeId
+        if (placeId !== undefined) {
+          // Track M: NPC place changes start a journey — never teleport-write.
+          const fromPlace = placeByCharId.get(existing.id) ?? null
+          if (fromPlace === placeId) {
+            fields.in_transit_to_place_id = null
+            fields.arrival_minutes = null
+            fields.arrival_world_time = null
+            fields.journey_path_json = null
+          } else {
+            const started = startJourney({
+              characterId: existing.id,
+              fromPlaceId: fromPlace,
+              toPlaceId: placeId,
+              clockMinutes,
+              spatialMode,
+              graph: null,
+              knownPlaceIds,
+            })
+            if (started.ok) {
+              const jf = journeyToCharacterFields(started.journey, {
+                includeClockToken: spatialMode === 'bounded',
+              })
+              fields.in_transit_to_place_id = jf.in_transit_to_place_id
+              fields.arrival_minutes = jf.arrival_minutes
+              fields.arrival_world_time = jf.arrival_world_time
+              fields.journey_path_json = jf.journey_path_json
+              if (fields.last_known_situation === undefined) {
+                fields.last_known_situation = 'left for destination'
+              }
+            }
+            // Do NOT set current_place_id — that would be a teleport.
+          }
+        }
         // Unknown place: silently drop. Archivist owns place creation; the
         // NPC agent only relocates within the known set.
       }
@@ -887,13 +943,42 @@ export async function applyNpcAgentPatch(
       if (u.in_transit_to !== undefined) {
         if (u.in_transit_to === null) {
           fields.in_transit_to_place_id = null
+          fields.arrival_minutes = null
+          fields.arrival_world_time = null
+          fields.journey_path_json = null
         } else {
           const placeId = placeIdByLower.get(u.in_transit_to.toLowerCase())
-          if (placeId !== undefined) fields.in_transit_to_place_id = placeId
+          if (placeId !== undefined) {
+            // Prefer structured journey when place not already set above.
+            if (fields.in_transit_to_place_id === undefined) {
+              const fromPlace = placeByCharId.get(existing.id) ?? null
+              const started = startJourney({
+                characterId: existing.id,
+                fromPlaceId: fromPlace,
+                toPlaceId: placeId,
+                clockMinutes,
+                spatialMode,
+                graph: null,
+                knownPlaceIds,
+              })
+              if (started.ok) {
+                const jf = journeyToCharacterFields(started.journey, {
+                  includeClockToken: spatialMode === 'bounded',
+                })
+                fields.in_transit_to_place_id = jf.in_transit_to_place_id
+                fields.arrival_minutes = jf.arrival_minutes
+                fields.arrival_world_time =
+                  u.arrival_world_time ?? jf.arrival_world_time
+                fields.journey_path_json = jf.journey_path_json
+              } else {
+                fields.in_transit_to_place_id = placeId
+              }
+            }
+          }
           // Unknown destination: silently drop, mirroring current_place_name.
         }
       }
-      if (u.arrival_world_time !== undefined) {
+      if (u.arrival_world_time !== undefined && fields.arrival_world_time === undefined) {
         fields.arrival_world_time = u.arrival_world_time
       }
       if (u.last_known_situation !== undefined) {

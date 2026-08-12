@@ -624,10 +624,29 @@ export function applyArchivistPatch(
   narratorTurnId: number,
   patch: ArchivistPatch,
 ): Promise<void> {
-  const { characters, dossierWriter, places, reveries, scenes, timeline, unitOfWork, worlds } =
-    getContainer()
+  const {
+    characters,
+    dossiers,
+    dossierWriter,
+    places,
+    reveries,
+    scenes,
+    timeline,
+    unitOfWork,
+    worlds,
+  } = getContainer()
   return runApplyArchivistPatch(
     { worldId, turnId: narratorTurnId, patch },
-    { characters, dossierWriter, places, reveries, scenes, timeline, unitOfWork, worlds },
+    {
+      characters,
+      dossiers,
+      dossierWriter,
+      places,
+      reveries,
+      scenes,
+      timeline,
+      unitOfWork,
+      worlds,
+    },
   )
 }

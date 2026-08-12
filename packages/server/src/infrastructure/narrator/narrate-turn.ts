@@ -9,12 +9,22 @@ import {
 } from 'ai'
 
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
+import { ensureHubAntagonist } from '@/application/use-cases/ensure-hub-antagonist'
 import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
 import type { SimulationSession, TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
 import { closeSubworldAndReturn } from '@/application/use-cases/close-subworld-and-return'
+import {
+  applyArrivalsToCharacters,
+  computeArrivalPatches,
+} from '@/domain/services/apply-arrivals'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
+import {
+  patchClosesSomething,
+  shouldRunCloseBiasPass,
+} from '@/domain/services/close-bias'
+import { decideDirector } from '@/domain/services/director'
 import {
   isConsoleCapablePlace,
   shouldInjectSimLogs,
@@ -89,6 +99,7 @@ import { computeReverieFlares } from '@/lib/reveries'
 import {
   applyPromotionDeltaToState,
   collectSceneTags,
+  formatDirectorBlock,
   formatSceneDigestForClassifier,
   formatStateBlock,
   getNarratorWorldState,
@@ -125,6 +136,11 @@ const ARCHIVIST_LAG_LOOKBACK_ROLE_ROWS = 20
 
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
   const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
+  const prestreamStartedAt = Date.now()
+  const timingSpans: Record<string, number> = {}
+  const mark = (name: string, started: number): void => {
+    timingSpans[name] = Date.now() - started
+  }
 
   // Read ports for the narrator-context assembler (P2 cutover) + the
   // non-archivist post-stream WRITE ports (P3 cutover: turns, reveries,
@@ -136,6 +152,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     clock,
     decks,
     dossiers,
+    dossierWriter,
     drama,
     npcIntents,
     occupancy,
@@ -165,15 +182,85 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   // State is read before the classifier so it can see who's present and where.
   // Single assembly (Track A2): later writes merge into this snapshot in memory.
-  const priorState = await getNarratorWorldState(stateDeps, worldId)
+  const stateReadStarted = Date.now()
+  let priorState = await getNarratorWorldState(stateDeps, worldId)
+  mark('state_ms', stateReadStarted)
+
+  // Track M: land due journeys before promotion / agent / STATE see them.
+  const clockMinutes = resolveClockMinutes({
+    storedMinutes: world.ship_clock_minutes,
+    worldTime: priorState.worldTime,
+  })
+  const arrivalStarted = Date.now()
+  const arrivalPatches = computeArrivalPatches({
+    characters: priorState.knownCharacters,
+    clockMinutes,
+    includeClockToken: world.spatial_mode === 'bounded',
+  })
+  if (arrivalPatches.length > 0) {
+    for (const p of arrivalPatches) {
+      try {
+        await characters.applyAgentNpcFields(p.characterId, {
+          current_place_id: p.current_place_id,
+          in_transit_to_place_id: p.in_transit_to_place_id,
+          arrival_minutes: p.arrival_minutes,
+          arrival_world_time: p.arrival_world_time,
+          journey_path_json: p.journey_path_json,
+          last_known_situation: p.last_known_situation ?? undefined,
+        })
+      } catch (err) {
+        console.error('[resolve-arrivals]', err)
+      }
+    }
+    const knownAfter = applyArrivalsToCharacters(priorState.knownCharacters, arrivalPatches)
+    // Re-derive present cast after landings (en-route excluded).
+    const player = knownAfter.filter((c) => c.is_player === 1)
+    const placeId = player[0]?.current_place_id ?? priorState.currentPlace?.id ?? null
+    const presentNpcs = placeId
+      ? knownAfter.filter(
+          (c) =>
+            c.is_player === 0 &&
+            c.current_place_id === placeId &&
+            c.in_transit_to_place_id == null,
+        )
+      : []
+    priorState = {
+      ...priorState,
+      knownCharacters: knownAfter,
+      presentCharacters: [...player, ...presentNpcs],
+    }
+  }
+  mark('arrivals_ms', arrivalStarted)
+
+  // Track A5: ensure hub antagonist linked on first hub turn if still null.
+  if (world.world_layer === 'hub' && world.antagonist_character_id == null) {
+    backgroundTasks.register(
+      ensureHubAntagonist(worldId, { worlds, characters, places }).catch((err) => {
+        console.error('[ensure-hub-antagonist]', err)
+      }),
+    )
+  }
+
+  // C2 A6-lite: launch classifier after first state read, parallel with
+  // promotion / recent-turns / open-order. Await only before NPC agent gate.
+  const classifyStarted = Date.now()
+  const classificationPromise = classifyAction(
+    playerText,
+    formatSceneDigestForClassifier(priorState),
+  ).then((result) => {
+    mark('classifier_ms', classifyStarted)
+    return result
+  })
 
   // Update NPC attention tiers before the NPC agent call.
+  const promoStarted = Date.now()
   const promotion = await characters.recordAppearancesAndAutoPromote(
     worldId,
     priorState.presentCharacters,
     playerTurnId,
   )
   const postPromotionState = applyPromotionDeltaToState(priorState, promotion, playerTurnId)
+  mark('promotion_ms', promoStarted)
 
   // Geocode off the critical path (Track A3). Comment already claimed
   // "never blocks the narrator"; now it actually doesn't. Resolution lands
@@ -189,9 +276,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // One recent-turns fetch for agent + narrator history.
   // Fetch includes the just-inserted current user turn; priorHistory drops it
   // so it is not duplicated with the pinned PLAYER ACTION message.
+  const recentStarted = Date.now()
   const allRecent = await turns.recentTurns(worldId, NARRATOR_HISTORY_FETCH)
   const recentForAgents = allRecent.slice(-4)
   const priorHistory = allRecent.slice(0, -1)
+  mark('recent_turns_ms', recentStarted)
 
   // S2 — open order: derive from recent user content + current text (TTL + yield
   // refresh). Durable write onto the player turn via mergeMetadata. Pre-stream
@@ -250,13 +339,8 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     }
   }
 
-  // Classifier + (occupancy ∥ npc-agent) — occupancy has no dependency on plans
-  // (Track A4). Classifier stays serial with the agent because the gate uses
-  // stance; A6 speculative agent is deferred until write-safety is proven.
-  const classification = await classifyAction(
-    playerText,
-    formatSceneDigestForClassifier(postPromotionState),
-  )
+  // Await classifier (started after first state read) before NPC gate.
+  const classification = await classificationPromise
   const { stance, input_mode } = classification
   const shouldRunNpcAgent = shouldTickNpcAgent({
     stance,
@@ -269,6 +353,14 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const npcAgentDeps = { characters, dossiers, npcIntents, places, reveries, unitOfWork, worlds }
   const era = eraFromGenreTags(parseGenreTags(world.genre_tags))
 
+  // C3: skip occupancy builder when the in-memory snapshot already has a valid
+  // same-scene occupancy payload (avoids redundant scene/place/latest reads).
+  const occupancyReuse =
+    postPromotionState.occupancy != null &&
+    postPromotionState.currentScene != null &&
+    postPromotionState.currentPlace != null
+
+  const agentOccStarted = Date.now()
   const [npcAgentSettled, occupancySettled] = await Promise.all([
     shouldRunNpcAgent || forceAgentForOpenOrder
       ? runNpcAgentTick(
@@ -285,16 +377,19 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           return { error: String(err) } as const
         })
       : Promise.resolve(null),
-    buildPlaceOccupancySnapshot(
-      { dossiers, occupancy, places, scenes, worlds },
-      worldId,
-      playerTurnId,
-      era,
-    ).catch((err) => {
-      console.error('[place-population]', err)
-      return null
-    }),
+    occupancyReuse
+      ? Promise.resolve(postPromotionState.occupancy)
+      : buildPlaceOccupancySnapshot(
+          { dossiers, occupancy, places, scenes, worlds },
+          worldId,
+          playerTurnId,
+          era,
+        ).catch((err) => {
+          console.error('[place-population]', err)
+          return null
+        }),
   ])
+  mark('agent_occupancy_ms', agentOccStarted)
 
   const npcAgentResult = npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
   const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
@@ -409,6 +504,23 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           audienceNames: activePrivateUtterance.audienceNames,
         }
       : null
+  // Track A1: pure Director beat after arrivals + agent (cast/en-route known).
+  const enRouteNames = narratorState.knownCharacters
+    .filter((c) => c.in_transit_to_place_id != null)
+    .map((c) => c.name)
+  const directorDecision = decideDirector({
+    threads: narratorState.dossier.threads,
+    objectives: narratorState.dossier.objectives,
+    clockMinutes,
+    currentTurnId: playerTurnId,
+    playerText,
+    enRouteNames,
+  })
+  const directorBlock = formatDirectorBlock(
+    directorDecision,
+    narratorState.dossier.threads,
+  )
+
   let stateBlock = formatStateBlock(
     narratorState,
     plans,
@@ -420,6 +532,9 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     openOrderRender,
     privateUtteranceRender,
   )
+  if (directorBlock) {
+    stateBlock = `${stateBlock}\n\n${directorBlock}`
+  }
 
   // Hub sim-ops: clearance-filtered index ambient; full body only at console gate.
   // Subworld influence packet (seeded once at enter) is a compact control channel.
@@ -627,6 +742,22 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     trailingUser,
   ]
 
+  // C1: instrument pre-stream wall time + span breakdown before Grok starts.
+  const prestreamMs = Date.now() - prestreamStartedAt
+  timingSpans.prestream_ms = prestreamMs
+  try {
+    await turns.mergeMetadata(playerTurnId, 'timing', {
+      prestream_ms: prestreamMs,
+      spans: timingSpans,
+      classifier_method: classification.method,
+      npc_agent_ran: Boolean(npcAgentResult),
+      arrivals_applied: arrivalPatches.length,
+      occupancy_reused: occupancyReuse,
+    })
+  } catch (err) {
+    console.error('[prestream timing]', err)
+  }
+
   // `completion` resolves with the persisted narrator turn id once onFinish has
   // run all post-stream work. It must settle ONLY after the source stream
   // drains — which the AI-SDK guarantees happens after onFinish — so the route's
@@ -637,6 +768,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     resolveCompletion = resolve
   })
   let narratorTurnId: number | undefined
+  const streamStartedAt = Date.now()
 
   const result = streamText({
     model: xai(NARRATOR_MODEL),
@@ -649,6 +781,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       // ── POST-STREAM transaction boundary: narrator turn + factual work ────
       const narratorTurn = await turns.insert(worldId, 'assistant', trimmed, activeSceneId)
       narratorTurnId = narratorTurn.id
+      const streamDurationMs = Date.now() - streamStartedAt
 
       // OOC policy refusals are still shown in the chat log (what the model
       // emitted), but they must not drive archivist / clock / living-world work
@@ -670,10 +803,28 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             usage: classification.usage,
             error: classification.error,
           })
+          await turns.mergeMetadata(narratorTurn.id, 'timing', {
+            prestream_ms: prestreamMs,
+            stream_ms: streamDurationMs,
+            spans: timingSpans,
+          })
         } catch (err) {
           console.error('[ooc-refusal metadata]', err)
         }
         return
+      }
+
+      try {
+        await turns.mergeMetadata(narratorTurn.id, 'timing', {
+          prestream_ms: prestreamMs,
+          stream_ms: streamDurationMs,
+          // Full stream duration is a coarse TTFT proxy until token-level hooks land.
+          ttft_ms: streamDurationMs,
+          spans: timingSpans,
+          classifier_method: classification.method,
+        })
+      } catch (err) {
+        console.error('[timing metadata]', err)
       }
 
       // NARRATIVE CLOCK (any world). Deterministic estimate is primary; LLM
@@ -825,7 +976,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           if (exit) {
             const session = await sessions.byWorld(worldId)
             if (session && session.status === 'in_subworld') {
-              await closeSubworldAndReturn(
+              const closeResult = await closeSubworldAndReturn(
                 {
                   session,
                   subworldId: worldId,
@@ -842,9 +993,22 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
                   simRuns,
                   turns,
                   backgroundTasks,
+                  dossiers,
+                  dossierWriter,
                 },
               )
-              await turns.mergeMetadata(narratorTurn.id, 'subworld_exit', { kind: exit.kind })
+              // Persist reportId so missing reports are diagnosable from turn metadata
+              // (Meridian/Vigil: exit flipped session without a SimRunReport row).
+              await turns.mergeMetadata(narratorTurn.id, 'subworld_exit', {
+                kind: exit.kind,
+                reportId: closeResult?.reportId ?? null,
+                hubWorldId: closeResult?.hubWorldId ?? null,
+              })
+              if (closeResult?.reportId == null) {
+                console.error(
+                  `[subworld-exit] close returned without reportId world=${worldId} kind=${exit.kind}`,
+                )
+              }
             }
           }
         } catch (err) {
@@ -956,6 +1120,61 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
               archivistMeta.last_success_turn_id = extractSelection.lastSuccessTurnId
             }
           }
+
+          // Track A3: focused close-bias second pass when fiction resolved work
+          // but the main extract opened freely without lifecycle closes.
+          const activeBefore = countActiveDossierRows(priorState.dossier)
+          const closeGate = shouldRunCloseBiasPass({
+            playerText,
+            narratorText: trimmed,
+            activeDossierCount: activeBefore,
+            mainPatchClosedSomething: patchClosesSomething(patch),
+            directorSuggestsClose:
+              directorDecision.suggestResolveThreadIds.length > 0 ||
+              directorDecision.suggestCompleteObjectiveIds.length > 0,
+          })
+          if (closeGate) {
+            try {
+              const closePass = await extractPatch(
+                world.premise,
+                priorState,
+                archivistRecent,
+                turnOccupancy,
+                false,
+                false,
+                activePrivateUtterance,
+              )
+              // Keep only lifecycle close fields from the second pass.
+              const closeOnly = {
+                story_threads: (closePass.patch.story_threads ?? []).filter(
+                  (t) =>
+                    t.status === 'resolved' ||
+                    t.status === 'failed' ||
+                    t.status === 'dormant',
+                ),
+                story_objectives: (closePass.patch.story_objectives ?? []).filter(
+                  (o) => o.status === 'completed' || o.status === 'failed',
+                ),
+              }
+              if (
+                (closeOnly.story_threads?.length ?? 0) > 0 ||
+                (closeOnly.story_objectives?.length ?? 0) > 0
+              ) {
+                await applyArchivistPatch(worldId, narratorTurn.id, closeOnly)
+                archivistMeta.archivist_close = {
+                  model: ARCHIVIST_MODEL,
+                  usage: closePass.usage,
+                  patch: closeOnly,
+                }
+              } else {
+                archivistMeta.archivist_close = { skipped: true, reason: 'no_close_fields' }
+              }
+            } catch (err) {
+              console.error('[archivist-close]', err)
+              archivistMeta.archivist_close = { error: String(err) }
+            }
+          }
+
           await turns.mergeMetadata(narratorTurn.id, 'archivist', archivistMeta)
 
           // Thread-bootstrap fallback (C): Haiku reliably omits story_threads, so

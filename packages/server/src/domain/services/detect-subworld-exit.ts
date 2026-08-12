@@ -8,6 +8,10 @@
 // than firing on any mention of sleep or injury. Checks the narrator's prose
 // (where the consequence lands) and the player's action (an explicit "I let go").
 // No I/O.
+//
+// Dialogue is stripped before matching: NPC lines like "you die with him" (Meridian /
+// Sequence Vigil false death) must never trigger exit. The reliable same-session
+// backstop remains archivist status='dead' on the play-page boundary.
 
 export type SubworldExit = { kind: 'death' | 'awakening' }
 
@@ -18,7 +22,8 @@ export type SubworldExit = { kind: 'death' | 'awakening' }
 // player status='dead', enforced at the play-page boundary; these catch it
 // same-turn for the immediate awakening narration.)
 const DEATH_PATTERNS: RegExp[] = [
-  /\byou (?:die|are dead|bleed out|are killed|are slain)\b/i,
+  // Prefer terminal finality; avoid conditionals / threats ("you die if", "you die with him").
+  /\byou (?:die|are dead|bleed out|are killed|are slain)\b(?!\s+(?:if|unless|when|with|before|after)\b)/i,
   /\byou (?:breathe|draw) your last(?: breath)?\b/i,
   /\byour (?:life|vision) (?:ends|slips away|fades to (?:black|nothing)|leaves you)\b/i,
   /\byour (?:heart|pulse) (?:stops|stills|gives out|ceases)\b/i,
@@ -37,6 +42,23 @@ const AWAKENING_PATTERNS: RegExp[] = [
   /\byou are (?:pulled|wrenched|lifted) (?:out of|from) the (?:simulation|sim|tank|cradle|chair)\b/i,
 ]
 
+/**
+ * Remove quoted dialogue (straight + curly) so NPC/threat speech cannot trigger
+ * player-finality exit detection. Unmatched open quotes strip to end of string.
+ */
+export function stripQuotedDialogue(text: string): string {
+  let out = text
+  // Paired curly double quotes
+  out = out.replace(/“[^”]*”/g, ' ')
+  // Paired straight double quotes
+  out = out.replace(/"[^"]*"/g, ' ')
+  // Paired curly single quotes used as dialogue (not apostrophes mid-word)
+  out = out.replace(/‘[^’]*’/g, ' ')
+  // Unclosed curly/straight open quote → end of string (partial spoken line)
+  out = out.replace(/[“"][^”"]*$/g, ' ')
+  return out.replace(/[ \t]+\n/g, '\n').replace(/ {2,}/g, ' ')
+}
+
 function anyMatch(patterns: RegExp[], text: string): boolean {
   return patterns.some((p) => p.test(text))
 }
@@ -45,7 +67,8 @@ export function detectSubworldExit(
   playerText: string,
   narratorText: string,
 ): SubworldExit | null {
-  const haystack = `${playerText}\n${narratorText}`
+  // Player action is rarely quoted threat-speech; still strip for safety.
+  const haystack = stripQuotedDialogue(`${playerText}\n${narratorText}`)
   // Awakening takes precedence: a simulated "death" that is really the surfacing
   // moment ("you die — and wake gasping in the tank") is an awakening.
   if (anyMatch(AWAKENING_PATTERNS, haystack)) return { kind: 'awakening' }

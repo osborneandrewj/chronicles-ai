@@ -148,6 +148,8 @@ export function mapCharacter(d: CharacterDoc): Character {
     player_notes: d.playerNotes,
     in_transit_to_place_id: d.inTransitToPlaceId,
     arrival_world_time: d.arrivalWorldTime,
+    arrival_minutes: d.arrivalMinutes ?? null,
+    journey_path_json: d.journeyPathJson ?? null,
     last_known_situation: d.lastKnownSituation,
     aliases: d.aliases,
     daily_loop: d.dailyLoop ? JSON.stringify(d.dailyLoop) : null,
