@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.7.2',
+    date: '2026-08-11',
+    highlights: [
+      'Finished plot threads and objectives stay finished — side notes and follow-up details no longer accidentally reopen a closed arc.',
+      'The story remembers recently completed work in compact form, so characters and the world stop chasing goals that are already settled.',
+    ],
+  },
+  {
     version: '0.7.1',
     date: '2026-08-11',
     highlights: [
