@@ -16,6 +16,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.10.0',
+    date: '2026-08-11',
+    highlights: [
+      'Exiting a simulation writes a compact mission log on the hub — not raw turn dumps — so staff can pull Sequence Vigil from a console when cleared.',
+      'Hub characters carry clearance levels; ambient turns only show a short index, while the simulation room can surface the compacted debrief.',
+      'The program antagonist is a real hub NPC who builds a small model of how you play and can seed pressure (vessel / tags) into later simulations.',
+    ],
+  },
+  {
     version: '0.9.0',
     date: '2026-08-11',
     highlights: [

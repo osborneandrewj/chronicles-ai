@@ -260,9 +260,21 @@ export async function createAdventureAction(
     )
     await c.worlds.setLayer(hubResult.worldId, 'hub', null)
 
-    // 4. Persist the bible if it was successfully generated.
+    // 4. Persist the bible if it was successfully generated; link antagonist.
     if (bible) {
       await c.worlds.setMetaStory(hubResult.worldId, JSON.stringify(bible))
+    }
+    try {
+      const { ensureHubAntagonist } = await import(
+        '@/application/use-cases/ensure-hub-antagonist'
+      )
+      await ensureHubAntagonist(hubResult.worldId, {
+        worlds: c.worlds,
+        characters: c.characters,
+        places: c.places,
+      })
+    } catch (err) {
+      console.error('[hub antagonist link]', err)
     }
 
     // 5. Open the durable session pointer.
@@ -285,7 +297,7 @@ export async function createAdventureAction(
           playerName,
         },
       },
-      { worlds: c.worlds, sessions: c.sessions },
+      { worlds: c.worlds, sessions: c.sessions, simRuns: c.simRuns },
     )
     subworldId = sub.subworldId
     await generateOpeningTurn(openingTurnDeps(c), subworldId, preset.hiddenPremise)

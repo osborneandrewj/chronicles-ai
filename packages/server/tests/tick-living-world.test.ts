@@ -87,6 +87,7 @@ function character(overrides: Partial<Character>): Character {
     aliases: null,
     daily_loop: null,
     speech_register: null,
+        clearance_level: 'public_crew',
     created_at: '',
     updated_at: '',
     ...overrides,
@@ -217,6 +218,7 @@ function buildFakes(
     applyAgentNpcFields: async () => {},
     setDailyLoopIfEmpty: async () => {},
     setSpeechRegisterIfEmpty: async () => {},
+    setClearanceLevel: async () => {},
   }
   const placeConnections: PlaceConnectionRepository = {
     forWorld: async () => connections,

@@ -89,4 +89,10 @@ export interface WorldRepository {
    * other fields untouched.
    */
   setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void>
+  /** Hub ops: persist compact PlayerModel JSON (or null to clear). */
+  setPlayerModel(worldId: number, playerModelJson: string | null): Promise<void>
+  /** Hub ops: durable antagonist character id linkage. */
+  setAntagonistCharacterId(worldId: number, characterId: number | null): Promise<void>
+  /** Subworld ops: persist InfluencePacket JSON seeded at enter. */
+  setInfluencePacket(worldId: number, influencePacketJson: string | null): Promise<void>
 }

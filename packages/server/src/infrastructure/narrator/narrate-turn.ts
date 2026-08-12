@@ -13,8 +13,22 @@ import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
 import type { SimulationSession, TimelineEvent } from '@/domain/entities'
 import type { CharacterRepository } from '@/domain/ports'
-import { returnToHub } from '@/application/use-cases/return-to-hub'
+import { closeSubworldAndReturn } from '@/application/use-cases/close-subworld-and-return'
 import { findLikelyDuplicateCharacters } from '@/domain/services/character-dedup'
+import {
+  isConsoleCapablePlace,
+  shouldInjectSimLogs,
+  shouldShowSimIndex,
+} from '@/domain/services/console-access'
+import { parseClearanceLevel } from '@/domain/services/clearance'
+import {
+  formatAmbientSimIndexBlock,
+  formatConsoleLogPullBlock,
+  pickReportForQuery,
+} from '@/domain/services/sim-run-report'
+import { formatPlayerModelBlock } from '@/domain/services/player-model'
+import { formatInfluencePacketBlock } from '@/domain/services/build-influence-packet'
+import type { InfluencePacket, PlayerModel } from '@/domain/entities'
 import { clusterSimArcs, type SimArc } from '@/domain/services/cluster-sim-arcs'
 import { detectSubworldExit } from '@/domain/services/detect-subworld-exit'
 import {
@@ -131,6 +145,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     reveries,
     scenes,
     sessions,
+    simRuns,
     threadBootstrapper,
     timeline,
     timelineReader,
@@ -394,7 +409,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           audienceNames: activePrivateUtterance.audienceNames,
         }
       : null
-  const stateBlock = formatStateBlock(
+  let stateBlock = formatStateBlock(
     narratorState,
     plans,
     recentNarratorProse,
@@ -405,6 +420,78 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     openOrderRender,
     privateUtteranceRender,
   )
+
+  // Hub sim-ops: clearance-filtered index ambient; full body only at console gate.
+  // Subworld influence packet (seeded once at enter) is a compact control channel.
+  try {
+    const hubSession =
+      world.world_layer === 'hub' ? await sessions.byWorld(worldId) : null
+    const hasAwoken = hubSession ? hubSession.has_awoken === 1 : false
+    const playerClearance = parseClearanceLevel(
+      narratorState.presentCharacters.find((c) => c.is_player === 1)?.clearance_level,
+      'public_crew',
+    )
+
+    if (world.world_layer === 'hub' && shouldShowSimIndex({ worldLayer: 'hub', hasAwoken })) {
+      const reports = await simRuns.forHub(worldId)
+      let simRoomName: string | null = null
+      if (world.template_id) {
+        const archetype = await decks.getTemplate(world.template_id)
+        simRoomName =
+          archetype?.rooms.find((r) => r.key === archetype.simulationRoomKey)?.name ?? null
+      }
+      const consolePlace = isConsoleCapablePlace({
+        placeName: narratorState.currentPlace?.name ?? null,
+        simulationRoomName: simRoomName,
+      })
+      const decision = shouldInjectSimLogs({
+        worldLayer: 'hub',
+        placeId: narratorState.currentPlace?.id ?? null,
+        placeName: narratorState.currentPlace?.name ?? null,
+        isConsoleCapablePlace: consolePlace,
+        playerText,
+        actingCharacterClearance: playerClearance,
+        hasAwoken,
+      })
+      // Ambient index always (post-awaken); body only when console gate opens.
+      stateBlock += formatAmbientSimIndexBlock(reports, playerClearance)
+      if (decision.inject && decision.mode === 'body' && reports.length > 0) {
+        const picked = pickReportForQuery(reports, playerText)
+        if (picked) {
+          stateBlock += formatConsoleLogPullBlock(picked, playerClearance)
+        }
+      }
+      // Player model only when antagonist is present (high clearance face).
+      const antagonistPresent = narratorState.presentCharacters.some(
+        (c) =>
+          c.is_player !== 1 &&
+          (c.id === world.antagonist_character_id ||
+            parseClearanceLevel(c.clearance_level) === 'antagonist'),
+      )
+      if (antagonistPresent && world.player_model_json) {
+        try {
+          const model = JSON.parse(world.player_model_json) as PlayerModel
+          stateBlock += `\n\n${formatPlayerModelBlock(model)}`
+        } catch {
+          // ignore malformed model
+        }
+      }
+      stateBlock +=
+        '\n\nSim log rule: staff only recite log facts present in STATE (index or body). Do not invent Sequence/protocol details that are not listed.'
+    }
+
+    if (world.world_layer === 'subworld' && world.influence_packet_json) {
+      try {
+        const packet = JSON.parse(world.influence_packet_json) as InfluencePacket
+        stateBlock += `\n\n${formatInfluencePacketBlock(packet)}`
+      } catch {
+        // ignore
+      }
+    }
+  } catch (err) {
+    console.error('[hub-sim-ops state]', err)
+  }
+
   const premiseBlock = formatPremiseBlock(world.premise)
 
   // OFF-SCREEN life (bounded worlds only). The during-play living tick runs
@@ -738,9 +825,24 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           if (exit) {
             const session = await sessions.byWorld(worldId)
             if (session && session.status === 'in_subworld') {
-              await returnToHub(
-                { session },
-                { worlds, places, scenes, characters, sessions, decks },
+              await closeSubworldAndReturn(
+                {
+                  session,
+                  subworldId: worldId,
+                  exitKind: exit.kind,
+                  sourceTurnId: narratorTurn.id,
+                },
+                {
+                  worlds,
+                  places,
+                  scenes,
+                  characters,
+                  sessions,
+                  decks,
+                  simRuns,
+                  turns,
+                  backgroundTasks,
+                },
               )
               await turns.mergeMetadata(narratorTurn.id, 'subworld_exit', { kind: exit.kind })
             }

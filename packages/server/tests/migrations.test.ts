@@ -73,7 +73,7 @@ describe('v5 migration', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // turn_states is gone.
@@ -242,7 +242,7 @@ describe('v5 migration', () => {
     ).run(2, 1, '{"time": "broken')
 
     expect(() => runMigrations(db)).not.toThrow()
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     // initial_state_json was valid but is NOT consulted — current code uses
@@ -282,7 +282,7 @@ describe('v6 migration (npc_goal_attitude)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -390,7 +390,7 @@ describe('v7 migration (character_observations)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -430,7 +430,7 @@ describe('v8 migration (agentic_npcs)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -485,7 +485,7 @@ describe('v13 migration (player_canon_and_corrections)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -609,7 +609,7 @@ describe('v15-v16 migrations (npc_cognition + npc_reveries)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -671,7 +671,7 @@ describe('v17 migration (place_geo_anchors)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{
@@ -728,7 +728,7 @@ describe('v18 migration (npc_journey_state)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -786,7 +786,7 @@ describe('v19 migration (character_aliases)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -833,7 +833,7 @@ describe('v21 migration (scene_pacing_context)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('scenes')").all() as Array<{
@@ -862,6 +862,64 @@ describe('v21 migration (scene_pacing_context)', () => {
   })
 })
 
+describe('v36 migration (hub_sim_ops)', () => {
+  it('adds sim_run_reports, clearance_level, and hub ops world columns', () => {
+    const db = seedV4Database()
+    db.prepare(
+      `INSERT INTO worlds (id, name, premise, initial_state_json) VALUES (?, ?, ?, ?)`,
+    ).run(
+      1,
+      'Hub World',
+      'p',
+      JSON.stringify({ time: 'morning', location: 'facility', identity: 'a face' }),
+    )
+
+    runMigrations(db)
+
+    expect(db.pragma('user_version', { simple: true })).toBe(36)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sim_run_reports'")
+      .all() as Array<{ name: string }>
+    expect(tables).toHaveLength(1)
+
+    const charCols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
+      name: string
+      dflt_value: string | null
+    }>
+    const clearance = charCols.find((c) => c.name === 'clearance_level')
+    expect(clearance).toBeDefined()
+    expect(String(clearance?.dflt_value)).toMatch(/public_crew/)
+
+    const worldCols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{ name: string }>
+    expect(worldCols.some((c) => c.name === 'player_model_json')).toBe(true)
+    expect(worldCols.some((c) => c.name === 'antagonist_character_id')).toBe(true)
+    expect(worldCols.some((c) => c.name === 'influence_packet_json')).toBe(true)
+
+    // Upsert uniqueness: one row per hub+subworld
+    db.prepare(
+      `INSERT INTO sim_run_reports (
+         hub_world_id, subworld_id, codename, status, headline, summary, min_clearance
+       ) VALUES (1, 9, 'Sequence Vigil', 'death_exit', 'headline', 'summary', 'operator')`,
+    ).run()
+    db.prepare(
+      `INSERT INTO sim_run_reports (
+         hub_world_id, subworld_id, codename, status, headline, summary, min_clearance
+       ) VALUES (1, 9, 'Sequence Vigil', 'death_exit', 'headline2', 'summary2', 'operator')
+       ON CONFLICT(hub_world_id, subworld_id) DO UPDATE SET headline = excluded.headline`,
+    ).run()
+    const n = db
+      .prepare('SELECT COUNT(*) AS n FROM sim_run_reports WHERE hub_world_id = 1 AND subworld_id = 9')
+      .get() as { n: number }
+    expect(n.n).toBe(1)
+    const row = db
+      .prepare('SELECT headline FROM sim_run_reports WHERE hub_world_id = 1 AND subworld_id = 9')
+      .get() as { headline: string }
+    expect(row.headline).toBe('headline2')
+  })
+})
+
 describe('v34 migration (character_speech_register)', () => {
   it('adds a nullable speech_register TEXT column to characters', () => {
     const db = seedV4Database()
@@ -880,7 +938,7 @@ describe('v34 migration (character_speech_register)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('characters')").all() as Array<{
@@ -918,7 +976,7 @@ describe('v23 migration (world_archived_at)', () => {
 
     runMigrations(db)
 
-    expect(db.pragma('user_version', { simple: true })).toBe(35)
+expect(db.pragma('user_version', { simple: true })).toBe(36)
     expect(db.pragma('foreign_key_check')).toEqual([])
 
     const cols = db.prepare("PRAGMA table_info('worlds')").all() as Array<{

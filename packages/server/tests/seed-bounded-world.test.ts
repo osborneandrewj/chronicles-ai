@@ -120,6 +120,9 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async setLayer() {},
     async setMetaStory() {},
     async setGenreTags() {},
+    async setPlayerModel() {},
+    async setAntagonistCharacterId() {},
+    async setInfluencePacket() {},
   }
   const places: PlaceRepository = {
     async forWorld() {
@@ -198,6 +201,7 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async applyAgentNpcFields() {},
     async setDailyLoopIfEmpty() {},
     async setSpeechRegisterIfEmpty() {},
+    async setClearanceLevel() {},
   }
   const relationships: RelationshipRepository = {
     async forWorld() {

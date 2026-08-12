@@ -4,11 +4,20 @@ export type {
   Character,
   CharacterAgencyLevel,
   CharacterRelationship,
+  ClearanceLevel,
   DeckGraph,
   Place,
   PlaceConnection,
   Scene,
 } from './character'
+export type {
+  InfluencePacket,
+  PlayerModel,
+  SimRunReport,
+  SimRunReportUpsert,
+  SimRunStatus,
+} from './sim-ops'
+// ClearanceLevel is exported from './character' only (sim-ops re-exports for convenience)
 export type { WorldCorrectionRow } from './correction'
 export type {
   InsertNpcIntent,

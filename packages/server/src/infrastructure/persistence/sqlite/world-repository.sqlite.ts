@@ -38,6 +38,15 @@ const setLayerStmt = db.prepare<[string, number | null, number]>(
 const setMetaStoryStmt = db.prepare<[string, number]>(
   'UPDATE worlds SET meta_story_json = ? WHERE id = ?',
 )
+const setPlayerModelStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET player_model_json = ? WHERE id = ?',
+)
+const setAntagonistCharacterIdStmt = db.prepare<[number | null, number]>(
+  'UPDATE worlds SET antagonist_character_id = ? WHERE id = ?',
+)
+const setInfluencePacketStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET influence_packet_json = ? WHERE id = ?',
+)
 
 // SQLite adapter for WorldRepository (spec §5.1-P1). Delegates to the flat
 // read/archive functions in `worlds.ts` and the cursor reader in `db.ts`. World
@@ -125,6 +134,21 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void> {
     setGenreTags(worldId, genreTagsJson)
+    return Promise.resolve()
+  }
+
+  setPlayerModel(worldId: number, playerModelJson: string | null): Promise<void> {
+    setPlayerModelStmt.run(playerModelJson, worldId)
+    return Promise.resolve()
+  }
+
+  setAntagonistCharacterId(worldId: number, characterId: number | null): Promise<void> {
+    setAntagonistCharacterIdStmt.run(characterId, worldId)
+    return Promise.resolve()
+  }
+
+  setInfluencePacket(worldId: number, influencePacketJson: string | null): Promise<void> {
+    setInfluencePacketStmt.run(influencePacketJson, worldId)
     return Promise.resolve()
   }
 }

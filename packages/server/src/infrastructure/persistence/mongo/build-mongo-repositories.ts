@@ -14,6 +14,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   SessionRepository,
+  SimRunRepository,
   TimelineReader,
   TimelineWriter,
   TtsCacheRepository,
@@ -38,6 +39,7 @@ import { MongoPlaceRepository } from './repositories/place-repository.mongo'
 import { MongoRelationshipRepository } from './repositories/relationship-repository.mongo'
 import { MongoReverieRepository } from './repositories/reverie-repository.mongo'
 import { MongoSessionRepository } from './repositories/session-repository.mongo'
+import { MongoSimRunRepository } from './repositories/sim-run-repository.mongo'
 import { MongoSceneRepository } from './repositories/scene-repository.mongo'
 import { MongoTimelineReader } from './repositories/timeline-reader.mongo'
 import { MongoTimelineWriter } from './repositories/timeline-writer.mongo'
@@ -65,6 +67,7 @@ export type MongoRepositorySet = {
   timelineReader: TimelineReader
   reveries: ReverieRepository
   sessions: SessionRepository
+  simRuns: SimRunRepository
   npcIntents: NpcIntentRepository
   occupancy: OccupancyRepository
   ttsCache: TtsCacheRepository
@@ -101,6 +104,7 @@ export async function buildMongoRepositories(
     timelineReader: new MongoTimelineReader(ctx),
     reveries: new MongoReverieRepository(ctx),
     sessions: new MongoSessionRepository(ctx),
+    simRuns: new MongoSimRunRepository(ctx),
     npcIntents: new MongoNpcIntentRepository(ctx),
     occupancy: new MongoOccupancyRepository(ctx),
     ttsCache: new MongoTtsCacheRepository(ctx),

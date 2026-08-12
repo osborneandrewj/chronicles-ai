@@ -1,4 +1,4 @@
-import type { Character } from '@/domain/entities'
+import type { Character, ClearanceLevel } from '@/domain/entities'
 
 // Result of the appearance-bump / auto-promotion pass (spec §3.4-P3). `promoted`
 // is the names of NPCs that crossed the auto-promote threshold on this call;
@@ -248,4 +248,6 @@ export interface CharacterRepository {
    * currently null/blank. Sticky idiolect for dialogue depth (≤200 chars).
    */
   setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void>
+  /** Hub ops: set clearance_level (first-class projected field). */
+  setClearanceLevel(characterId: number, clearance: ClearanceLevel): Promise<void>
 }

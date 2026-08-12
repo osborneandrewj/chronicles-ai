@@ -208,6 +208,9 @@ const setSpeechRegisterIfEmptyStmt = db.prepare<[string, number]>(
   `UPDATE characters SET speech_register = ?, updated_at = datetime('now')
      WHERE id = ? AND (speech_register IS NULL OR trim(speech_register) = '')`,
 )
+const setClearanceLevelStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET clearance_level = ?, updated_at = datetime('now') WHERE id = ?`,
+)
 const setRelationshipToPlayerStmt = db.prepare<[string, number]>(
   `UPDATE characters SET relationship_to_player = ?, updated_at = datetime('now') WHERE id = ?`,
 )
@@ -440,6 +443,14 @@ export class SqliteCharacterRepository implements CharacterRepository {
 
   setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void> {
     setSpeechRegisterIfEmptyStmt.run(speechRegister, characterId)
+    return Promise.resolve()
+  }
+
+  setClearanceLevel(
+    characterId: number,
+    clearance: import('@/domain/entities').ClearanceLevel,
+  ): Promise<void> {
+    setClearanceLevelStmt.run(clearance, characterId)
     return Promise.resolve()
   }
 }

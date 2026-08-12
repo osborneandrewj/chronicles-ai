@@ -19,6 +19,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   SessionRepository,
+  SimRunRepository,
   SpeechSynthesizer,
   TimePassageEstimator,
   TimelineReader,
@@ -46,6 +47,7 @@ import { SqlitePlaceRepository } from '@/infrastructure/persistence/sqlite/place
 import { SqliteRelationshipRepository } from '@/infrastructure/persistence/sqlite/relationship-repository.sqlite'
 import { SqliteReverieRepository } from '@/infrastructure/persistence/sqlite/reverie-repository.sqlite'
 import { SqliteSessionRepository } from '@/infrastructure/persistence/sqlite/session-repository.sqlite'
+import { SqliteSimRunRepository } from '@/infrastructure/persistence/sqlite/sim-run-repository.sqlite'
 import { SqliteSceneRepository } from '@/infrastructure/persistence/sqlite/scene-repository.sqlite'
 import { SqliteTimelineReader } from '@/infrastructure/persistence/sqlite/timeline-reader.sqlite'
 import { SqliteTimelineWriter } from '@/infrastructure/persistence/sqlite/timeline-writer.sqlite'
@@ -92,6 +94,7 @@ export type Container = {
   timelineReader: TimelineReader
   reveries: ReverieRepository
   sessions: SessionRepository
+  simRuns: SimRunRepository
   npcIntents: NpcIntentRepository
   occupancy: OccupancyRepository
   ttsCache: TtsCacheRepository
@@ -151,6 +154,7 @@ function buildSqlite(): Container {
     timelineReader: new SqliteTimelineReader(),
     reveries: new SqliteReverieRepository(),
     sessions: new SqliteSessionRepository(),
+    simRuns: new SqliteSimRunRepository(),
     npcIntents: new SqliteNpcIntentRepository(),
     occupancy: new SqliteOccupancyRepository(),
     ttsCache: new SqliteTtsCacheRepository(),

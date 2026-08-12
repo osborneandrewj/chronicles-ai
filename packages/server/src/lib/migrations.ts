@@ -981,6 +981,44 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'world_corrections', 'hidden', 'INTEGER NOT NULL DEFAULT 0')
     },
   },
+  {
+    // Hub sim logs + antagonist ops: compact SimRunReport table, first-class
+    // clearance_level on characters, hub player model / antagonist link, and
+    // subworld influence packet seed.
+    version: 36,
+    name: 'hub_sim_ops',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sim_run_reports (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          hub_world_id         INTEGER NOT NULL,
+          subworld_id          INTEGER NOT NULL,
+          codename             TEXT    NOT NULL,
+          genre_tags           TEXT    NOT NULL DEFAULT '[]',
+          status               TEXT    NOT NULL,
+          headline             TEXT    NOT NULL,
+          summary              TEXT    NOT NULL,
+          outcomes             TEXT    NOT NULL DEFAULT '[]',
+          anomalies            TEXT    NOT NULL DEFAULT '[]',
+          persons_of_interest  TEXT    NOT NULL DEFAULT '[]',
+          min_clearance        TEXT    NOT NULL DEFAULT 'operator',
+          source_turn_id       INTEGER,
+          created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE (hub_world_id, subworld_id)
+        );
+        CREATE INDEX IF NOT EXISTS sim_run_reports_hub ON sim_run_reports(hub_world_id);
+      `)
+      addColumnIfMissing(
+        db,
+        'characters',
+        'clearance_level',
+        "TEXT NOT NULL DEFAULT 'public_crew'",
+      )
+      addColumnIfMissing(db, 'worlds', 'player_model_json', 'TEXT')
+      addColumnIfMissing(db, 'worlds', 'antagonist_character_id', 'INTEGER')
+      addColumnIfMissing(db, 'worlds', 'influence_packet_json', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,
