@@ -57,6 +57,37 @@ describe('narrator prompt — NPC knowledge boundary (A2)', () => {
   })
 })
 
+describe('director-brain prompt', () => {
+  it('forbids inventing new major threads and asks for one initiator', () => {
+    const p = loadPrompt('director-brain')
+    expect(p).toMatch(/do not invent new major threads/i)
+    expect(p).toMatch(/one `initiate`/)
+    expect(p).toMatch(/player agency/i)
+  })
+})
+
+describe('npc-agent prompt — director CAST slots', () => {
+  it('tells the agent to honor initiate/react/arrive/background', () => {
+    const p = loadPrompt('npc-agent-system')
+    expect(p).toMatch(/director_slot/i)
+    expect(p).toMatch(/initiate/)
+    expect(p).toMatch(/background/)
+    expect(p).toMatch(/Fill assigned slots only/i)
+  })
+})
+
+describe('narrator prompt — director beat is binding', () => {
+  it('treats DIRECTOR MUST STAGE like planned moves', () => {
+    const p = loadPrompt('narrator-system')
+    expect(p).toMatch(/## DIRECTOR/)
+    expect(p).toMatch(/MUST STAGE/)
+    expect(p).toMatch(/same force as planned moves/i)
+    expect(p).toMatch(/MUST NOT/)
+    expect(p).toMatch(/CAST/)
+    expect(p).toMatch(/do not write "director"/i)
+  })
+})
+
 describe('narrator prompt — no option menus (A3)', () => {
   it('forbids enumerating choices / option menus', () => {
     const p = loadPrompt('narrator-system')

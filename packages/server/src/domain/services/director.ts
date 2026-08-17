@@ -2,8 +2,14 @@
 // Deterministic; fail-open empty beat. Soft guidance only — no hard climax
 // fiction. Structure/closure gap, not prose volume.
 
-import type { DirectorBeat, DirectorPhase } from '@/domain/entities/director-beat'
+import type {
+  DirectorBeat,
+  DirectorBeatKind,
+  DirectorCastSlot,
+  DirectorPhase,
+} from '@/domain/entities/director-beat'
 import { emptyDirectorBeat } from '@/domain/entities/director-beat'
+import type { PendingDirectorBeat } from '@/domain/entities/director-state'
 import {
   extractDeadlineMinutes,
   rankObjectives,
@@ -25,6 +31,12 @@ export type RankableObjectiveWithThread = RankableObjective & {
   thread_id?: number | null
 }
 
+export type DirectorCastCandidate = {
+  id: number
+  name: string
+  isPlayer?: boolean
+}
+
 export type DirectorSnapshot = {
   threads: RankableThread[]
   objectives: RankableObjectiveWithThread[]
@@ -37,6 +49,12 @@ export type DirectorSnapshot = {
    * for threads that mention them — never required for A1.
    */
   enRouteNames?: string[]
+  /** Present characters for CAST assignment (player is ignored). */
+  presentCast?: DirectorCastCandidate[]
+  /** En-route characters with ids (arrive slots). */
+  enRouteCast?: DirectorCastCandidate[]
+  /** Unused pending beat from last turn's gated brain. */
+  pendingBeat?: PendingDirectorBeat | null
 }
 
 export type DirectorDecision = DirectorBeat & {
@@ -63,7 +81,10 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
   )
 
   if (activeThreads.length === 0 && activeObjectives.length === 0) {
-    return { ...emptyDirectorBeat(), backgroundThreadIds: [], heavyThreadIds: [] }
+    return mergePendingBeat(
+      { ...emptyDirectorBeat(), backgroundThreadIds: [], heavyThreadIds: [] },
+      snapshot,
+    )
   }
 
   const ctx: RankingContext = { clockMinutes: snapshot.clockMinutes }
@@ -116,17 +137,93 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
       playerText: snapshot.playerText,
     })
 
-  return {
-    foregroundThreadId,
+  const cast = assignCast({
+    present: snapshot.presentCast ?? [],
+    enRoute: snapshot.enRouteCast ?? namesToCast(snapshot.enRouteNames),
+    foreground,
+  })
+  const closing =
+    suggestResolveThreadIds.length > 0 || suggestCompleteObjectiveIds.length > 0
+  const beatKind = deriveBeatKind({
+    foreground,
     phase,
-    tension,
-    guidanceLines,
-    suggestResolveThreadIds,
-    suggestCompleteObjectiveIds,
-    suggestDormantThreadIds,
-    backgroundThreadIds,
-    heavyThreadIds,
+    engaged,
+    stallTurns,
+    playerText: snapshot.playerText,
+    cast,
+    hasObjectives: activeObjectives.length > 0,
+    closing,
+  })
+  const mustStage = buildMustStage({
+    foreground,
+    beatKind,
+    cast,
+    closing,
+    stallTurns,
+    engaged,
+  })
+  const mustNot = buildMustNot({ beatKind, phase })
+
+  return mergePendingBeat(
+    {
+      foregroundThreadId,
+      phase,
+      tension,
+      beatKind,
+      mustStage,
+      mustNot,
+      cast,
+      guidanceLines,
+      suggestResolveThreadIds,
+      suggestCompleteObjectiveIds,
+      suggestDormantThreadIds,
+      backgroundThreadIds,
+      heavyThreadIds,
+    },
+    snapshot,
+  )
+}
+
+/** Overlay a pending brain beat unless the player engaged a different thread. */
+export function mergePendingBeat(
+  decision: DirectorDecision,
+  snapshot: DirectorSnapshot,
+): DirectorDecision {
+  const pending = snapshot.pendingBeat
+  if (!pending) return decision
+  if (playerOverridesPending(snapshot, pending)) return decision
+  return {
+    ...decision,
+    beatKind: pending.beatKind,
+    foregroundThreadId: pending.foregroundThreadId ?? decision.foregroundThreadId,
+    mustStage: pending.mustStage.length > 0 ? pending.mustStage : decision.mustStage,
+    mustNot: uniqueLines([...decision.mustNot, ...pending.mustNot]),
+    cast: pending.cast.length > 0 ? pending.cast : decision.cast,
+    guidanceLines: uniqueLines([...pending.guidanceLines, ...decision.guidanceLines]),
   }
+}
+
+function playerOverridesPending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  if (pending.foregroundThreadId == null) return false
+  const other = snapshot.threads.filter(
+    (t) => t.status === 'active' && t.id !== pending.foregroundThreadId,
+  )
+  return other.some((t) => playerEngages(snapshot.playerText, t, snapshot.objectives))
+}
+
+function uniqueLines(lines: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const line of lines) {
+    const key = line.trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(line)
+  }
+  return out
 }
 
 // ── Internals ───────────────────────────────────────────────────────────────
@@ -344,6 +441,151 @@ function softSuggestions(args: {
 function truncate(s: string, n: number): string {
   const t = s.trim()
   return t.length <= n ? t : `${t.slice(0, n - 1)}…`
+}
+
+const DIRECTOR_REACT_CAP = 2
+
+function namesToCast(names: string[] | undefined): DirectorCastCandidate[] {
+  return (names ?? []).map((name, i) => ({ id: -1 - i, name }))
+}
+
+function assignCast(args: {
+  present: DirectorCastCandidate[]
+  enRoute: DirectorCastCandidate[]
+  foreground: RankableThread | null
+}): DirectorCastSlot[] {
+  const npcs = args.present.filter((c) => !c.isPlayer && c.name.trim())
+  const mentioned = (name: string): boolean =>
+    Boolean(args.foreground && mentionsAny(args.foreground, [name.toLowerCase()]))
+
+  const scored = [...npcs].sort((a, b) => {
+    const aHit = mentioned(a.name) ? 1 : 0
+    const bHit = mentioned(b.name) ? 1 : 0
+    return bHit - aHit || a.id - b.id
+  })
+
+  const slots: DirectorCastSlot[] = []
+  let reactCount = 0
+  for (const c of scored) {
+    let role: DirectorCastSlot['role'] = 'background'
+    if (slots.every((s) => s.role !== 'initiate')) role = 'initiate'
+    else if (reactCount < DIRECTOR_REACT_CAP) {
+      role = 'react'
+      reactCount += 1
+    }
+    slots.push({ characterId: c.id, name: c.name, role })
+  }
+
+  const presentIds = new Set(npcs.map((c) => c.id))
+  for (const c of args.enRoute) {
+    if (presentIds.has(c.id) || !c.name.trim()) continue
+    if (args.foreground && mentioned(c.name)) {
+      slots.push({ characterId: c.id, name: c.name, role: 'arrive' })
+    }
+  }
+  return slots
+}
+
+function deriveBeatKind(args: {
+  foreground: RankableThread | null
+  phase: DirectorPhase | null
+  engaged: boolean
+  stallTurns: number
+  playerText: string
+  cast: DirectorCastSlot[]
+  hasObjectives: boolean
+  closing: boolean
+}): DirectorBeatKind | null {
+  if (!args.foreground && !args.hasObjectives) return null
+  if (args.closing || args.phase === 'resolution') return 'close'
+  if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) return 'stall_escalate'
+  if (args.cast.some((c) => c.role === 'arrive')) return 'arrival'
+  if (isIdleMove(args.playerText) && !args.engaged) return 'yield'
+  if (isRevealMove(args.playerText)) return 'reveal'
+  if (!args.foreground || args.phase === 'setup') return 'local'
+  return 'pressure'
+}
+
+function isIdleMove(text: string): boolean {
+  return /\b(wait|look around|stare|sit|drink|idle|do nothing|stay|linger)\b/i.test(
+    text,
+  )
+}
+
+function isRevealMove(text: string): boolean {
+  return /\b(examine|search|inspect|read|ask about|look at|study|who is|what is)\b/i.test(
+    text,
+  )
+}
+
+function buildMustStage(args: {
+  foreground: RankableThread | null
+  beatKind: DirectorBeatKind | null
+  cast: DirectorCastSlot[]
+  closing: boolean
+  stallTurns: number
+  engaged: boolean
+}): string[] {
+  const lines: string[] = []
+  if (args.foreground && args.beatKind) {
+    lines.push(
+      `Stage a concrete beat of "${args.foreground.title}" (${args.beatKind}).`,
+    )
+  } else if (args.beatKind === 'local') {
+    lines.push('Stage local scene pressure only — no new major arc.')
+  }
+  const initiator = args.cast.find((c) => c.role === 'initiate')
+  if (initiator) {
+    lines.push(
+      `${initiator.name} initiates — they act first; do not wait for the protagonist to prompt them.`,
+    )
+  }
+  if (args.closing) {
+    lines.push('Prefer closing listed work over opening a new complication.')
+  }
+  if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) {
+    lines.push(
+      'Escalate time, NPC initiative, or environmental cost without railroading.',
+    )
+  }
+  return lines
+}
+
+function buildMustNot(args: {
+  beatKind: DirectorBeatKind | null
+  phase: DirectorPhase | null
+}): string[] {
+  const lines: string[] = []
+  if (
+    args.beatKind === 'close' ||
+    args.beatKind === 'stall_escalate' ||
+    args.phase === 'climax' ||
+    args.phase === 'resolution'
+  ) {
+    lines.push('Do not open a new major arc this turn.')
+  }
+  if (args.beatKind === 'close') {
+    lines.push('Do not revive recently closed work as a new quest.')
+  }
+  return lines
+}
+
+/** Serialize the binding BeatBrief for turn metadata (`director` key). */
+export function directorBeatToMetadata(
+  d: DirectorDecision,
+): Record<string, unknown> {
+  return {
+    beatKind: d.beatKind,
+    foregroundThreadId: d.foregroundThreadId,
+    phase: d.phase,
+    tension: d.tension,
+    mustStage: d.mustStage,
+    mustNot: d.mustNot,
+    cast: d.cast,
+    suggestResolveThreadIds: d.suggestResolveThreadIds,
+    suggestCompleteObjectiveIds: d.suggestCompleteObjectiveIds,
+    suggestDormantThreadIds: d.suggestDormantThreadIds,
+  }
 }
 
 /** Re-export ranking helper for Director-shaped tests. */

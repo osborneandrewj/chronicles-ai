@@ -67,6 +67,7 @@ export type WorldDoc = {
   playerModelJson: string | null
   antagonistCharacterId: number | null
   influencePacketJson: string | null
+  directorStateJson: string | null
   worldTime: string | null
   currentSceneId: number | null
   archivedAt: Date | null
@@ -90,6 +91,7 @@ const WorldSchema = new Schema<WorldDoc>(
     playerModelJson: { type: String, default: null },
     antagonistCharacterId: { type: Number, default: null },
     influencePacketJson: { type: String, default: null },
+    directorStateJson: { type: String, default: null },
     worldTime: { type: String, default: null },
     currentSceneId: { type: Number, default: null },
     archivedAt: { type: Date, default: null },
@@ -942,6 +944,43 @@ const SimRunReportSchema = new Schema<SimRunReportDoc>(
 SimRunReportSchema.index({ hubWorldId: 1, subworldId: 1 }, { unique: true })
 SimRunReportSchema.index({ hubWorldId: 1, id: -1 })
 
+// ---------------------------------------------------------------------------
+// world_events — append-only coordination log (not timeline_events)
+// ---------------------------------------------------------------------------
+export type WorldEventDoc = {
+  _id: Types.ObjectId
+  id: number
+  worldId: number
+  turnId: number | null
+  worldTime: string | null
+  kind: string
+  sourceAgent: string
+  actorId: number | null
+  threadId: number | null
+  payload: Record<string, unknown>
+  visibility: string
+  createdAt: Date
+}
+
+const WorldEventSchema = new Schema<WorldEventDoc>(
+  {
+    id: { type: Number, required: true, unique: true },
+    worldId: { type: Number, required: true },
+    turnId: { type: Number, default: null },
+    worldTime: { type: String, default: null },
+    kind: { type: String, required: true },
+    sourceAgent: { type: String, required: true },
+    actorId: { type: Number, default: null },
+    threadId: { type: Number, default: null },
+    payload: { type: Schema.Types.Mixed, default: {} },
+    visibility: { type: String, default: 'system' },
+    createdAt: { type: Date, required: true },
+  },
+  { collection: 'world_events', minimize: false, versionKey: false },
+)
+WorldEventSchema.index({ worldId: 1, id: -1 })
+WorldEventSchema.index({ worldId: 1, kind: 1, id: -1 })
+
 export type MongoModels = {
   Counter: Model<CounterDoc>
   SimulationSession: Model<SimulationSessionDoc>
@@ -964,6 +1003,7 @@ export type MongoModels = {
   TtsAudioCache: Model<TtsAudioCacheDoc>
   WorldCorrection: Model<WorldCorrectionDoc>
   SimRunReport: Model<SimRunReportDoc>
+  WorldEvent: Model<WorldEventDoc>
 }
 
 // Bind one schema to a connection, reusing an already-compiled model so
@@ -1010,5 +1050,6 @@ export function buildModels(connection: Connection): MongoModels {
     TtsAudioCache: bind(connection, 'TtsAudioCache', TtsAudioCacheSchema),
     WorldCorrection: bind(connection, 'WorldCorrection', WorldCorrectionSchema),
     SimRunReport: bind(connection, 'SimRunReport', SimRunReportSchema),
+    WorldEvent: bind(connection, 'WorldEvent', WorldEventSchema),
   }
 }

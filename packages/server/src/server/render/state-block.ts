@@ -548,31 +548,58 @@ export type FormatDossierOptions = {
 }
 
 /**
- * Soft ## DIRECTOR block from a pure Director decision (Track A1).
- * Fail-open empty string when no guidance.
+ * ## DIRECTOR block from a pure Director decision.
+ * MUST STAGE / MUST NOT / CAST are structural (same force as planned moves).
+ * Fail-open empty string when there is nothing to direct.
  */
 export function formatDirectorBlock(
   decision: DirectorDecision,
   threads: StoryThread[],
 ): string {
-  if (decision.guidanceLines.length === 0 && decision.foregroundThreadId == null) {
-    return ''
-  }
+  const hasBrief =
+    decision.foregroundThreadId != null ||
+    decision.mustStage.length > 0 ||
+    decision.cast.length > 0 ||
+    decision.guidanceLines.length > 0
+  if (!hasBrief) return ''
+
   const byId = new Map(threads.map((t) => [t.id, t]))
   const lines: string[] = [
     '## DIRECTOR',
-    'Soft structural pressure — interpret in craft; do not invent mechanics or list as menu options.',
+    'Structural beat — MUST realize every MUST STAGE line this turn (same force as PLANNED MOVES). Craft is free on how. Do not invent mechanics or list as menu options.',
   ]
-  if (decision.foregroundThreadId != null) {
-    const fg = byId.get(decision.foregroundThreadId)
-    if (fg) {
-      lines.push(
-        `- Foreground: ${fg.title} (${fg.kind}, phase ${decision.phase ?? 'rising'}, tension ${decision.tension.toFixed(2)})`,
-      )
+  const fg =
+    decision.foregroundThreadId != null
+      ? byId.get(decision.foregroundThreadId)
+      : undefined
+  const beatLabel = [
+    decision.beatKind,
+    fg ? `"${fg.title}"` : null,
+    fg ? fg.kind : null,
+    decision.phase,
+    decision.tension > 0 ? `tension ${decision.tension.toFixed(2)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  if (beatLabel) lines.push(`Beat: ${beatLabel}`)
+
+  if (decision.mustStage.length > 0) {
+    lines.push('MUST STAGE')
+    for (const item of decision.mustStage) lines.push(`- ${item}`)
+  }
+  if (decision.mustNot.length > 0) {
+    lines.push('MUST NOT')
+    for (const item of decision.mustNot) lines.push(`- ${item}`)
+  }
+  if (decision.cast.length > 0) {
+    lines.push('CAST')
+    for (const slot of decision.cast) {
+      lines.push(`- ${slot.role}: ${slot.name}`)
     }
   }
-  for (const g of decision.guidanceLines) {
-    lines.push(`- ${g}`)
+  if (decision.guidanceLines.length > 0) {
+    lines.push('Notes (soft)')
+    for (const g of decision.guidanceLines) lines.push(`- ${g}`)
   }
   if (decision.backgroundThreadIds.length > 0) {
     const bg = decision.backgroundThreadIds

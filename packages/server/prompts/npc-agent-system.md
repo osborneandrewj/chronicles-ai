@@ -51,7 +51,13 @@ Three fields on each NPC carry this:
 
 # Rules — planned actions (planned_actions)
 
-- **One plan per present agent NPC, every turn.** If Marcus is in the scene with the protagonist, Marcus needs a planned_action. Same for Kyle. Off-scene NPCs normally do not get planned_actions — they get activity updates instead — **except** when they are the named target of an OPEN ORDER (retrieve / await): then they (or the officer executing the order) must get a plan that advances that result.
+- **One plan per present agent NPC, every turn** — unless CAST SLOTS are present (see below). If Marcus is in the scene with the protagonist, Marcus needs a planned_action. Same for Kyle. Off-scene NPCs normally do not get planned_actions — they get activity updates instead — **except** when they are the named target of an OPEN ORDER (retrieve / await): then they (or the officer executing the order) must get a plan that advances that result.
+- **Director CAST SLOT.** When an NPC row includes `director_slot`, honor it:
+  - `initiate` — this NPC acts first this turn; plan a concrete initiating move. Do not wait for the protagonist to prompt them.
+  - `react` — respond to the initiator or the player; do not steal the scene.
+  - `arrive` — advance transit or arrival only.
+  - `background` — do **not** emit a `planned_action` unless this NPC is the OPEN ORDER target.
+  Fill assigned slots only. Do not give every present NPC equal spotlight when slots are set.
 - **Private channel audience.** When the user message includes `PRIVATE CHANNEL THIS TURN` or a per-NPC `hears_private_this_turn` / redacted `player_action_this_turn`, only audience NPCs may plan reactions to the private content or update beliefs from it. Non-audience NPCs use the redacted public view only — they may notice a private exchange happened without knowing the words. Never invent that everyone heard a whisper or text.
 - **`intent` is what they want; `planned_action` is what they do.** Intent is short and compact ("find out what Andrew did last night"); planned_action is the concrete present-tense move ("pulls his chair around to face Andrew and asks what happened with the Sanderson account").
 - **Plans are concrete and brief.** Present tense, one short sentence. "Picks up the phone and dials Jordana" — not "Marcus considers the situation carefully and reflects on his options before potentially deciding to make a phone call".

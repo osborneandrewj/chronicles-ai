@@ -28,10 +28,12 @@ import type {
   TurnRepository,
   UnitOfWork,
   UsageRepository,
+  WorldEventRepository,
   WorldRepository,
 } from '@/domain/ports'
 import type { EnsembleGenerator } from '@/domain/ports/ensemble-generator'
 import type { ThreadBootstrapper } from '@/domain/ports/thread-bootstrapper'
+import type { DirectorDecisionPort } from '@/domain/ports/director-decision'
 import type { MetaStoryGenerator } from '@/domain/ports/meta-story-generator'
 import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
 import { SystemClock } from '@/infrastructure/clock/system-clock'
@@ -56,6 +58,7 @@ import { SqliteTurnRepository } from '@/infrastructure/persistence/sqlite/turn-r
 import { SqliteUnitOfWork } from '@/infrastructure/persistence/sqlite/unit-of-work.sqlite'
 import { SqliteMemoryRepository } from '@/infrastructure/persistence/sqlite/memory-repository.sqlite'
 import { SqliteUsageRepository } from '@/infrastructure/persistence/sqlite/usage-repository.sqlite'
+import { SqliteWorldEventRepository } from '@/infrastructure/persistence/sqlite/world-event-repository.sqlite'
 import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world-repository.sqlite'
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
@@ -64,6 +67,7 @@ import { GrokThreadBootstrapper } from '@/infrastructure/world-gen/grok-thread-b
 import { GrokMetaStoryGenerator } from '@/infrastructure/world-gen/grok-meta-story-generator'
 import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
 import { HaikuTimePassageEstimator } from '@/infrastructure/world-gen/haiku-time-passage-estimator'
+import { HaikuDirectorBrain } from '@/infrastructure/world-gen/haiku-director-brain'
 
 // Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
 // constructs concrete infrastructure adapters. Everything else depends on the
@@ -109,6 +113,8 @@ export type Container = {
   metaStoryGenerator: MetaStoryGenerator
   drama: DramaPort
   timePassage: TimePassageEstimator
+  worldEvents: WorldEventRepository
+  directorBrain: DirectorDecisionPort
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -169,6 +175,8 @@ function buildSqlite(): Container {
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
+    worldEvents: new SqliteWorldEventRepository(),
+    directorBrain: new HaikuDirectorBrain(),
   }
 }
 
@@ -220,6 +228,7 @@ export async function initContainer(): Promise<Container> {
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
+    directorBrain: new HaikuDirectorBrain(),
     ...repos,
   })
 }

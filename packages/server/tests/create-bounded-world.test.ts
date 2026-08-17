@@ -140,6 +140,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     async setPlayerModel() {},
     async setAntagonistCharacterId() {},
     async setInfluencePacket() {},
+    async setDirectorState() {},
   }
 
   const places: CreateBoundedWorldDeps['places'] = {

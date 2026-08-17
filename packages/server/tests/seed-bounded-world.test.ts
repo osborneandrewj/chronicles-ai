@@ -123,6 +123,7 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async setPlayerModel() {},
     async setAntagonistCharacterId() {},
     async setInfluencePacket() {},
+    async setDirectorState() {},
   }
   const places: PlaceRepository = {
     async forWorld() {

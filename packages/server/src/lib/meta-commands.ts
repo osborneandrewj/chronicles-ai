@@ -30,6 +30,7 @@ const handlers: Record<string, Handler> = {
         scenes: c.scenes,
         dossiers: c.dossiers,
         reveries: c.reveries,
+        worldEvents: c.worldEvents,
       },
       worldId,
     )

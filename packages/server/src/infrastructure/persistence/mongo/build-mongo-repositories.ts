@@ -21,6 +21,7 @@ import type {
   TurnRepository,
   UnitOfWork,
   UsageRepository,
+  WorldEventRepository,
   WorldRepository,
 } from '@/domain/ports'
 
@@ -46,6 +47,7 @@ import { MongoTimelineWriter } from './repositories/timeline-writer.mongo'
 import { MongoTtsCacheRepository } from './repositories/tts-cache-repository.mongo'
 import { MongoTurnRepository } from './repositories/turn-repository.mongo'
 import { MongoUsageRepository } from './repositories/usage-repository.mongo'
+import { MongoWorldEventRepository } from './repositories/world-event-repository.mongo'
 import { MongoWorldRepository } from './repositories/world-repository.mongo'
 
 // The repository set the composition root injects when PERSISTENCE=mongo. This
@@ -74,6 +76,7 @@ export type MongoRepositorySet = {
   corrections: CorrectionRepository
   usage: UsageRepository
   memory: MemoryRepository
+  worldEvents: WorldEventRepository
 }
 
 /**
@@ -111,5 +114,6 @@ export async function buildMongoRepositories(
     corrections: new MongoCorrectionRepository(ctx),
     usage: new MongoUsageRepository(ctx),
     memory: new MongoMemoryRepository(),
+    worldEvents: new MongoWorldEventRepository(ctx),
   }
 }

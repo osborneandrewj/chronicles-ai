@@ -17,6 +17,7 @@ import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
 import { resolveClockMinutes } from '@/domain/services/narrative-clock'
 import type { OpenOrder } from '@/domain/services/open-order'
 import { missingPlannedActions } from '@/domain/services/npc-promotion'
+import type { DirectorCastHint } from '@/domain/services/plan-cast'
 import {
   journeyToCharacterFields,
   startJourney,
@@ -427,6 +428,7 @@ export async function runNpcAgentTick(
   recentTurns: Array<{ role: 'user' | 'assistant'; content: string }>,
   openOrder: OpenOrder | null = null,
   privateUtterance: PrivateUtterance | null = null,
+  directorCast: DirectorCastHint[] | null = null,
 ): Promise<{
   patch: NpcAgentPatch
   plans: PlannedActionWithIntent[]
@@ -506,6 +508,7 @@ export async function runNpcAgentTick(
       in_transit_to_place_id: a.in_transit_to_place_id,
     })),
     openOrderTargetId,
+    directorCast: directorCast ?? undefined,
   })
   if (castPick.length === 0) return null
   const eligibleIds = new Set(castPick.map((e) => e.id))
@@ -635,6 +638,8 @@ export async function runNpcAgentTick(
     // Audience-scoped player action for this turn (structure-first privacy).
     player_action_this_turn: playerTextForNpc(playerInput, a.id, activePrivate),
     hears_private_this_turn: activePrivate ? isAudience(a.id, activePrivate) : null,
+    director_slot:
+      directorCast?.find((s) => s.characterId === a.id)?.role ?? null,
   }))
 
   const privateChannelLine =
@@ -712,13 +717,23 @@ export async function runNpcAgentTick(
   // first-pass plans). Merge UPSTREAM of the single insert loop so ids allocate
   // through one code path (SQLite + Mongo parity).
   let mergedUsage = usage
-  // Present agents must get plans; open-order targets (possibly off-scene) too (S2).
+  // Director CAST initiate/react/arrive (plus open-order) must get plans.
+  // Without CAST, every present agent still must plan (legacy engagement floor).
+  const directorRoleById = new Map(
+    (directorCast ?? []).map((s) => [s.characterId, s.role]),
+  )
+  const hasDirectedAction = [...directorRoleById.values()].some(
+    (r) => r === 'initiate' || r === 'react' || r === 'arrive',
+  )
   const mustPlanNames = tickable
-    .filter(
-      (a) =>
-        (a.current_place_id !== null && a.current_place_id === playerPlaceId) ||
-        (openOrderTargetId != null && a.id === openOrderTargetId),
-    )
+    .filter((a) => {
+      if (openOrderTargetId != null && a.id === openOrderTargetId) return true
+      if (hasDirectedAction) {
+        const role = directorRoleById.get(a.id)
+        return role === 'initiate' || role === 'react' || role === 'arrive'
+      }
+      return a.current_place_id !== null && a.current_place_id === playerPlaceId
+    })
     .map((a) => a.name)
   const planned = [...(object.planned_actions ?? [])]
   const missing = missingPlannedActions(mustPlanNames, planned)

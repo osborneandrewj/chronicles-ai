@@ -210,4 +210,40 @@ d('mongo persistence adapters', () => {
       expect(doc?.content).toBe('committed')
     })
   })
+
+  describe('world_events append + recent', () => {
+    it('appends a beat and returns it newest-first', async () => {
+      await seedWorld(1012, 'event-world')
+      const { MongoWorldEventRepository } = await import(
+        '@/infrastructure/persistence/mongo/repositories/world-event-repository.mongo'
+      )
+      const repo = new MongoWorldEventRepository(h.ctx)
+      await repo.append({
+        world_id: 1012,
+        turn_id: 3,
+        world_time: 'dusk',
+        kind: 'BEAT_DIRECTED',
+        source_agent: 'director',
+        actor_id: null,
+        thread_id: 8,
+        payload: { beatKind: 'pressure' },
+        visibility: 'system',
+      })
+      await repo.append({
+        world_id: 1012,
+        turn_id: 3,
+        world_time: 'dusk',
+        kind: 'NPC_STAGED',
+        source_agent: 'reconciler',
+        actor_id: 5,
+        thread_id: null,
+        payload: { intent_id: 1, disposition: 'staged' },
+        visibility: 'system',
+      })
+      const recent = await repo.recentForWorld(1012, 20)
+      expect(recent.map((e) => e.kind)).toEqual(['NPC_STAGED', 'BEAT_DIRECTED'])
+      expect(recent[1].thread_id).toBe(8)
+      expect(recent[0].actor_id).toBe(5)
+    })
+  })
 })

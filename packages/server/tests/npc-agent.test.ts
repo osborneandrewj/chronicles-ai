@@ -540,7 +540,7 @@ describe('NPC story context (plot lifecycle)', () => {
       protagonistPlace: 'Office',
       openOrderLine: null,
       privateChannelLine: null,
-      npcContext: [{ name: 'Marcus' }],
+      npcContext: [{ name: 'Marcus', director_slot: 'initiate' }],
       knownPlacesBlock: '- Office',
       priorNarration: 'Marcus watches the door.',
       playerAboutLine: 'PLAYER IS ABOUT TO (this turn): I wait.',
@@ -552,5 +552,7 @@ describe('NPC story context (plot lifecycle)', () => {
     expect(content).toContain('Done quest')
     expect(content).toContain('Deliver manifests')
     expect(content).toContain('recently_closed')
+    expect(content).toContain('director_slot')
+    expect(content).toContain('initiate')
   })
 })

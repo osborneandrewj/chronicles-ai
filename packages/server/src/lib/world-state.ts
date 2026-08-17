@@ -6,6 +6,7 @@ import type {
   ReverieRow,
   Scene,
   StoryDossier,
+  WorldEvent,
 } from '@/domain/entities'
 import type {
   CharacterRepository,
@@ -15,6 +16,7 @@ import type {
   ReverieRepository,
   SceneRepository,
   TurnRepository,
+  WorldEventRepository,
   WorldRepository,
 } from '@/domain/ports'
 import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
@@ -65,6 +67,7 @@ export type FullWorldState = {
   turnNumbers: Record<number, number>
   potentialDuplicates: DuplicatePair[]
   reveriesByCharacter: Record<number, ReverieRow[]>
+  worldEvents: WorldEvent[]
 }
 
 // Read ports the narrator-context assembler needs each turn. The use case (or
@@ -202,6 +205,7 @@ export type FullWorldStateDeps = {
   scenes: Pick<SceneRepository, 'forWorld'>
   dossiers: Pick<DossierRepository, 'forWorld'>
   reveries: Pick<ReverieRepository, 'forWorld'>
+  worldEvents?: Pick<WorldEventRepository, 'recentForWorld'>
 }
 
 // Port-driven full-state assembler for the inspector. No SQLite-direct twin (A0).
@@ -231,6 +235,9 @@ export async function getFullWorldState(
     turnNumbers,
     potentialDuplicates: findLikelyDuplicateCharacters(characters),
     reveriesByCharacter,
+    worldEvents: deps.worldEvents
+      ? await deps.worldEvents.recentForWorld(worldId, 20)
+      : [],
   }
 }
 

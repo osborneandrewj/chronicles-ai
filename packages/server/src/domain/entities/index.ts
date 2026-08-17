@@ -19,8 +19,20 @@ export type {
 } from './sim-ops'
 // ClearanceLevel is exported from './character' only (sim-ops re-exports for convenience)
 export type { WorldCorrectionRow } from './correction'
-export type { DirectorBeat, DirectorPhase } from './director-beat'
+export type {
+  DirectorBeat,
+  DirectorBeatKind,
+  DirectorCastRole,
+  DirectorCastSlot,
+  DirectorPhase,
+} from './director-beat'
 export { emptyDirectorBeat } from './director-beat'
+export type {
+  DirectorBrainReason,
+  DirectorState,
+  PendingDirectorBeat,
+} from './director-state'
+export { emptyDirectorState } from './director-state'
 export type {
   InsertNpcIntent,
   IntentDisposition,
@@ -48,5 +60,18 @@ export type {
 } from './story'
 export type { CachedTtsAudio } from './tts-cache'
 export type { AssistantTurnMetadata, Turn, TurnRole, TurnTimestamp } from './turn'
+export type {
+  WorldEvent,
+  WorldEventInput,
+  WorldEventKind,
+  WorldEventSource,
+  WorldEventVisibility,
+} from './world-event'
+export {
+  WORLD_EVENT_KINDS,
+  WORLD_EVENT_SOURCES,
+  WORLD_EVENT_VISIBILITIES,
+  isWorldEventKind,
+} from './world-event'
 export type { UsageTotals } from './usage'
 export type { InitialState, SpatialMode, World, WorldLayer, WorldSummary } from './world'
