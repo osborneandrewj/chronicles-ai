@@ -36,6 +36,8 @@ export type World = {
   antagonist_character_id: number | null
   // Subworld ops: InfluencePacket JSON seeded at enter. Null when none.
   influence_packet_json: string | null
+  // Gated director brain memory (pending beat for next turn).
+  director_state_json: string | null
   created_at: string
 }
 

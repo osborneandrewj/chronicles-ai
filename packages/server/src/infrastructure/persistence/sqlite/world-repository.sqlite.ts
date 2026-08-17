@@ -47,6 +47,9 @@ const setAntagonistCharacterIdStmt = db.prepare<[number | null, number]>(
 const setInfluencePacketStmt = db.prepare<[string | null, number]>(
   'UPDATE worlds SET influence_packet_json = ? WHERE id = ?',
 )
+const setDirectorStateStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET director_state_json = ? WHERE id = ?',
+)
 
 // SQLite adapter for WorldRepository (spec §5.1-P1). Delegates to the flat
 // read/archive functions in `worlds.ts` and the cursor reader in `db.ts`. World
@@ -149,6 +152,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setInfluencePacket(worldId: number, influencePacketJson: string | null): Promise<void> {
     setInfluencePacketStmt.run(influencePacketJson, worldId)
+    return Promise.resolve()
+  }
+
+  setDirectorState(worldId: number, directorStateJson: string | null): Promise<void> {
+    setDirectorStateStmt.run(directorStateJson, worldId)
     return Promise.resolve()
   }
 }

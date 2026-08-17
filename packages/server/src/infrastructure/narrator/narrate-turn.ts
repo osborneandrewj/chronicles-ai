@@ -24,7 +24,19 @@ import {
   patchClosesSomething,
   shouldRunCloseBiasPass,
 } from '@/domain/services/close-bias'
-import { decideDirector } from '@/domain/services/director'
+import { decideDirector, directorBeatToMetadata } from '@/domain/services/director'
+import { shouldRunDirectorBrain } from '@/domain/services/director-brain-gate'
+import { decideDirectorCloses } from '@/domain/services/director-lifecycle'
+import {
+  parseDirectorState,
+  serializeDirectorState,
+} from '@/domain/services/director-state'
+import {
+  beatDirectedEvent,
+  npcReconcileEvents,
+  objectiveCompletedEvent,
+  threadClosedEvent,
+} from '@/domain/services/world-event-log'
 import {
   isConsoleCapablePlace,
   shouldInjectSimLogs,
@@ -151,6 +163,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     characters,
     clock,
     decks,
+    directorBrain,
     dossiers,
     dossierWriter,
     drama,
@@ -169,6 +182,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     timePassage,
     turns,
     unitOfWork,
+    worldEvents,
     worlds,
   } = getContainer()
   const stateDeps = { characters, dossiers, occupancy, places, scenes, worlds }
@@ -360,6 +374,38 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     postPromotionState.currentScene != null &&
     postPromotionState.currentPlace != null
 
+  // Director before the NPC agent so CAST slots drive plan-cast (slice 3).
+  // Arrivals + present cast are already known; occupancy is not required.
+  const enRouteNames = postPromotionState.knownCharacters
+    .filter((c) => c.in_transit_to_place_id != null)
+    .map((c) => c.name)
+  let directorState = parseDirectorState(world.director_state_json)
+  const directorDecision = decideDirector({
+    threads: postPromotionState.dossier.threads,
+    objectives: postPromotionState.dossier.objectives,
+    clockMinutes,
+    currentTurnId: playerTurnId,
+    playerText,
+    enRouteNames,
+    presentCast: postPromotionState.presentCharacters.map((c) => ({
+      id: c.id,
+      name: c.name,
+      isPlayer: c.is_player === 1,
+    })),
+    enRouteCast: postPromotionState.knownCharacters
+      .filter((c) => c.in_transit_to_place_id != null)
+      .map((c) => ({ id: c.id, name: c.name })),
+    pendingBeat: directorState.pending,
+  })
+  if (directorState.pending) {
+    directorState = { ...directorState, pending: null }
+    try {
+      await worlds.setDirectorState(worldId, serializeDirectorState(directorState))
+    } catch (err) {
+      console.error('[director-state consume]', err)
+    }
+  }
+
   const agentOccStarted = Date.now()
   const [npcAgentSettled, occupancySettled] = await Promise.all([
     shouldRunNpcAgent || forceAgentForOpenOrder
@@ -372,6 +418,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           recentForAgents,
           activeOpenOrder?.status === 'pending' ? activeOpenOrder : null,
           activePrivateUtterance,
+          directorDecision.cast,
         ).catch((err) => {
           console.error('[npc agent failed pre-narrator]', err)
           return { error: String(err) } as const
@@ -504,18 +551,6 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           audienceNames: activePrivateUtterance.audienceNames,
         }
       : null
-  // Track A1: pure Director beat after arrivals + agent (cast/en-route known).
-  const enRouteNames = narratorState.knownCharacters
-    .filter((c) => c.in_transit_to_place_id != null)
-    .map((c) => c.name)
-  const directorDecision = decideDirector({
-    threads: narratorState.dossier.threads,
-    objectives: narratorState.dossier.objectives,
-    clockMinutes,
-    currentTurnId: playerTurnId,
-    playerText,
-    enRouteNames,
-  })
   const directorBlock = formatDirectorBlock(
     directorDecision,
     narratorState.dossier.threads,
@@ -928,6 +963,25 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       } else if (npcAgentError) {
         upfrontMeta.npc_agent = { model: NPC_AGENT_MODEL, error: npcAgentError }
       }
+      if (
+        directorDecision.foregroundThreadId != null ||
+        directorDecision.mustStage.length > 0
+      ) {
+        upfrontMeta.director = directorBeatToMetadata(directorDecision)
+        const directed = beatDirectedEvent({
+          worldId,
+          turnId: narratorTurn.id,
+          worldTime: narratorState.worldTime,
+          decision: directorDecision,
+        })
+        if (directed) {
+          try {
+            await worldEvents.append(directed)
+          } catch (err) {
+            console.error('[world-event beat]', err)
+          }
+        }
+      }
       if (promotion.promoted.length > 0) {
         upfrontMeta.npc_promotion = { promoted: promotion.promoted, tiers: promotion.tiers }
         console.log(`[npc promotion] world=${worldId} promoted=${promotion.promoted.join(', ')}`)
@@ -940,6 +994,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         await turns.mergeMetadata(narratorTurn.id, agentKey, block as Record<string, unknown>)
       }
 
+      let reconcileConfirmed = false
       // Reconcile NPC plans against the narrator's prose — best-effort.
       if (plans.length > 0) {
         try {
@@ -957,6 +1012,23 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             error: reconciliation.error,
             skipped: reconciliation.skipped,
           })
+          reconcileConfirmed = reconciliation.results.some(
+            (r) => r.disposition === 'staged' || r.disposition === 'modified',
+          )
+          const reconcileEvents = npcReconcileEvents({
+            worldId,
+            turnId: narratorTurn.id,
+            worldTime: narratorState.worldTime,
+            plans,
+            results: reconciliation.results,
+          })
+          for (const event of reconcileEvents) {
+            try {
+              await worldEvents.append(event)
+            } catch (err) {
+              console.error('[world-event npc]', err)
+            }
+          }
         } catch (err) {
           await turns.mergeMetadata(narratorTurn.id, 'npc_intent_reconciler', {
             model: RECONCILER_MODEL,
@@ -964,6 +1036,143 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           })
           console.error('[intent reconciler failed]', err)
         }
+      }
+
+      // Slice 4: close suggested threads/objectives when the brief asked and
+      // prose (or a staged close beat) confirmed. Hygiene rides applyArchivistPatch.
+      let directorClosedThisTurn = false
+      const closePlan = decideDirectorCloses({
+        beatKind: directorDecision.beatKind,
+        foregroundThreadId: directorDecision.foregroundThreadId,
+        suggestResolveThreadIds: directorDecision.suggestResolveThreadIds,
+        suggestCompleteObjectiveIds: directorDecision.suggestCompleteObjectiveIds,
+        threads: narratorState.dossier.threads,
+        objectives: narratorState.dossier.objectives,
+        playerText,
+        narratorText: trimmed,
+        reconcileConfirmed,
+      })
+      if (closePlan.threads.length > 0 || closePlan.objectives.length > 0) {
+        try {
+          await applyArchivistPatch(worldId, narratorTurn.id, {
+            story_threads: closePlan.threads.map((t) => ({
+              title: t.title,
+              status: t.status,
+            })),
+            story_objectives: closePlan.objectives.map((o) => ({
+              title: o.title,
+              status: o.status,
+            })),
+          })
+          directorClosedThisTurn = true
+          for (const t of closePlan.threads) {
+            await worldEvents.append(
+              threadClosedEvent({
+                worldId,
+                turnId: narratorTurn.id,
+                worldTime: narratorState.worldTime,
+                threadId: t.id,
+                status: t.status,
+                title: t.title,
+              }),
+            )
+          }
+          for (const o of closePlan.objectives) {
+            await worldEvents.append(
+              objectiveCompletedEvent({
+                worldId,
+                turnId: narratorTurn.id,
+                worldTime: narratorState.worldTime,
+                objectiveId: o.id,
+                status: o.status,
+                title: o.title,
+              }),
+            )
+          }
+          await turns.mergeMetadata(narratorTurn.id, 'director_lifecycle', {
+            threads: closePlan.threads,
+            objectives: closePlan.objectives,
+          })
+        } catch (err) {
+          console.error('[director-lifecycle]', err)
+          await turns.mergeMetadata(narratorTurn.id, 'director_lifecycle', {
+            error: String(err),
+          })
+        }
+      }
+
+      const brainReason = shouldRunDirectorBrain({
+        pendingUnused: false,
+        lastBrainTurnId: directorState.lastBrainTurnId,
+        currentTurnId: narratorTurn.id,
+        beatKind: directorDecision.beatKind,
+        phase: directorDecision.phase,
+        activeThreadCount: narratorState.dossier.threads.filter((t) => t.status === 'active')
+          .length,
+        activeObjectiveCount: narratorState.dossier.objectives.filter(
+          (o) => o.status === 'active' || o.status === 'blocked',
+        ).length,
+        cast: directorDecision.cast,
+        presentNpcCount: narratorState.presentCharacters.filter((c) => c.is_player !== 1)
+          .length,
+      })
+      if (brainReason) {
+        const fgTitle =
+          directorDecision.foregroundThreadId != null
+            ? (narratorState.dossier.threads.find(
+                (t) => t.id === directorDecision.foregroundThreadId,
+              )?.title ?? null)
+            : null
+        backgroundTasks.register(
+          directorBrain
+            .proposeNextBeat({
+              reason: brainReason,
+              premise: world.premise,
+              playerText,
+              narratorText: trimmed,
+              threads: narratorState.dossier.threads.map((t) => ({
+                id: t.id,
+                title: t.title,
+                kind: t.kind,
+                summary: t.summary,
+                status: t.status,
+              })),
+              present: narratorState.presentCharacters
+                .filter((c) => c.is_player !== 1)
+                .map((c) => ({ id: c.id, name: c.name })),
+              lastDecision: {
+                beatKind: directorDecision.beatKind,
+                phase: directorDecision.phase,
+                tension: directorDecision.tension,
+                foregroundTitle: fgTitle,
+                mustStage: directorDecision.mustStage,
+                cast: directorDecision.cast,
+              },
+            })
+            .then(async (proposed) => {
+              if (!proposed) return
+              await worlds.setDirectorState(
+                worldId,
+                serializeDirectorState({
+                  pending: {
+                    ...proposed,
+                    reason: brainReason,
+                    sourceTurnId: narratorTurn.id,
+                  },
+                  lastBrainTurnId: narratorTurn.id,
+                  lastBrainReason: brainReason,
+                }),
+              )
+              await turns.mergeMetadata(narratorTurn.id, 'director_brain', {
+                reason: brainReason,
+                beatKind: proposed.beatKind,
+                foregroundThreadId: proposed.foregroundThreadId,
+              })
+            })
+            .catch((err) => {
+              console.error('[director-brain]', err)
+            }),
+        )
       }
 
       // Subworld exit (C5/C6): in a simulation, a death or awakening surfaces
@@ -1128,7 +1337,8 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             playerText,
             narratorText: trimmed,
             activeDossierCount: activeBefore,
-            mainPatchClosedSomething: patchClosesSomething(patch),
+            mainPatchClosedSomething:
+              patchClosesSomething(patch) || directorClosedThisTurn,
             directorSuggestsClose:
               directorDecision.suggestResolveThreadIds.length > 0 ||
               directorDecision.suggestCompleteObjectiveIds.length > 0,

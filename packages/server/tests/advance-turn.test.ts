@@ -106,6 +106,7 @@ function fakeWorld(exists: boolean): WorldRepository {
     setPlayerModel: async () => {},
     setAntagonistCharacterId: async () => {},
     setInfluencePacket: async () => {},
+    setDirectorState: async () => {},
   }
 }
 

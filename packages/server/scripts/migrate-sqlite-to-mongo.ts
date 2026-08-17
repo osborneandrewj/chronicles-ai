@@ -9,7 +9,7 @@
 //   DATABASE_URL='mongodb://localhost:27017/chronicles?replicaSet=rs0' \
 //   npx tsx --conditions=react-server packages/server/scripts/migrate-sqlite-to-mongo.ts
 //
-// DO NOT run against prod without a fresh backup (CLAUDE.md data-repair rule);
+// DO NOT run against prod without a fresh backup (AGENTS.md data-repair rule);
 // run against a COPY. createIndexes runs AFTER bulk insert so any latent
 // duplicate that SQLite's UNIQUE(world_id, lower(name)) was silently preventing
 // surfaces as E11000 instead of producing dual rows.
@@ -151,6 +151,7 @@ async function main(): Promise<void> {
       currentSceneId: num(w.current_scene_id),
       archivedAt: nullableDate(w.archived_at),
       createdAt: date(w.created_at),
+      directorStateJson: str(w.director_state_json),
     })),
   )
 
@@ -499,6 +500,34 @@ async function main(): Promise<void> {
     })
   }
 
+  // -- world_events -------------------------------------------------------
+  if (tableExists(sqlite, 'world_events')) {
+    for (const e of selectAll(sqlite, 'world_events')) {
+      let payload: Record<string, unknown> = {}
+      try {
+        const parsed = JSON.parse(String(e.payload_json ?? '{}')) as unknown
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          payload = parsed as Record<string, unknown>
+        }
+      } catch {
+        payload = {}
+      }
+      await upsertById(m.WorldEvent, {
+        id: reqNum(e.id),
+        worldId: reqNum(e.world_id),
+        turnId: num(e.turn_id),
+        worldTime: str(e.world_time),
+        kind: reqStr(e.kind),
+        sourceAgent: reqStr(e.source_agent),
+        actorId: num(e.actor_id),
+        threadId: num(e.thread_id),
+        payload,
+        visibility: str(e.visibility) ?? 'system',
+        createdAt: date(e.created_at),
+      })
+    }
+  }
+
   // -- counters: seed every monotone allocator to MAX(id) so new inserts -----
   //    continue past the existing range. turnSeq is load-bearing for [t:N].
   const maxOf = (table: string, col: string): number => {
@@ -519,6 +548,7 @@ async function main(): Promise<void> {
     ['storyObjectiveId', maxOf('story_objectives', 'id')],
     ['storyResourceId', maxOf('story_resources', 'id')],
     ['timelineEventId', maxOf('timeline_events', 'id')],
+    ['worldEventId', maxOf('world_events', 'id')],
     ['npcIntentId', maxOf('npc_intents', 'id')],
     ['reverieId', maxOf('npc_reveries', 'id')],
     ['populationTemplateId', maxOf('population_templates', 'id')],

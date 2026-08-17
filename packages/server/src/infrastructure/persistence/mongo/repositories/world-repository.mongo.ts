@@ -338,4 +338,15 @@ export class MongoWorldRepository implements WorldRepository {
       { session: this.ctx.currentSession ?? undefined },
     )
   }
+
+  async setDirectorState(
+    worldId: number,
+    directorStateJson: string | null,
+  ): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { directorStateJson } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
 }

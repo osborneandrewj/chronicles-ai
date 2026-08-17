@@ -1,7 +1,9 @@
-// Plan-eligible cast selection (Track B3). Cap Haiku NPC agent payload to the
-// NPCs that matter this turn: present + open-order target + foreground cast +
-// highest agency. Rest are scenic. Pure.
+// Plan-eligible cast selection (Track B3 + director CAST). Cap Haiku NPC
+// agent payload to the NPCs that matter this turn. When the director assigned
+// slots, fill those only (plus a pending open-order target). Rest are scenic.
+// Pure.
 
+import type { DirectorCastRole } from '@/domain/entities'
 import { isPlanEligible, isTransientServiceNpc } from '@/domain/services/npc-promotion'
 
 export const PLAN_ELIGIBLE_CAST_CAP = 4
@@ -20,16 +22,23 @@ export type PlanCastCandidate = {
   foregroundCast?: boolean
 }
 
+export type DirectorCastHint = {
+  characterId: number
+  role: DirectorCastRole
+}
+
 export type SelectPlanCastArgs = {
   candidates: PlanCastCandidate[]
   openOrderTargetId?: number | null
+  directorCast?: DirectorCastHint[]
   cap?: number
 }
 
 /**
  * Select up to `cap` NPCs for the NPC agent planning prompt.
- * Priority: open-order target → present non-transient → en-route open-order-ish
- * → foreground cast → higher agency → stable id.
+ * When director CAST has initiate/react/arrive slots, those (plus an open-order
+ * target) are the set — background is scenic. Otherwise fall back to:
+ * open-order target → present non-transient → en-route → foreground → agency.
  */
 export function selectPlanEligibleCast(args: SelectPlanCastArgs): PlanCastCandidate[] {
   const cap = args.cap ?? PLAN_ELIGIBLE_CAST_CAP
@@ -52,16 +61,43 @@ export function selectPlanEligibleCast(args: SelectPlanCastArgs): PlanCastCandid
     })
   })
 
-  const scored = eligible.map((c) => ({
+  const directed = pickDirectorSlots(eligible, args.directorCast ?? [], openId)
+  const pool = directed ?? eligible
+  const scored = pool.map((c) => ({
     c,
-    score: scoreCast(c, openId),
+    score: scoreCast(c, openId, args.directorCast),
   }))
   scored.sort((a, b) => b.score - a.score || a.c.id - b.c.id)
   return scored.slice(0, Math.max(0, cap)).map((s) => s.c)
 }
 
-function scoreCast(c: PlanCastCandidate, openId: number | null): number {
+function pickDirectorSlots(
+  eligible: PlanCastCandidate[],
+  directorCast: DirectorCastHint[],
+  openId: number | null,
+): PlanCastCandidate[] | null {
+  const roleById = new Map(directorCast.map((s) => [s.characterId, s.role]))
+  const hasActionSlot = [...roleById.values()].some((r) => r !== 'background')
+  if (!hasActionSlot) return null
+
+  const picked = eligible.filter((c) => {
+    if (openId != null && c.id === openId) return true
+    const role = roleById.get(c.id)
+    return role === 'initiate' || role === 'react' || role === 'arrive'
+  })
+  return picked.length > 0 ? picked : null
+}
+
+function scoreCast(
+  c: PlanCastCandidate,
+  openId: number | null,
+  directorCast?: DirectorCastHint[],
+): number {
   let s = 0
+  const role = directorCast?.find((slot) => slot.characterId === c.id)?.role
+  if (role === 'initiate') s += 2000
+  else if (role === 'react') s += 1500
+  else if (role === 'arrive') s += 1200
   if (openId != null && c.id === openId) s += 1000
   if (c.present_with_protagonist) s += 500
   if (c.in_transit_to_place_id != null && openId != null && c.id === openId) s += 200

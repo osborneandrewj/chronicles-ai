@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { decideDirector } from '@/domain/services/director'
 import type { RankableObjective, RankableThread } from '@/domain/services/dossier-ranking'
+import { formatDirectorBlock } from '@/lib/world-state'
 
 function thread(
   partial: Partial<RankableThread> & Pick<RankableThread, 'id' | 'title' | 'kind'>,
@@ -44,6 +45,74 @@ describe('decideDirector', () => {
     })
     expect(d.foregroundThreadId).toBeNull()
     expect(d.guidanceLines).toHaveLength(0)
+    expect(d.beatKind).toBeNull()
+    expect(d.mustStage).toHaveLength(0)
+    expect(d.mustNot).toHaveLength(0)
+    expect(d.cast).toHaveLength(0)
+  })
+
+  it('applies a pending brain beat unless the player engages another thread', () => {
+    const pending = {
+      beatKind: 'reveal' as const,
+      foregroundThreadId: 1,
+      mustStage: ['Stage the papyrus seal'],
+      mustNot: ['Do not open a new major arc this turn.'],
+      cast: [{ characterId: 2, name: 'Setnakht', role: 'initiate' as const }],
+      guidanceLines: ['Brain: keep the courier in frame'],
+      reason: 'stall' as const,
+      sourceTurnId: 8,
+    }
+    const used = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'The Sealed Papyrus',
+          kind: 'quest',
+          summary: 'Setnakht carries a letter',
+          source_turn_id: 4,
+        }),
+        thread({
+          id: 2,
+          title: 'Temple politics',
+          kind: 'threat',
+          summary: 'The vizier watches',
+          source_turn_id: 5,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 10,
+      playerText: 'I ask about the papyrus',
+      pendingBeat: pending,
+    })
+    expect(used.beatKind).toBe('reveal')
+    expect(used.mustStage).toContain('Stage the papyrus seal')
+    expect(used.cast[0]?.name).toBe('Setnakht')
+
+    const overridden = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'The Sealed Papyrus',
+          kind: 'quest',
+          summary: 'Setnakht carries a letter',
+          source_turn_id: 4,
+        }),
+        thread({
+          id: 2,
+          title: 'Temple politics',
+          kind: 'threat',
+          summary: 'The vizier watches',
+          source_turn_id: 5,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 10,
+      playerText: 'I confront the vizier about temple politics',
+      pendingBeat: pending,
+    })
+    expect(overridden.mustStage).not.toContain('Stage the papyrus seal')
   })
 
   it('picks one foreground among Threshold-shaped multi-threat pile', () => {
@@ -150,5 +219,117 @@ describe('decideDirector', () => {
     })
     expect(d.guidanceLines.some((l) => /stall/i.test(l))).toBe(true)
     expect(d.guidanceLines.every((l) => !/must climax|force climax/i.test(l))).toBe(true)
+    expect(d.beatKind).toBe('stall_escalate')
+    expect(d.mustStage.some((l) => /escalate/i.test(l))).toBe(true)
+    expect(d.mustNot).toContain('Do not open a new major arc this turn.')
+    expect(d.mustNot.every((l) => !/must climax|force climax/i.test(l))).toBe(true)
+  })
+
+  it('assigns one initiator from present cast and must-stage them', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'The Sealed Papyrus',
+          kind: 'quest',
+          summary: 'Setnakht carries a sealed letter',
+          source_turn_id: 10,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 12,
+      playerText: 'I ask what the papyrus holds',
+      presentCast: [
+        { id: 1, name: 'Joseph', isPlayer: true },
+        { id: 2, name: 'Setnakht' },
+        { id: 3, name: 'A temple porter' },
+        { id: 4, name: 'A second scribe' },
+        { id: 5, name: 'A door guard' },
+      ],
+    })
+    expect(d.cast.filter((c) => c.role === 'initiate')).toEqual([
+      { characterId: 2, name: 'Setnakht', role: 'initiate' },
+    ])
+    expect(d.cast.filter((c) => c.role === 'react')).toHaveLength(2)
+    expect(d.cast.some((c) => c.role === 'background')).toBe(true)
+    expect(d.cast.every((c) => c.name !== 'Joseph')).toBe(true)
+    expect(d.mustStage.some((l) => /Setnakht initiates/i.test(l))).toBe(true)
+    expect(d.mustStage.some((l) => /Sealed Papyrus/i.test(l))).toBe(true)
+  })
+
+  it('marks an en-route foreground name as arrive', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'Bring Marcus in',
+          kind: 'quest',
+          summary: 'Marcus is driving across town',
+          source_turn_id: 4,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 8,
+      playerText: 'I wait by the window',
+      presentCast: [{ id: 1, name: 'Kyle' }],
+      enRouteCast: [{ id: 9, name: 'Marcus' }],
+    })
+    expect(d.cast).toEqual(
+      expect.arrayContaining([
+        { characterId: 1, name: 'Kyle', role: 'initiate' },
+        { characterId: 9, name: 'Marcus', role: 'arrive' },
+      ]),
+    )
+    expect(d.beatKind).toBe('arrival')
+  })
+})
+
+describe('formatDirectorBlock', () => {
+  it('renders binding MUST STAGE / MUST NOT / CAST', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'Hit squad',
+          kind: 'threat',
+          stakes: 'death by dusk',
+          source_turn_id: 8,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 10,
+      playerText: 'I check the alley',
+      presentCast: [{ id: 2, name: 'Lira' }],
+    })
+    const block = formatDirectorBlock(d, [
+      {
+        id: 1,
+        title: 'Hit squad',
+        kind: 'threat',
+        status: 'active',
+        summary: null,
+        stakes: 'death by dusk',
+      } as never,
+    ])
+    expect(block).toContain('## DIRECTOR')
+    expect(block).toContain('MUST STAGE')
+    expect(block).toContain('CAST')
+    expect(block).toMatch(/initiate: Lira/)
+    expect(block).toContain('same force as PLANNED MOVES')
+    expect(block).not.toMatch(/Soft structural pressure/)
+  })
+
+  it('returns empty string when the beat is empty', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 0,
+      currentTurnId: 1,
+      playerText: 'look around',
+    })
+    expect(formatDirectorBlock(d, [])).toBe('')
   })
 })

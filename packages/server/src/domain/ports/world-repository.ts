@@ -95,4 +95,6 @@ export interface WorldRepository {
   setAntagonistCharacterId(worldId: number, characterId: number | null): Promise<void>
   /** Subworld ops: persist InfluencePacket JSON seeded at enter. */
   setInfluencePacket(worldId: number, influencePacketJson: string | null): Promise<void>
+  /** Persist gated director brain state (pending beat + cooldown), or null to clear. */
+  setDirectorState(worldId: number, directorStateJson: string | null): Promise<void>
 }

@@ -36,6 +36,7 @@ export function fullWorldStateDeps(): FullWorldStateDeps {
     scenes: c.scenes,
     dossiers: c.dossiers,
     reveries: c.reveries,
+    worldEvents: c.worldEvents,
   }
 }
 

@@ -18,7 +18,9 @@ import type {
   TimelineEvent,
   Turn,
   WorldCorrectionRow,
+  WorldEvent,
 } from '@/domain/entities'
+import { isWorldEventKind } from '@/domain/entities/world-event'
 import type { World, WorldSummary } from '@/lib/worlds'
 import type { ReverieRow } from '@/lib/reveries'
 
@@ -40,6 +42,7 @@ import type {
   TurnDoc,
   WorldCorrectionDoc,
   WorldDoc,
+  WorldEventDoc,
 } from '../models'
 
 // Document → domain-entity mappers (spec §3.3). The ports speak in the same
@@ -90,6 +93,7 @@ export function mapWorld(d: WorldDoc): World {
     player_model_json: d.playerModelJson ?? null,
     antagonist_character_id: d.antagonistCharacterId ?? null,
     influence_packet_json: d.influencePacketJson ?? null,
+    director_state_json: d.directorStateJson ?? null,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }
@@ -463,6 +467,37 @@ export function mapWorldCorrection(d: WorldCorrectionDoc): WorldCorrectionRow {
     player_text: d.playerText,
     archivist_reply: d.archivistReply,
     applied_patch: d.appliedPatch,
+    created_at: toSqliteDatetime(d.createdAt),
+  }
+}
+
+export function mapWorldEvent(d: WorldEventDoc): WorldEvent | null {
+  if (!isWorldEventKind(d.kind)) return null
+  const source =
+    d.sourceAgent === 'director' || d.sourceAgent === 'reconciler'
+      ? d.sourceAgent
+      : 'director'
+  const visibility =
+    d.visibility === 'narrator' ||
+    d.visibility === 'player' ||
+    d.visibility === 'system'
+      ? d.visibility
+      : 'system'
+  const payload =
+    d.payload && typeof d.payload === 'object' && !Array.isArray(d.payload)
+      ? d.payload
+      : {}
+  return {
+    id: d.id,
+    world_id: d.worldId,
+    turn_id: d.turnId ?? null,
+    world_time: d.worldTime ?? null,
+    kind: d.kind,
+    source_agent: source,
+    actor_id: d.actorId ?? null,
+    thread_id: d.threadId ?? null,
+    payload,
+    visibility,
     created_at: toSqliteDatetime(d.createdAt),
   }
 }

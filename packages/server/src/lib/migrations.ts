@@ -1030,6 +1030,41 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'characters', 'journey_path_json', 'TEXT')
     },
   },
+  {
+    // Append-only coordination log for director / reconciler (and later agents).
+    // Distinct from timeline_events, which stay player-facing story milestones.
+    version: 38,
+    name: 'world_events',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS world_events (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          world_id      INTEGER NOT NULL REFERENCES worlds(id),
+          turn_id       INTEGER,
+          world_time    TEXT,
+          kind          TEXT    NOT NULL,
+          source_agent  TEXT    NOT NULL,
+          actor_id      INTEGER,
+          thread_id     INTEGER,
+          payload_json  TEXT    NOT NULL DEFAULT '{}',
+          visibility    TEXT    NOT NULL DEFAULT 'system',
+          created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS world_events_world_id_id
+          ON world_events(world_id, id);
+        CREATE INDEX IF NOT EXISTS world_events_world_kind
+          ON world_events(world_id, kind);
+      `)
+    },
+  },
+  {
+    // Gated director brain memory: pending beat for the next turn (A7).
+    version: 39,
+    name: 'director_state_json',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'director_state_json', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

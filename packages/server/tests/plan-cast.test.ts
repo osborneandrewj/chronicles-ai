@@ -43,6 +43,76 @@ describe('selectPlanEligibleCast', () => {
     })
     expect(picked[0]!.id).toBe(2)
   })
+
+  it('fills director initiate/react/arrive only and drops background', () => {
+    const candidates = [
+      {
+        id: 1,
+        name: 'Setnakht',
+        description: null,
+        agency_level: 'local',
+        present_with_protagonist: true,
+      },
+      {
+        id: 2,
+        name: 'Porter',
+        description: null,
+        agency_level: 'local',
+        present_with_protagonist: true,
+      },
+      {
+        id: 3,
+        name: 'Scribe',
+        description: null,
+        agency_level: 'local',
+        present_with_protagonist: true,
+      },
+      {
+        id: 4,
+        name: 'Guard',
+        description: null,
+        agency_level: 'local',
+        present_with_protagonist: true,
+      },
+    ]
+    const picked = selectPlanEligibleCast({
+      candidates,
+      directorCast: [
+        { characterId: 1, role: 'initiate' },
+        { characterId: 2, role: 'react' },
+        { characterId: 3, role: 'background' },
+        { characterId: 4, role: 'background' },
+      ],
+    })
+    expect(picked.map((c) => c.id)).toEqual([1, 2])
+  })
+
+  it('still includes an open-order target alongside director slots', () => {
+    const candidates = [
+      {
+        id: 1,
+        name: 'Present',
+        description: null,
+        agency_level: 'local',
+        present_with_protagonist: true,
+      },
+      {
+        id: 9,
+        name: 'Reyes',
+        description: null,
+        agency_level: 'npc',
+        present_with_protagonist: false,
+        in_transit_to_place_id: 3,
+      },
+    ]
+    const picked = selectPlanEligibleCast({
+      candidates,
+      openOrderTargetId: 9,
+      directorCast: [{ characterId: 1, role: 'initiate' }],
+    })
+    expect(picked.map((c) => c.id).sort((a, b) => a - b)).toEqual([1, 9])
+    expect(picked[0]!.id).toBe(1)
+  })
 })
 
 describe('projectContinuityScore', () => {

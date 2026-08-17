@@ -66,3 +66,10 @@ export type { SpeechSynthesizer, SynthesizedSpeech } from './speech-synthesizer'
 export type { NarrationStream } from './narrator'
 export type { BackgroundTasks } from './background-tasks'
 export type { SimRunRepository } from './sim-run-repository'
+export type { WorldEventRepository } from './world-event-repository'
+export { WORLD_EVENT_RECENT_CAP } from './world-event-repository'
+export type {
+  DirectorBrainInput,
+  DirectorBrainResult,
+  DirectorDecisionPort,
+} from './director-decision'
