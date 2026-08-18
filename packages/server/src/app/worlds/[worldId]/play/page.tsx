@@ -4,7 +4,9 @@ import { closeSubworldAndReturn } from '@/application/use-cases/close-subworld-a
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
 import { HubSimulationsMenu, type HubSimulationEntry } from '@/components/HubSimulationsMenu'
 import { getContainer } from '@/composition/container'
+import { parseGenreTags } from '@/domain/services/occupancy-sim'
 import { resolveActiveWorldId } from '@/domain/services/resolve-active-world'
+import { effectiveUiSkin } from '@/domain/services/ui-skin'
 import { generateOpeningTurn } from '@/lib/opening-turn'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
 
@@ -113,14 +115,20 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
   const hasOlder = turns.length > 0 ? await turnRepo.hasTurnBefore(worldId, turns[0].id) : false
 
   // In the hub, surface the read-only archive of past simulations (v0.2.1).
+  const hubId = world.world_layer === 'hub' ? worldId : (session?.hub_world_id ?? world.parent_world_id)
   const pastSimulations: HubSimulationEntry[] =
-    world.world_layer === 'hub'
-      ? (await worlds.simulationsForHub(worldId)).map((s) => ({
+    hubId != null
+      ? (await worlds.simulationsForHub(hubId)).map((s) => ({
           id: s.id,
           name: s.name,
           turnCount: s.turn_count,
         }))
       : []
+  const skin = effectiveUiSkin(
+    world.ui_skin,
+    parseGenreTags(world.genre_tags),
+    world.world_layer,
+  )
 
   return (
     <Chat
@@ -130,8 +138,11 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       initialUsage={initialUsage}
       initialOldestId={turns[0]?.id ?? null}
       initialHasOlder={hasOlder}
+      skin={skin}
+      worldLayer={world.world_layer}
+      canReturnToAnimus={world.world_layer === 'subworld'}
       headerEnd={
-        world.world_layer === 'hub' ? (
+        hubId != null ? (
           <HubSimulationsMenu simulations={pastSimulations} />
         ) : undefined
       }

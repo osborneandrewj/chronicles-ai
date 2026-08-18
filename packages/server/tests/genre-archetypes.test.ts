@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { filterHubsByGenre } from '@/domain/services/pick-hub-archetype'
+import { filterHubsByAesthetic, filterHubsByGenre } from '@/domain/services/pick-hub-archetype'
 import { hubArchetypes } from '@/infrastructure/world-gen/archetypes'
 
 // Genre-coupling audit, Phase 2: non-containment archetypes + genre-filtered hub
@@ -35,5 +35,27 @@ describe('filterHubsByGenre', () => {
   it('falls back to the full pool when nothing matches or no tags are given', () => {
     expect(filterHubsByGenre(hubs, ['no-such-tag'])).toHaveLength(hubs.length)
     expect(filterHubsByGenre(hubs, [])).toHaveLength(hubs.length)
+  })
+})
+
+describe('filterHubsByAesthetic', () => {
+  const hubs = hubArchetypes()
+
+  it('keeps modern/sci-fi containment hubs for a signal Animus', () => {
+    const ids = filterHubsByAesthetic(hubs, 'signal').map((a) => a.id)
+    expect(ids).toContain('scout-vessel')
+    expect(ids).toContain('research-facility')
+    expect(ids).toContain('bunker')
+    expect(ids).not.toContain('feudal-village')
+    expect(ids).not.toContain('castle-keep')
+  })
+
+  it('keeps period hubs for a relic Animus', () => {
+    const ids = filterHubsByAesthetic(hubs, 'relic').map((a) => a.id)
+    expect(ids).toContain('feudal-village')
+    expect(ids).toContain('monastery')
+    expect(ids).toContain('ziggurat-temple')
+    expect(ids).not.toContain('scout-vessel')
+    expect(ids).not.toContain('research-facility')
   })
 })

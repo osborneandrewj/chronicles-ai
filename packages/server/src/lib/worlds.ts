@@ -10,7 +10,7 @@ export type { InitialState, World, WorldSummary }
 const insertWorldStmt = db.prepare<[string, string, string, string | null]>(
   `INSERT INTO worlds (name, premise, initial_state_json, setting_region)
    VALUES (?, ?, ?, ?)
-   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, player_model_json, antagonist_character_id, influence_packet_json, director_state_json, created_at`,
+   RETURNING id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, ui_skin, player_model_json, antagonist_character_id, influence_packet_json, director_state_json, created_at`,
 )
 
 // Bare bounded-world insert (starship P1). Unlike createWorld, this seeds NO
@@ -23,7 +23,7 @@ const insertBoundedWorldStmt = db.prepare<[string, string, string, string]>(
 )
 
 const getWorldStmt = db.prepare<[number]>(
-  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, player_model_json, antagonist_character_id, influence_packet_json, director_state_json, created_at
+  `SELECT id, name, premise, initial_state_json, setting_region, spatial_mode, template_id, ship_clock_minutes, world_layer, parent_world_id, meta_story_json, genre_tags, ui_skin, player_model_json, antagonist_character_id, influence_packet_json, director_state_json, created_at
    FROM worlds WHERE id = ?`,
 )
 
@@ -89,12 +89,19 @@ const setShipClockMinutesStmt = db.prepare<[number, number]>(
 const setGenreTagsStmt = db.prepare<[string | null, number]>(
   'UPDATE worlds SET genre_tags = ? WHERE id = ?',
 )
+const setUiSkinStmt = db.prepare<[string | null, number]>(
+  'UPDATE worlds SET ui_skin = ? WHERE id = ?',
+)
 
 // Persist a world's genre signal (genre-coupling audit): a JSON string array of
 // era/tone tags, or null to clear. Written once at creation from the chosen
 // preset / quick-start genre.
 export function setGenreTags(worldId: number, genreTagsJson: string | null): void {
   setGenreTagsStmt.run(genreTagsJson, worldId)
+}
+
+export function setUiSkin(worldId: number, uiSkin: string | null): void {
+  setUiSkinStmt.run(uiSkin, worldId)
 }
 
 // Bounded-world sim write (starship P2): advance only world_time, leaving the

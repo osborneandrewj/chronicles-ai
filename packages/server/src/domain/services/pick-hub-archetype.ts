@@ -33,3 +33,21 @@ export function filterHubsByGenre(
   const matching = hubs.filter((h) => (h.genres ?? []).some((g) => tags.has(g)))
   return matching.length > 0 ? matching : hubs
 }
+
+// Animus aesthetic filter. The player chose the facility's look; that — not
+// the first life's era — decides the hub pool. Signal hubs are modern/sci-fi
+// containment (scout, lab, bunker). Relic hubs are period places. Falls back
+// to the full list if a pool is empty so pickHubArchetype never sees [].
+const SIGNAL_HUB_TAGS = new Set(['sci-fi', 'space', 'future', 'modern', 'generic'])
+
+export function filterHubsByAesthetic(
+  hubs: WorldArchetype[],
+  aesthetic: 'signal' | 'relic',
+): WorldArchetype[] {
+  const matching = hubs.filter((h) => {
+    const tags = h.genres ?? []
+    const isSignal = tags.some((g) => SIGNAL_HUB_TAGS.has(g))
+    return aesthetic === 'signal' ? isSignal : !isSignal
+  })
+  return matching.length > 0 ? matching : hubs
+}

@@ -6,5 +6,5 @@ import 'server-only'
 // (the SIM_HUB flag + the genre-preset registry's player-safe API) so the
 // creation page/action can branch on the flag and list adventure labels without
 // crossing the boundary.
-export { isSimHubEnabled } from '@/infrastructure/config/feature-flags'
+export { isAnimusEnabled, isSimHubEnabled } from '@/infrastructure/config/feature-flags'
 export { getGenrePreset, listGenrePresets } from '@/infrastructure/world-gen/genre-presets'

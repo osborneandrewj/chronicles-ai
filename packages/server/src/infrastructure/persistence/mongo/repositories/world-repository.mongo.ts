@@ -309,6 +309,14 @@ export class MongoWorldRepository implements WorldRepository {
     )
   }
 
+  async setUiSkin(worldId: number, uiSkin: 'signal' | 'relic' | null): Promise<void> {
+    await this.ctx.models.World.updateOne(
+      { id: worldId },
+      { $set: { uiSkin } },
+      { session: this.ctx.currentSession ?? undefined },
+    )
+  }
+
   async setPlayerModel(worldId: number, playerModelJson: string | null): Promise<void> {
     await this.ctx.models.World.updateOne(
       { id: worldId },

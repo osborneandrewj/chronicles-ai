@@ -9,10 +9,8 @@ import { concealmentView } from '@/domain/services/concealment-view'
 // `lib/world-state.ts`) is P6 — so the projection is passed in as a function the
 // route wires, keeping `application/` free of lib/SQL imports.
 //
-// Concealment (C7): while a playthrough is concealed (in a subworld, not yet
-// awoken) the HUB is not inspectable — even for test users. We treat an attempt
-// to inspect the concealed hub as a not-found, indistinguishable from a missing
-// world, so no surface can confirm the hub exists before the awakening.
+// Concealment (C7, Animus pass): the Animus (hub) is inspectable. hideWorld
+// is always false. The Meta-Story Bible is still never part of the projection.
 
 export { WorldNotFoundError }
 

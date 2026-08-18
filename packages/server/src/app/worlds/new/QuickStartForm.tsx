@@ -12,7 +12,7 @@ export function QuickStartForm() {
   const [genre, setGenre] = useState<string>('')
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form action={formAction} className="space-y-6 pb-28 sm:pb-0">
       <label className="block">
         <span className="mb-1.5 block text-xs font-medium uppercase tracking-[0.1em] text-neutral-400">
           Your name
@@ -58,14 +58,16 @@ export function QuickStartForm() {
         </div>
       )}
 
-      <div className="flex justify-end">
-        <button
-          type="submit"
-          disabled={pending || genre === ''}
-          className="min-h-11 rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
-        >
-          {pending ? 'Generating…' : 'Generate world'}
-        </button>
+      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-neutral-800 bg-neutral-950/95 px-5 py-3 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+        <div className="mx-auto flex max-w-2xl justify-end pb-[env(safe-area-inset-bottom)] sm:pb-0">
+          <button
+            type="submit"
+            disabled={pending || genre === ''}
+            className="min-h-12 w-full rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 sm:w-auto"
+          >
+            {pending ? 'Generating…' : 'Generate world'}
+          </button>
+        </div>
       </div>
     </form>
   )

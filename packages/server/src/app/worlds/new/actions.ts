@@ -11,7 +11,8 @@ import { getGenrePreset } from '@/composition/onboarding'
 import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
 import { usesSimulationFrame } from '@/domain/services/meta-frame'
-import { filterHubsByGenre, pickHubArchetype } from '@/domain/services/pick-hub-archetype'
+import { filterHubsByAesthetic, filterHubsByGenre, pickHubArchetype } from '@/domain/services/pick-hub-archetype'
+import { isUiSkin, resolveUiSkin } from '@/domain/services/ui-skin'
 import { isGenre } from '@/lib/genres'
 import { generateOpeningTurn, type OpeningTurnDeps } from '@/lib/opening-turn'
 import { extractSettingRegion } from '@/lib/region-extractor'
@@ -59,6 +60,12 @@ const StarshipWorldSchema = z.object({
   playerName: z.string().trim().max(120).optional(),
 })
 
+const AnimusSchema = z.object({
+  playerName: z.string().trim().max(120).optional(),
+  firstLifeKind: z.enum(['preset', 'genre']),
+  firstLifeId: z.string().trim().min(1),
+})
+
 // Fixed dressing for the scout starship — the player picks neither name nor
 // premise here; the bounded mode supplies a single authored vessel.
 const STARSHIP_NAME = 'Scout Vessel'
@@ -76,9 +83,20 @@ export type CreateWorldFormState = {
 // region from the premise, synthesize the narrator's opening move, then send
 // the player into /play. `redirect` throws by design, so it must be the caller's
 // last statement (and is therefore invoked here, not returned).
+async function persistWorldSkin(
+  worlds: ReturnType<typeof getContainer>['worlds'],
+  worldId: number,
+  genreTags: string[] | undefined,
+  explicit?: 'signal' | 'relic',
+): Promise<void> {
+  const skin = resolveUiSkin({ genreTags, explicit })
+  await worlds.setUiSkin(worldId, skin)
+}
+
 async function createAndOpenWorld(
   input: CreateWorldInput,
   genreTags?: string[],
+  explicitSkin?: 'signal' | 'relic',
 ): Promise<never> {
   const c = getContainer()
   const { worldId } = await createWorld(input, {
@@ -90,6 +108,7 @@ async function createAndOpenWorld(
   if (genreTags && genreTags.length > 0) {
     await c.worlds.setGenreTags(worldId, JSON.stringify(genreTags))
   }
+  await persistWorldSkin(c.worlds, worldId, genreTags, explicitSkin)
   await generateOpeningTurn(openingTurnDeps(c), worldId, input.premise)
   redirect(`/worlds/${worldId}/play`)
 }
@@ -123,11 +142,17 @@ export async function createWorldAction(
     return { error: parsed.error.issues.map((i) => i.message).join('; ') }
   }
   const { name, premise, location, time, playerName, identity } = parsed.data
-  return createAndOpenWorld({
-    name,
-    premise,
-    initialState: { time, location, identity, playerName },
-  })
+  const skinRaw = formData.get('uiSkin')
+  const explicitSkin = typeof skinRaw === 'string' && isUiSkin(skinRaw) ? skinRaw : 'relic'
+  return createAndOpenWorld(
+    {
+      name,
+      premise,
+      initialState: { time, location, identity, playerName },
+    },
+    undefined,
+    explicitSkin,
+  )
 }
 
 export async function createBasicWorldAction(
@@ -309,6 +334,132 @@ export async function createAdventureAction(
   redirect(`/worlds/${subworldId}/play`)
 }
 
+export async function createAnimusAction(
+  _prev: CreateWorldFormState,
+  formData: FormData,
+): Promise<CreateWorldFormState> {
+  const parsed = AnimusSchema.safeParse({
+    playerName: formData.get('playerName') || undefined,
+    firstLifeKind: formData.get('firstLifeKind'),
+    firstLifeId: formData.get('firstLifeId'),
+  })
+  if (!parsed.success) {
+    return { error: 'Choose a first life.' }
+  }
+  const { playerName, firstLifeKind, firstLifeId } = parsed.data
+
+  let firstName: string
+  let firstPremise: string
+  let firstLocation: string
+  let firstTags: string[]
+  let firstTime = 'Day 1, morning'
+  let firstIdentity = 'a newcomer, name not yet established'
+
+  if (firstLifeKind === 'preset') {
+    const preset = getGenrePreset(firstLifeId)
+    if (!preset) return { error: 'Pick a first life from the list.' }
+    const seed = (hashString(firstLifeId) ^ Date.now()) >>> 0
+    firstName = generateCodename(seed)
+    firstPremise = preset.hiddenPremise
+    firstLocation = preset.label
+    firstTags = [...preset.eraTags, ...preset.toneTags]
+  } else {
+    if (!isGenre(firstLifeId)) return { error: 'Pick a first life from the list.' }
+    try {
+      const generated = await generateWorldFromGenre(firstLifeId, playerName ?? null)
+      firstName = generated.name
+      firstPremise = generated.premise
+      firstLocation = generated.location
+      firstTime = generated.time
+      firstIdentity = generated.identity
+      firstTags = [firstLifeId]
+    } catch (err) {
+      console.error('[animus first-life generator failed]', err)
+      return { error: "Couldn't invent that life — try another, or a prepared setting." }
+    }
+  }
+
+  const c = getContainer()
+  const seed = (hashString(firstLifeId) ^ Date.now()) >>> 0
+  let subworldId: number
+  try {
+    const hubs = (await c.decks.all()).filter((a) => a.isHub)
+    const hub = pickHubArchetype(filterHubsByAesthetic(hubs, 'signal'), seed)
+    const hubPremise = `A ${hub.name.toLowerCase()} with a small, friendly resident crew; ${
+      hub.playerIntroTemplate ?? 'a newcomer has just arrived'
+    }.`
+    const arcEngine = pickArcEngine(seed)
+
+    let bible: Awaited<ReturnType<typeof c.metaStoryGenerator.generate>> | undefined
+    try {
+      bible = await c.metaStoryGenerator.generate({
+        hubName: hub.name,
+        hubPremise,
+        arcEngine,
+        genreLabels: [firstLocation],
+        seed,
+      })
+    } catch (err) {
+      console.error('[meta-story generation]', err)
+    }
+
+    const hubName = bible?.institutionName?.trim() || generateCodename(seed)
+    const hubResult = await createBoundedWorld(
+      { templateId: hub.id, name: hubName, premise: hubPremise, playerName },
+      { ...c, crew: c.ensembleGenerator },
+    )
+    await c.worlds.setLayer(hubResult.worldId, 'hub', null)
+    await persistWorldSkin(c.worlds, hubResult.worldId, ['sci-fi', 'modern'], 'signal')
+    if (bible) {
+      await c.worlds.setMetaStory(hubResult.worldId, JSON.stringify(bible))
+    }
+    try {
+      const { ensureHubAntagonist } = await import(
+        '@/application/use-cases/ensure-hub-antagonist'
+      )
+      await ensureHubAntagonist(hubResult.worldId, {
+        worlds: c.worlds,
+        characters: c.characters,
+        places: c.places,
+      })
+    } catch (err) {
+      console.error('[hub antagonist link]', err)
+    }
+
+    const session = await c.sessions.create({
+      hub_world_id: hubResult.worldId,
+      player_identity: playerName?.trim() || 'the newcomer',
+    })
+
+    const sub = await enterSubworld(
+      {
+        hubWorldId: hubResult.worldId,
+        sessionId: session.id,
+        name: firstName,
+        premise: firstPremise,
+        initialState: {
+          time: firstTime,
+          location: firstLocation,
+          identity: firstIdentity,
+          playerName,
+        },
+      },
+      { worlds: c.worlds, sessions: c.sessions, simRuns: c.simRuns },
+    )
+    subworldId = sub.subworldId
+    if (firstTags.length > 0) {
+      await c.worlds.setGenreTags(subworldId, JSON.stringify(firstTags))
+    }
+    await persistWorldSkin(c.worlds, subworldId, firstTags)
+    await generateOpeningTurn(openingTurnDeps(c), subworldId, firstPremise)
+  } catch (err) {
+    console.error('[animus creation failed]', err)
+    return { error: "Couldn't forge the Animus — try again." }
+  }
+
+  redirect(`/worlds/${subworldId}/play`)
+}
+
 // Bounded "living world" mode: seed the authored scout ship (real Grok crew),
 // run the player-less forward sim (real Haiku beats), drop the player aboard as a
 // newcomer on the Bridge, then send them into /play already mid-motion. The
@@ -343,6 +494,7 @@ export async function createStarshipWorldAction(
       { ...c, crew: c.ensembleGenerator },
     )
     worldId = result.worldId
+    await persistWorldSkin(c.worlds, worldId, ['sci-fi', 'space'], 'signal')
     await generateOpeningTurn(openingTurnDeps(c), worldId, STARSHIP_PREMISE)
   } catch (err) {
     console.error('[starship launch failed]', err)

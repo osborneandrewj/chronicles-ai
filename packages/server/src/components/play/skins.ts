@@ -1,0 +1,48 @@
+export type PlaySkin = 'signal' | 'relic'
+
+export const PLAY_SKIN_VARS: Record<PlaySkin, Record<string, string>> = {
+  relic: {
+    '--reader-bg': '#120e0a',
+    '--reader-bg-muted': '#1a1510',
+    '--reader-panel': 'rgba(18, 14, 11, 0.94)',
+    '--reader-panel-strong': 'rgba(26, 21, 16, 0.96)',
+    '--reader-border': '#5a4a32',
+    '--reader-text': '#eee4d0',
+    '--reader-muted': '#b8a888',
+    '--reader-faint': '#7a6c54',
+    '--reader-accent': '#c4a15a',
+    '--reader-accent-soft': 'rgba(196, 161, 90, 0.18)',
+    '--reader-button-text': '#f2eadc',
+    '--reader-button-hover': '#2a2318',
+    '--reader-field': 'rgba(18, 14, 10, 0.72)',
+    '--reader-field-focus': 'rgba(28, 22, 16, 0.88)',
+    '--reader-shadow': 'rgba(0, 0, 0, 0.55)',
+    '--reader-top-fade': 'linear-gradient(to bottom, #120e0a, rgba(18, 14, 10, 0))',
+    '--reader-bottom-fade':
+      'linear-gradient(to top, #120e0a, rgba(18, 14, 10, 0.92), rgba(18, 14, 10, 0))',
+    '--reader-player': '#d7c4a0',
+    '--skin-bg-image': "url('/skins/relic-bg.jpg')",
+  },
+  signal: {
+    '--reader-bg': '#07090c',
+    '--reader-bg-muted': '#0c1016',
+    '--reader-panel': 'rgba(9, 12, 17, 0.94)',
+    '--reader-panel-strong': 'rgba(12, 16, 22, 0.96)',
+    '--reader-border': '#3a2a18',
+    '--reader-text': '#d8dde4',
+    '--reader-muted': '#8b939e',
+    '--reader-faint': '#5c6570',
+    '--reader-accent': '#e08a2a',
+    '--reader-accent-soft': 'rgba(224, 138, 42, 0.16)',
+    '--reader-button-text': '#e8edf2',
+    '--reader-button-hover': '#161b22',
+    '--reader-field': 'rgba(8, 12, 16, 0.75)',
+    '--reader-field-focus': 'rgba(14, 20, 28, 0.9)',
+    '--reader-shadow': 'rgba(0, 0, 0, 0.6)',
+    '--reader-top-fade': 'linear-gradient(to bottom, #07090c, rgba(7, 9, 12, 0))',
+    '--reader-bottom-fade':
+      'linear-gradient(to top, #07090c, rgba(7, 9, 12, 0.92), rgba(7, 9, 12, 0))',
+    '--reader-player': '#3ecfcf',
+    '--skin-bg-image': "url('/skins/signal-bg.jpg')",
+  },
+}

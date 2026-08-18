@@ -90,6 +90,7 @@ export function mapWorld(d: WorldDoc): World {
     parent_world_id: d.parentWorldId ?? null,
     meta_story_json: d.metaStory ?? null,
     genre_tags: d.genreTags ?? null,
+    ui_skin: d.uiSkin === 'signal' || d.uiSkin === 'relic' ? d.uiSkin : null,
     player_model_json: d.playerModelJson ?? null,
     antagonist_character_id: d.antagonistCharacterId ?? null,
     influence_packet_json: d.influencePacketJson ?? null,

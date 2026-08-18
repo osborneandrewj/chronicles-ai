@@ -137,6 +137,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     async setLayer() {},
     async setMetaStory() {},
     async setGenreTags() {},
+    async setUiSkin() {},
     async setPlayerModel() {},
     async setAntagonistCharacterId() {},
     async setInfluencePacket() {},

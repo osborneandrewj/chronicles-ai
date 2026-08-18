@@ -8,6 +8,11 @@ export type SpatialMode = 'open' | 'bounded'
 // open/bounded worlds (the default, unchanged).
 export type WorldLayer = 'hub' | 'subworld' | 'standalone'
 
+// Play-chrome identity. Persisted on the world so a sci-fi Animus and a Roman
+// first life can look different. Null on legacy rows — resolve at read time
+// from genre_tags (domain/services/ui-skin.ts).
+export type UiSkin = 'signal' | 'relic'
+
 export type World = {
   id: number
   name: string
@@ -30,6 +35,8 @@ export type World = {
   // captured at creation (e.g. '["roman","ancient","political"]'); null when no
   // genre was declared. Consumers treat null as "no signal" (current behavior).
   genre_tags: string | null
+  // Play-chrome skin. Null on pre-v40 rows; resolveUiSkin infers from genre_tags.
+  ui_skin: UiSkin | null
   // Hub ops: compact PlayerModel JSON (antagonist intel). Null until first debrief.
   player_model_json: string | null
   // Hub ops: linked antagonist character id on this hub world.

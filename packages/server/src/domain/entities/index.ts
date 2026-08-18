@@ -89,4 +89,4 @@ export {
   isWorldEventSource,
 } from './world-event'
 export type { UsageTotals } from './usage'
-export type { InitialState, SpatialMode, World, WorldLayer, WorldSummary } from './world'
+export type { InitialState, SpatialMode, UiSkin, World, WorldLayer, WorldSummary } from './world'

@@ -125,6 +125,7 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     async setLayer() {},
     async setMetaStory() {},
     async setGenreTags() {},
+    async setUiSkin() {},
     async setPlayerModel() {},
     async setAntagonistCharacterId() {},
     async setInfluencePacket() {},

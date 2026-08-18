@@ -21,22 +21,17 @@ describe('isWorldListVisible', () => {
     expect(isWorldListVisible({ id: 5, world_layer: 'standalone' }, null)).toBe(true)
   })
 
-  it('hides the hub while concealed, shows it once awoken', () => {
+  it('always shows the Animus, even before any awakening', () => {
     const hub = { id: 10, world_layer: 'hub' as const }
-    expect(isWorldListVisible(hub, session({ has_awoken: 0, status: 'in_subworld' }))).toBe(false)
+    expect(isWorldListVisible(hub, session({ has_awoken: 0, status: 'in_subworld' }))).toBe(true)
     expect(isWorldListVisible(hub, session({ has_awoken: 1, status: 'in_hub' }))).toBe(true)
-    expect(isWorldListVisible(hub, null)).toBe(false)
+    expect(isWorldListVisible(hub, null)).toBe(true)
   })
 
-  it('shows the active simulation only while concealed', () => {
+  it('never lists a first life as a top-level home card', () => {
     const sim = { id: 20, world_layer: 'subworld' as const }
-    expect(isWorldListVisible(sim, session({ has_awoken: 0, subworld_world_id: 20 }))).toBe(true)
-    // After awakening it moves into the hub archive — hidden from home.
+    expect(isWorldListVisible(sim, session({ has_awoken: 0, subworld_world_id: 20 }))).toBe(false)
     expect(isWorldListVisible(sim, session({ has_awoken: 1, status: 'in_hub' }))).toBe(false)
-  })
-
-  it('hides a past simulation the session no longer points at', () => {
-    // byWorld returns null for a run the session has moved on from.
     expect(isWorldListVisible({ id: 99, world_layer: 'subworld' }, null)).toBe(false)
   })
 })

@@ -89,6 +89,8 @@ export interface WorldRepository {
    * other fields untouched.
    */
   setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void>
+  /** Persist the play-chrome skin ('signal' | 'relic'), or null to clear. */
+  setUiSkin(worldId: number, uiSkin: 'signal' | 'relic' | null): Promise<void>
   /** Hub ops: persist compact PlayerModel JSON (or null to clear). */
   setPlayerModel(worldId: number, playerModelJson: string | null): Promise<void>
   /** Hub ops: durable antagonist character id linkage. */

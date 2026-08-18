@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 
 import { createWorldAction, type CreateWorldFormState } from './actions'
 
@@ -8,9 +8,11 @@ const INITIAL: CreateWorldFormState = {}
 
 export function CreateWorldForm() {
   const [state, formAction, pending] = useActionState(createWorldAction, INITIAL)
+  const [uiSkin, setUiSkin] = useState<'relic' | 'signal'>('relic')
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} className="space-y-5 pb-28 sm:pb-0">
+      <input type="hidden" name="uiSkin" value={uiSkin} />
       <Field
         label="Name"
         name="name"
@@ -65,20 +67,54 @@ export function CreateWorldForm() {
         hint="1–2 sentences on who the protagonist is, what they look like, what they're carrying."
       />
 
+      <div>
+        <span className="mb-2 block text-xs font-medium uppercase tracking-[0.1em] text-neutral-400">
+          Play look
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            aria-pressed={uiSkin === 'relic'}
+            onClick={() => setUiSkin('relic')}
+            className={`min-h-12 rounded-xl border px-3 py-2.5 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${
+              uiSkin === 'relic'
+                ? 'border-amber-500/80 bg-amber-500/15 text-amber-100'
+                : 'border-neutral-800 bg-neutral-900/60 text-neutral-300'
+            }`}
+          >
+            Historical / Fantasy
+          </button>
+          <button
+            type="button"
+            aria-pressed={uiSkin === 'signal'}
+            onClick={() => setUiSkin('signal')}
+            className={`min-h-12 rounded-xl border px-3 py-2.5 text-left text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 ${
+              uiSkin === 'signal'
+                ? 'border-amber-500/80 bg-amber-500/15 text-amber-100'
+                : 'border-neutral-800 bg-neutral-900/60 text-neutral-300'
+            }`}
+          >
+            Modern / Sci-fi
+          </button>
+        </div>
+      </div>
+
       {state.error && (
         <div className="rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">
           {state.error}
         </div>
       )}
 
-      <div className="flex justify-end">
-        <button
-          type="submit"
-          disabled={pending}
-          className="min-h-11 rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
-        >
-          {pending ? 'Creating…' : 'Create world'}
-        </button>
+      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-neutral-800 bg-neutral-950/95 px-5 py-3 backdrop-blur sm:static sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
+        <div className="mx-auto flex max-w-2xl justify-end pb-[env(safe-area-inset-bottom)] sm:pb-0">
+          <button
+            type="submit"
+            disabled={pending}
+            className="min-h-12 w-full rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 sm:w-auto"
+          >
+            {pending ? 'Creating…' : 'Create world'}
+          </button>
+        </div>
       </div>
     </form>
   )

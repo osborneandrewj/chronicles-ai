@@ -1065,6 +1065,16 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'director_state_json', 'TEXT')
     },
   },
+  {
+    // Play-chrome identity: 'signal' (modern/sci-fi HUD) or 'relic'
+    // (historical/fantasy parchment). Nullable so legacy rows infer from
+    // genre_tags at read time.
+    version: 40,
+    name: 'world_ui_skin',
+    up: (db) => {
+      addColumnIfMissing(db, 'worlds', 'ui_skin', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,
