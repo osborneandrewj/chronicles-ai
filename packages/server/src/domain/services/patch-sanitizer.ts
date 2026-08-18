@@ -19,22 +19,35 @@ import { shouldEscalateViolence } from '@/domain/services/violence-escalation'
 
 type CharacterPatch = NonNullable<ArchivistPatch['characters']>[number]
 
+export type DeterministicPatchOpts = {
+  /** Collapse / stay-under / wake-advance: ignore "I head to X". */
+  skipPlayerTravel?: boolean
+  /** Wake-advance: land at this depicted place instead of the last typed walk. */
+  wakePlace?: string | null
+}
+
 export function extractDeterministicPatch(
   prior: NarratorWorldState,
   playerText: string,
   narratorText: string,
+  opts: DeterministicPatchOpts = {},
 ): ArchivistPatch | null {
   const patch: ArchivistPatch = {}
 
-  const destination = extractDestination(playerText)
+  const destination = opts.wakePlace
+    ? opts.wakePlace
+    : opts.skipPlayerTravel
+      ? null
+      : extractDestination(playerText)
   if (destination) {
     const destinationKey = normalize(destination)
     const player = prior.presentCharacters.find((c) => c.is_player === 1)
     if (
       destinationKey &&
       destinationKey !== normalize(prior.currentPlace?.name ?? '') &&
-      narratorAcceptsDestination(destination, narratorText) &&
-      player
+      player &&
+      (opts.wakePlace != null ||
+        narratorAcceptsDestination(destination, narratorText))
     ) {
       patch.places = [{ name: destination }]
       patch.characters = [{ name: player.name, is_player: true, current_place_name: destination }]
@@ -135,6 +148,104 @@ export function extractDeterministicPatch(
   return Object.keys(patch).length > 0 ? patch : null
 }
 
+/**
+ * Overlay a deterministic travel patch onto an LLM archivist patch.
+ * The LLM often moves NPCs and forgets the protagonist; travel the player
+ * authored and the narrator confirmed must still land.
+ */
+export function mergeDeterministicTravel(
+  llmPatch: ArchivistPatch,
+  deterministic: ArchivistPatch | null,
+): ArchivistPatch {
+  if (!deterministic) return llmPatch
+  const merged: ArchivistPatch = { ...llmPatch }
+  const playerMove = deterministic.characters?.find(
+    (c) => c.is_player === true && c.current_place_name,
+  )
+  if (playerMove?.current_place_name) {
+    const dest = playerMove.current_place_name
+    const chars = [...(merged.characters ?? [])]
+    const idx = chars.findIndex((c) => c.is_player === true || c.name === playerMove.name)
+    if (idx >= 0) {
+      if (!chars[idx].current_place_name) {
+        chars[idx] = { ...chars[idx], current_place_name: dest }
+      }
+    } else {
+      chars.push(playerMove)
+    }
+    merged.characters = chars
+    if (deterministic.places) {
+      merged.places = [...(merged.places ?? []), ...deterministic.places]
+    }
+    if (
+      deterministic.scene?.action === 'open' &&
+      (!merged.scene || merged.scene.action === 'keep_open')
+    ) {
+      merged.scene = deterministic.scene
+    }
+  }
+  return merged
+}
+
+/**
+ * When the protagonist cannot act, drop player travel unless it is the
+ * depicted wake place. NPC moves stay.
+ */
+export function constrainPlayerTravel(
+  patch: ArchivistPatch,
+  allowedPlace: string | null,
+): ArchivistPatch {
+  const next: ArchivistPatch = { ...patch }
+  const allowed = allowedPlace ? canonicalPlaceKey(allowedPlace) : null
+
+  if (next.scene?.action === 'open') {
+    const dest = canonicalPlaceKey(next.scene.place_name)
+    if (!allowed || dest !== allowed) delete next.scene
+  }
+
+  if (next.characters) {
+    const characters = next.characters.map((c) => {
+      if (c.is_player !== true || !c.current_place_name) return c
+      const dest = canonicalPlaceKey(c.current_place_name)
+      if (allowed && dest === allowed) return c
+      const rest = { ...c }
+      delete rest.current_place_name
+      return rest
+    })
+    next.characters = characters.filter(hasMeaningfulCharacterPatch)
+    if (next.characters.length === 0) delete next.characters
+  }
+  return next
+}
+
+/** Place they wake, from narrator prose. Known names first; cot/med-station → Medical. */
+export function extractWakePlace(
+  narratorText: string,
+  knownPlaceNames: string[],
+): string | null {
+  const match =
+    /\byou wake(?:s|d)?\b[\s\S]{0,320}/i.exec(narratorText) ||
+    /\bwhen awareness returns\b[\s\S]{0,320}/i.exec(narratorText) ||
+    /\byou (?:are|wake) (?:on|in) the (?:cot|couch|table)\b[\s\S]{0,200}/i.exec(
+      narratorText,
+    )
+  if (!match) return null
+  const window = match[0].toLowerCase()
+  const names = [...knownPlaceNames]
+    .filter((n) => n.trim().length >= 3)
+    .sort((a, b) => b.length - a.length)
+  for (const name of names) {
+    const key = name.toLowerCase()
+    if (!window.includes(key)) continue
+    if (/\bisolation\b/.test(key) && /\bnot in sight\b/.test(window)) continue
+    return name
+  }
+  if (/\b(cot|med-?station|medical bay|examination (?:couch|table))\b/.test(window)) {
+    return names.find((n) => /^medical$/i.test(n.trim())) ?? 'Medical'
+  }
+  return null
+}
+
 export function sanitizeArchivistPatch(
   prior: NarratorWorldState,
   recent: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -203,6 +314,8 @@ function extractDestination(text: string): string | null {
     /\b(?:i\s+)?(?:go|walk|run|drive|head|travel)\s+(?:back\s+)?to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
     /\b(?:i\s+)?(?:return)\s+to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
     /\b(?:i\s+)?(?:enter|walk into|go into)\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
+    // "I groan and follow him to medical" — follow is the travel verb.
+    /\bfollow(?:s|ed|ing)?\s+(?:[\w'.]+\s+){0,5}to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
   ]
   for (const pattern of patterns) {
     const match = text.match(pattern)
@@ -354,6 +467,10 @@ function hasActualMotion(value: string): boolean {
     /\byou make your way\b/.test(value) ||
     /\byou (?:are|re) (?:led|taken|carried|brought|ushered|escorted|shown)\b/.test(value) ||
     /\b(?:leads|takes|carries|brings|ushers|escorts|shows) you\b/.test(value) ||
+    /\bfall(?:s)? in step\b/.test(value) ||
+    /\bleads? without\b/.test(value) ||
+    /\bdoorway opens\b/.test(value) ||
+    /\bopens ahead\b/.test(value) ||
     /\b(?:when|by the time) you arrive\b/.test(value) ||
     /\bscene (?:cuts|shifts)\b/.test(value)
   )

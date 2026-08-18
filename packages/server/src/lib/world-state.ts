@@ -19,6 +19,7 @@ import type {
   WorldEventRepository,
   WorldRepository,
 } from '@/domain/ports'
+import { STORY_TAB_EVENT_KINDS } from '@/domain/services/world-event-log'
 import { findLikelyDuplicateCharacters, type DuplicatePair } from '@/lib/character-dedup'
 import { inferPlaceProfile, type PlaceOccupancy } from '@/lib/place-population'
 import { buildTurnNumberMap } from '@/lib/turn-numbers'
@@ -34,7 +35,9 @@ export {
   formatDirectorBlock,
   formatDossierBlock,
   formatOccupancyBlock,
+  formatPerceptionPin,
   formatPlaceGeo,
+  formatResolvedOutcomeBlock,
   formatStateBlock,
   type NpcPlannedAction,
   type OpenOrderRenderContext,
@@ -236,7 +239,7 @@ export async function getFullWorldState(
     potentialDuplicates: findLikelyDuplicateCharacters(characters),
     reveriesByCharacter,
     worldEvents: deps.worldEvents
-      ? await deps.worldEvents.recentForWorld(worldId, 20)
+      ? await deps.worldEvents.recentForWorld(worldId, 20, STORY_TAB_EVENT_KINDS)
       : [],
   }
 }

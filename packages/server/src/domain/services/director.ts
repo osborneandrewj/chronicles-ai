@@ -18,6 +18,8 @@ import {
   type RankableThread,
   type RankingContext,
 } from '@/domain/services/dossier-ranking'
+import { isPlayerYieldingFloor } from '@/domain/services/open-order'
+import { isSettledLeftoverThread } from '@/domain/services/settled-findings'
 
 /** Cap active threats shown as heavy pressure in STATE. */
 export const DIRECTOR_THREAT_CAP = 2
@@ -25,6 +27,16 @@ export const DIRECTOR_THREAT_CAP = 2
 export const DIRECTOR_QUEST_CAP = 1
 /** Turns without engagement before stall escalation. */
 export const DIRECTOR_STALL_TURNS = 8
+/** Consecutive stall_escalate beats before MUST STAGE must change the board. */
+export const DIRECTOR_STALL_REPEAT_BOARD = 1
+
+const STAGING_BEATS = new Set<DirectorBeatKind>([
+  'pressure',
+  'reveal',
+  'arrival',
+  'close',
+  'stall_escalate',
+])
 
 export type RankableObjectiveWithThread = RankableObjective & {
   thread_title?: string | null
@@ -55,6 +67,16 @@ export type DirectorSnapshot = {
   enRouteCast?: DirectorCastCandidate[]
   /** Unused pending beat from last turn's gated brain. */
   pendingBeat?: PendingDirectorBeat | null
+  /** Prior turn's consumed beat — in-scene play and stall-repeat. */
+  lastBeatKind?: DirectorBeatKind | null
+  lastForegroundThreadId?: number | null
+  stallStreak?: number
+  /** They cannot act; world should advance and restore agency. */
+  wakeAdvance?: boolean
+  /** Player text this turn authors a collapse or restraint. */
+  collapsingThisTurn?: boolean
+  /** Player asked to remain unable to act; still change the board. */
+  stayUnder?: boolean
 }
 
 export type DirectorDecision = DirectorBeat & {
@@ -75,26 +97,48 @@ export type DirectorDecision = DirectorBeat & {
  * 5. Soft suggest-resolve when phase is resolution and signals match.
  */
 export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
-  const activeThreads = snapshot.threads.filter((t) => t.status === 'active')
-  const activeObjectives = snapshot.objectives.filter(
+  const leftoverIds = new Set(
+    snapshot.threads
+      .filter((t) => isSettledLeftoverThread(t, snapshot.threads, snapshot.objectives))
+      .map((t) => t.id),
+  )
+  const pendingBeat =
+    snapshot.pendingBeat && leftoverIds.has(snapshot.pendingBeat.foregroundThreadId ?? -1)
+      ? null
+      : snapshot.pendingBeat
+  const directed = { ...snapshot, pendingBeat }
+  const activeThreads = directed.threads.filter(
+    (t) => t.status === 'active' && !leftoverIds.has(t.id),
+  )
+  const activeObjectives = directed.objectives.filter(
     (o) => o.status === 'active' || o.status === 'blocked',
   )
 
   if (activeThreads.length === 0 && activeObjectives.length === 0) {
     return mergePendingBeat(
-      { ...emptyDirectorBeat(), backgroundThreadIds: [], heavyThreadIds: [] },
-      snapshot,
+      {
+        ...emptyDirectorBeat(),
+        suggestDormantThreadIds: [...leftoverIds],
+        backgroundThreadIds: [],
+        heavyThreadIds: [],
+      },
+      directed,
     )
   }
 
   const ctx: RankingContext = { clockMinutes: snapshot.clockMinutes }
   const ranked = rankThreads(activeThreads, ctx, activeThreads.length)
-  // Soft boost: threads whose text mentions an en-route character.
+  const addressed = namedPresent(snapshot.playerText, snapshot.presentCast ?? [])
+  const addressedTokens = nameTokens(addressed.map((c) => c.name))
+  // Soft boost: player-addressed names, then en-route mentions.
   const enRoute = (snapshot.enRouteNames ?? []).map((n) => n.toLowerCase()).filter(Boolean)
   const ordered =
-    enRoute.length === 0
+    addressedTokens.length === 0 && enRoute.length === 0
       ? ranked
       : [...ranked].sort((a, b) => {
+          const aAddr = mentionsAny(a, addressedTokens) ? 1 : 0
+          const bAddr = mentionsAny(b, addressedTokens) ? 1 : 0
+          if (aAddr !== bAddr) return bAddr - aAddr
           const aHit = mentionsAny(a, enRoute) ? 1 : 0
           const bHit = mentionsAny(b, enRoute) ? 1 : 0
           return bHit - aHit
@@ -104,9 +148,7 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
   const foregroundThreadId = foreground?.id ?? null
 
   const phase = derivePhase(foreground, activeObjectives, snapshot)
-  const engaged = foreground
-    ? playerEngages(snapshot.playerText, foreground, activeObjectives)
-    : false
+  const engaged = foreground ? isPlayerEngagedWithThread(snapshot, foreground) : false
   const stallTurns = foreground
     ? turnsSince(foreground, snapshot.currentTurnId)
     : 0
@@ -141,6 +183,7 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
     present: snapshot.presentCast ?? [],
     enRoute: snapshot.enRouteCast ?? namesToCast(snapshot.enRouteNames),
     foreground,
+    playerText: snapshot.playerText,
   })
   const closing =
     suggestResolveThreadIds.length > 0 || suggestCompleteObjectiveIds.length > 0
@@ -153,7 +196,10 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
     cast,
     hasObjectives: activeObjectives.length > 0,
     closing,
+    wakeAdvance: snapshot.wakeAdvance,
+    stayUnder: snapshot.stayUnder,
   })
+  const lastForegroundThreadId = snapshot.lastForegroundThreadId ?? null
   const mustStage = buildMustStage({
     foreground,
     beatKind,
@@ -161,8 +207,30 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
     closing,
     stallTurns,
     engaged,
+    lastBeatKind: snapshot.lastBeatKind ?? null,
+    lastForegroundThreadId,
+    stallStreak: snapshot.stallStreak ?? 0,
+    wakeAdvance: snapshot.wakeAdvance === true,
+    collapsingThisTurn: snapshot.collapsingThisTurn === true,
+    stayUnder: snapshot.stayUnder === true,
+    playerText: snapshot.playerText,
   })
-  const mustNot = buildMustNot({ beatKind, phase })
+  const settledTitles = snapshot.objectives
+    .filter((o) => o.status === 'completed')
+    .map((o) => o.title)
+    .filter((t) => t.trim().length > 0)
+    .slice(-3)
+  const mustNot = buildMustNot({
+    beatKind,
+    phase,
+    settledTitles,
+    repeatPressure: isRepeatForegroundPressure({
+      foreground,
+      beatKind,
+      lastBeatKind: snapshot.lastBeatKind ?? null,
+      lastForegroundThreadId,
+    }),
+  })
 
   return mergePendingBeat(
     {
@@ -176,15 +244,16 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
       guidanceLines,
       suggestResolveThreadIds,
       suggestCompleteObjectiveIds,
-      suggestDormantThreadIds,
+      suggestDormantThreadIds: [...new Set([...suggestDormantThreadIds, ...leftoverIds])],
       backgroundThreadIds,
       heavyThreadIds,
     },
-    snapshot,
+    directed,
   )
 }
 
-/** Overlay a pending brain beat unless the player engaged a different thread. */
+/** Overlay a pending brain beat unless the player engaged a different thread
+ * or is in-scene on a stall pending (stall overlay would freeze a live scene). */
 export function mergePendingBeat(
   decision: DirectorDecision,
   snapshot: DirectorSnapshot,
@@ -192,6 +261,8 @@ export function mergePendingBeat(
   const pending = snapshot.pendingBeat
   if (!pending) return decision
   if (playerOverridesPending(snapshot, pending)) return decision
+  if (snapshot.wakeAdvance || snapshot.stayUnder) return decision
+  if (shouldDropStallPending(snapshot, pending)) return decision
   return {
     ...decision,
     beatKind: pending.beatKind,
@@ -211,7 +282,20 @@ function playerOverridesPending(
   const other = snapshot.threads.filter(
     (t) => t.status === 'active' && t.id !== pending.foregroundThreadId,
   )
-  return other.some((t) => playerEngages(snapshot.playerText, t, snapshot.objectives))
+  return other.some((t) => isPlayerEngagedWithThread(snapshot, t))
+}
+
+function shouldDropStallPending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  if (pending.beatKind !== 'stall_escalate') return false
+  const thread =
+    pending.foregroundThreadId != null
+      ? snapshot.threads.find((t) => t.id === pending.foregroundThreadId)
+      : null
+  if (thread) return isPlayerEngagedWithThread(snapshot, thread)
+  return !isIdleMove(snapshot.playerText)
 }
 
 function uniqueLines(lines: string[]): string[] {
@@ -233,7 +317,40 @@ function mentionsAny(
   namesLower: string[],
 ): boolean {
   const hay = `${t.title} ${t.summary ?? ''} ${t.stakes ?? ''} ${t.hidden ?? ''}`.toLowerCase()
-  return namesLower.some((n) => n.length >= 2 && hay.includes(n))
+  return nameTokens(namesLower).some((n) => n.length >= 3 && hay.includes(n))
+}
+
+function nameTokens(names: string[]): string[] {
+  const out: string[] = []
+  for (const n of names) {
+    const trimmed = n.trim().toLowerCase()
+    if (!trimmed) continue
+    out.push(trimmed)
+    for (const part of trimmed.split(/\s+/)) {
+      if (part.length >= 3) out.push(part)
+    }
+  }
+  return out
+}
+
+function namedPresent(
+  playerText: string,
+  present: DirectorCastCandidate[],
+): DirectorCastCandidate[] {
+  const text = playerText.toLowerCase()
+  if (!text.trim()) return []
+  const hits: DirectorCastCandidate[] = []
+  for (const c of present) {
+    if (c.isPlayer) continue
+    for (const part of c.name.toLowerCase().split(/\s+/)) {
+      if (part.length < 3) continue
+      if (new RegExp(`\\b${escapeRegExp(part)}\\b`, 'i').test(text)) {
+        hits.push(c)
+        break
+      }
+    }
+  }
+  return hits
 }
 
 function derivePhase(
@@ -289,6 +406,43 @@ function turnsSince(
     return Math.max(0, currentTurnId - row.source_turn_id)
   }
   return 0
+}
+
+function isPlayerEngagedWithThread(
+  snapshot: DirectorSnapshot,
+  thread: RankableThread,
+): boolean {
+  if (playerEngages(snapshot.playerText, thread, snapshot.objectives)) return true
+  if (playerNamesPresent(snapshot.playerText, snapshot.presentCast ?? [])) return true
+  if (
+    snapshot.lastForegroundThreadId === thread.id &&
+    snapshot.lastBeatKind != null &&
+    STAGING_BEATS.has(snapshot.lastBeatKind) &&
+    !isIdleMove(snapshot.playerText)
+  ) {
+    return true
+  }
+  return false
+}
+
+function playerNamesPresent(
+  playerText: string,
+  present: DirectorCastCandidate[],
+): boolean {
+  const text = playerText.toLowerCase()
+  if (!text.trim()) return false
+  for (const c of present) {
+    if (c.isPlayer) continue
+    for (const part of c.name.toLowerCase().split(/\s+/)) {
+      if (part.length < 3) continue
+      if (new RegExp(`\\b${escapeRegExp(part)}\\b`, 'i').test(text)) return true
+    }
+  }
+  return false
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function playerEngages(
@@ -453,12 +607,19 @@ function assignCast(args: {
   present: DirectorCastCandidate[]
   enRoute: DirectorCastCandidate[]
   foreground: RankableThread | null
+  playerText?: string
 }): DirectorCastSlot[] {
   const npcs = args.present.filter((c) => !c.isPlayer && c.name.trim())
+  const addressedIds = new Set(
+    namedPresent(args.playerText ?? '', args.present).map((c) => c.id),
+  )
   const mentioned = (name: string): boolean =>
     Boolean(args.foreground && mentionsAny(args.foreground, [name.toLowerCase()]))
 
   const scored = [...npcs].sort((a, b) => {
+    const aAddr = addressedIds.has(a.id) ? 1 : 0
+    const bAddr = addressedIds.has(b.id) ? 1 : 0
+    if (aAddr !== bAddr) return bAddr - aAddr
     const aHit = mentioned(a.name) ? 1 : 0
     const bHit = mentioned(b.name) ? 1 : 0
     return bHit - aHit || a.id - b.id
@@ -467,11 +628,12 @@ function assignCast(args: {
   const slots: DirectorCastSlot[] = []
   let reactCount = 0
   for (const c of scored) {
+    const addressed = addressedIds.has(c.id)
     let role: DirectorCastSlot['role'] = 'background'
     if (slots.every((s) => s.role !== 'initiate')) role = 'initiate'
-    else if (reactCount < DIRECTOR_REACT_CAP) {
+    else if (addressed || reactCount < DIRECTOR_REACT_CAP) {
       role = 'react'
-      reactCount += 1
+      if (!addressed) reactCount += 1
     }
     slots.push({ characterId: c.id, name: c.name, role })
   }
@@ -495,11 +657,16 @@ function deriveBeatKind(args: {
   cast: DirectorCastSlot[]
   hasObjectives: boolean
   closing: boolean
+  wakeAdvance?: boolean
+  collapsingThisTurn?: boolean
+  stayUnder?: boolean
 }): DirectorBeatKind | null {
+  if (args.wakeAdvance || args.stayUnder) return 'yield'
   if (!args.foreground && !args.hasObjectives) return null
+  if (args.cast.some((c) => c.role === 'arrive')) return 'arrival'
+  if (isPlayerYieldingFloor(args.playerText)) return 'yield'
   if (args.closing || args.phase === 'resolution') return 'close'
   if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) return 'stall_escalate'
-  if (args.cast.some((c) => c.role === 'arrive')) return 'arrival'
   if (isIdleMove(args.playerText) && !args.engaged) return 'yield'
   if (isRevealMove(args.playerText)) return 'reveal'
   if (!args.foreground || args.phase === 'setup') return 'local'
@@ -507,6 +674,7 @@ function deriveBeatKind(args: {
 }
 
 function isIdleMove(text: string): boolean {
+  if (isPlayerYieldingFloor(text)) return true
   return /\b(wait|look around|stare|sit|drink|idle|do nothing|stay|linger)\b/i.test(
     text,
   )
@@ -518,6 +686,18 @@ function isRevealMove(text: string): boolean {
   )
 }
 
+function isRepeatForegroundPressure(args: {
+  foreground: RankableThread | null
+  beatKind: DirectorBeatKind | null
+  lastBeatKind: DirectorBeatKind | null
+  lastForegroundThreadId: number | null
+}): boolean {
+  if (!args.foreground) return false
+  if (args.lastForegroundThreadId !== args.foreground.id) return false
+  if (args.lastBeatKind !== 'pressure' && args.lastBeatKind !== 'yield') return false
+  return args.beatKind === 'pressure' || args.beatKind === 'yield'
+}
+
 function buildMustStage(args: {
   foreground: RankableThread | null
   beatKind: DirectorBeatKind | null
@@ -525,14 +705,60 @@ function buildMustStage(args: {
   closing: boolean
   stallTurns: number
   engaged: boolean
+  lastBeatKind: DirectorBeatKind | null
+  lastForegroundThreadId: number | null
+  stallStreak: number
+  wakeAdvance: boolean
+  collapsingThisTurn: boolean
+  stayUnder: boolean
+  playerText: string
 }): string[] {
   const lines: string[] = []
-  if (args.foreground && args.beatKind) {
+  if (args.wakeAdvance) {
     lines.push(
-      `Stage a concrete beat of "${args.foreground.title}" (${args.beatKind}).`,
+      'The protagonist cannot act. Advance time until they can. Do not wait for their choice.',
     )
+    lines.push(
+      'Others act. Land one changed board: a named place, a named result, a logged incident, or new presence. Open on the first moment they can act again.',
+    )
+    return lines
+  }
+  if (args.stayUnder) {
+    lines.push(
+      'The protagonist still cannot act. Advance time. Do not wait for their choice and do not restore agency this turn.',
+    )
+    lines.push(
+      'Others act. Land one changed board: a named place, a named result, a logged incident, or new presence.',
+    )
+    return lines
+  }
+  if (args.foreground && args.beatKind) {
+    if (
+      isRepeatForegroundPressure({
+        foreground: args.foreground,
+        beatKind: args.beatKind,
+        lastBeatKind: args.lastBeatKind,
+        lastForegroundThreadId: args.lastForegroundThreadId,
+      })
+    ) {
+      lines.push(
+        `Advance "${args.foreground.title}" with a new consequence — a finding, named next place, new person, or information that was not on the last turn. Do not restage the same bodily event or procedure.`,
+      )
+    } else {
+      lines.push(
+        `Stage a concrete beat of "${args.foreground.title}" (${args.beatKind}).`,
+      )
+    }
   } else if (args.beatKind === 'local') {
     lines.push('Stage local scene pressure only — no new major arc.')
+  }
+  if (isPlayerYieldingFloor(args.playerText)) {
+    lines.push(
+      'The protagonist yielded the floor. Write through the current procedure or exchange this turn — complete remaining checks, deliver the finding, finish the conversation beat.',
+    )
+    lines.push(
+      'Land one changed board: a named result, a named next place, a logged incident, or new presence. Do not stop mid-check or mid-exchange waiting for another continue. Do not end on a question whose only useful answer is continue.',
+    )
   }
   const initiator = args.cast.find((c) => c.role === 'initiate')
   if (initiator) {
@@ -540,10 +766,19 @@ function buildMustStage(args: {
       `${initiator.name} initiates — they act first; do not wait for the protagonist to prompt them.`,
     )
   }
+  if (args.collapsingThisTurn) {
+    lines.push(
+      'After they cannot act, others may start to move. Do not ask the protagonist a question or a choice.',
+    )
+  }
   if (args.closing) {
     lines.push('Prefer closing listed work over opening a new complication.')
   }
-  if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) {
+  if (args.beatKind === 'stall_escalate' && isRepeatStall(args)) {
+    lines.push(
+      'Change the board this turn: a named result, a named next place, or off-stage pressure arriving. Do not restage the same watch / wait / reading loop.',
+    )
+  } else if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) {
     lines.push(
       'Escalate time, NPC initiative, or environmental cost without railroading.',
     )
@@ -551,9 +786,18 @@ function buildMustStage(args: {
   return lines
 }
 
+function isRepeatStall(args: {
+  lastBeatKind: DirectorBeatKind | null
+  stallStreak: number
+}): boolean {
+  return args.lastBeatKind === 'stall_escalate' || args.stallStreak >= DIRECTOR_STALL_REPEAT_BOARD
+}
+
 function buildMustNot(args: {
   beatKind: DirectorBeatKind | null
   phase: DirectorPhase | null
+  settledTitles: string[]
+  repeatPressure: boolean
 }): string[] {
   const lines: string[] = []
   if (
@@ -566,6 +810,16 @@ function buildMustNot(args: {
   }
   if (args.beatKind === 'close') {
     lines.push('Do not revive recently closed work as a new quest.')
+  }
+  if (args.repeatPressure) {
+    lines.push(
+      'Do not re-describe an unchanged symptom, monitor reading, or room from the last turn.',
+    )
+  }
+  if (args.settledTitles.length > 0) {
+    lines.push(
+      `Do not reverse settled findings: ${args.settledTitles.join('; ')}.`,
+    )
   }
   return lines
 }

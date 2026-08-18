@@ -20,7 +20,7 @@ import type {
   WorldCorrectionRow,
   WorldEvent,
 } from '@/domain/entities'
-import { isWorldEventKind } from '@/domain/entities/world-event'
+import { isWorldEventKind, isWorldEventSource } from '@/domain/entities/world-event'
 import type { World, WorldSummary } from '@/lib/worlds'
 import type { ReverieRow } from '@/lib/reveries'
 
@@ -474,9 +474,7 @@ export function mapWorldCorrection(d: WorldCorrectionDoc): WorldCorrectionRow {
 export function mapWorldEvent(d: WorldEventDoc): WorldEvent | null {
   if (!isWorldEventKind(d.kind)) return null
   const source =
-    d.sourceAgent === 'director' || d.sourceAgent === 'reconciler'
-      ? d.sourceAgent
-      : 'director'
+    isWorldEventSource(d.sourceAgent) ? d.sourceAgent : 'director'
   const visibility =
     d.visibility === 'narrator' ||
     d.visibility === 'player' ||

@@ -4,7 +4,14 @@ import { useChat, type UIMessage } from "@ai-sdk/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DefaultChatTransport } from "ai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { SlashCommandMenu } from "@/components/SlashCommandMenu";
 import { useNarratorAudio } from "@/components/useNarratorAudio";
@@ -109,6 +116,8 @@ type Props = {
   // Read-only review (v0.2.1): render the transcript with no composer, no slash
   // menu, and no completion refresh — used to revisit a completed simulation.
   readOnly?: boolean;
+  // Optional in-flow header control (hub Past Simulations). Must not overlay.
+  headerEnd?: ReactNode;
 };
 
 
@@ -120,6 +129,7 @@ export function Chat({
   initialOldestId,
   initialHasOlder,
   readOnly = false,
+  headerEnd,
 }: Props) {
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
@@ -504,6 +514,7 @@ export function Chat({
           </span>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1.5">
+          {headerEnd}
           {/* Session total — hidden when there's not enough room next to the
               world name. The per-turn footer carries the cost on every turn,
               so this chip is supplemental. */}

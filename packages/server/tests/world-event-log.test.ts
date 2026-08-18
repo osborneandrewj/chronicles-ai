@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { decideDirector } from '@/domain/services/director'
 import {
   beatDirectedEvent,
+  isStoryTabWorldEvent,
   npcReconcileEvents,
   objectiveCompletedEvent,
+  outcomeResolvedEvent,
   threadClosedEvent,
 } from '@/domain/services/world-event-log'
+import { contestedFallback } from '@/domain/services/outcome-resolution'
 
 describe('beatDirectedEvent', () => {
   it('returns null when the director has nothing to record', () => {
@@ -129,5 +132,48 @@ describe('lifecycle world events', () => {
       kind: 'OBJECTIVE_COMPLETED',
       payload: { objective_id: 2, status: 'completed' },
     })
+  })
+})
+
+describe('outcomeResolvedEvent', () => {
+  it('records a binding conductor resolution and skips not_applicable', () => {
+    const event = outcomeResolvedEvent({
+      worldId: 3,
+      turnId: 9,
+      worldTime: 'dusk',
+      resolution: contestedFallback('I kill the king'),
+    })
+    expect(event).toMatchObject({
+      kind: 'OUTCOME_RESOLVED',
+      source_agent: 'conductor',
+      visibility: 'system',
+      payload: { outcome: 'partial_success' },
+    })
+    expect(
+      outcomeResolvedEvent({
+        worldId: 3,
+        turnId: 9,
+        worldTime: 'dusk',
+        resolution: {
+          intent: 'look around',
+          stance: 'attempt',
+          inputMode: 'tactical_intent',
+          outcome: 'not_applicable',
+          worldStateDelta: '',
+        },
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('isStoryTabWorldEvent', () => {
+  it('hides closure rows from Story; keeps referee outcomes; drops per-turn coordination', () => {
+    expect(isStoryTabWorldEvent({ kind: 'THREAD_CLOSED' })).toBe(false)
+    expect(isStoryTabWorldEvent({ kind: 'OBJECTIVE_COMPLETED' })).toBe(false)
+    expect(isStoryTabWorldEvent({ kind: 'OUTCOME_RESOLVED' })).toBe(true)
+    expect(isStoryTabWorldEvent({ kind: 'BEAT_DIRECTED' })).toBe(false)
+    expect(isStoryTabWorldEvent({ kind: 'NPC_STAGED' })).toBe(false)
+    expect(isStoryTabWorldEvent({ kind: 'NPC_MODIFIED' })).toBe(false)
+    expect(isStoryTabWorldEvent({ kind: 'NPC_IGNORED' })).toBe(false)
   })
 })

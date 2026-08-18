@@ -34,6 +34,20 @@ export type {
 } from './director-state'
 export { emptyDirectorState } from './director-state'
 export type {
+  AdjudicationInputMode,
+  AdjudicationStance,
+  OutcomeLabel,
+  ResolvedOutcome,
+} from './resolved-outcome'
+export {
+  ADJUDICATION_INPUT_MODES,
+  ADJUDICATION_STANCES,
+  OUTCOME_LABELS,
+  isAdjudicationInputMode,
+  isAdjudicationStance,
+  isOutcomeLabel,
+} from './resolved-outcome'
+export type {
   InsertNpcIntent,
   IntentDisposition,
   IntentVisibility,
@@ -72,6 +86,7 @@ export {
   WORLD_EVENT_SOURCES,
   WORLD_EVENT_VISIBILITIES,
   isWorldEventKind,
+  isWorldEventSource,
 } from './world-event'
 export type { UsageTotals } from './usage'
 export type { InitialState, SpatialMode, World, WorldLayer, WorldSummary } from './world'

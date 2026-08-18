@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Lazy load + cache prompt template files from the server package's `prompts/`
-// directory. Per CLAUDE.md convention, prompt templates live in `prompts/*.md`
+// directory. Per AGENTS.md convention, prompt templates live in `prompts/*.md`
 // so they stay git-diffable. Read at first use and cached for the process
 // lifetime — dev-server hot-reload only restarts the process when the .ts
 // changes, so a .md edit needs a manual restart (same posture as inline string

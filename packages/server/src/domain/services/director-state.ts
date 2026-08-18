@@ -37,6 +37,13 @@ export function parseDirectorState(raw: string | null | undefined): DirectorStat
         typeof v.lastBrainReason === 'string' && REASONS.has(v.lastBrainReason)
           ? v.lastBrainReason
           : null,
+      lastBeatKind:
+        typeof v.lastBeatKind === 'string' && BEAT_KINDS.has(v.lastBeatKind)
+          ? v.lastBeatKind
+          : null,
+      lastForegroundThreadId: asInt(v.lastForegroundThreadId),
+      stallStreak: Math.max(0, asInt(v.stallStreak) ?? 0),
+      agencyLocked: v.agencyLocked === true,
     }
   } catch {
     return emptyDirectorState()

@@ -70,6 +70,13 @@ describe('todaysTokens', () => {
     expect((await todaysTokens()) - baseline).toBe(10)
   })
 
+  it('sums conductor input + output', async () => {
+    insertTurnWithMetadata(worldId, {
+      conductor: { usage: { inputTokens: 8, outputTokens: 4 } },
+    })
+    expect((await todaysTokens()) - baseline).toBe(12)
+  })
+
   it('sums all four keys together when present on a mixed row', async () => {
     insertTurnWithMetadata(worldId, {
       narrator: { usage: { inputTokens: 1, outputTokens: 2 } },

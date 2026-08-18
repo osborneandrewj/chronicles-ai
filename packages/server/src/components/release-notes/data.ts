@@ -16,6 +16,24 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.12.0',
+    date: '2026-08-18',
+    highlights: [
+      'New worlds open with a handful of real story threads — a mystery, a pressure, a relationship — instead of waiting for a medical symptom to become the plot.',
+      'When you address someone by name, they answer. Colleagues no longer talk over them, and “wait for them to respond” is no longer treated as sitting out the turn.',
+      'Talk scenes run as conversations: each speaker gets more than a one-liner, and the same bodily event is not restaged every beat.',
+      'The Story inspector no longer lists a pile of closed-thread and completed-objective machinery. Active pressure stays; the archive stays in the log.',
+    ],
+  },
+  {
+    version: '0.11.0',
+    date: '2026-08-18',
+    highlights: [
+      'Story arcs hold a clearer foreground: the world stages one beat at a time, with who initiates and what must happen this turn.',
+      'Travel and contested actions stay honest — you cannot teleport, and a claimed outcome is judged before the prose continues.',
+    ],
+  },
+  {
     version: '0.10.0',
     date: '2026-08-11',
     highlights: [

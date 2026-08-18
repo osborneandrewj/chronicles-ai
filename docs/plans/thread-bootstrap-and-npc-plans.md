@@ -41,7 +41,7 @@ Recommended order: **A first** (immediate unblock + gives a non-empty dossier fi
 - Three objectives (Setnakht's routes): reach the vizier's scribes (east of the temple of Amun); seek the western-tomb priests who remember harem conspiracies; destroy the letter and flee Thebes.
 - One clue: the intact official seal (breaking it is irreversible).
 
-**Verify:** read-back in-script; then open the dev app inspector for world 5; advance one turn and confirm the thread is in narrator context and `activeThreadCount > 0` (so the misfiring bootstrap mandate stops for this world). **Back up first** (CLAUDE.md data-repair rule) — `mongodump` the `story_threads`/`worlds` for world 5 or snapshot the volume before writing.
+**Verify:** read-back in-script; then open the dev app inspector for world 5; advance one turn and confirm the thread is in narrator context and `activeThreadCount > 0` (so the misfiring bootstrap mandate stops for this world). **Back up first** (AGENTS.md data-repair rule) — `mongodump` the `story_threads`/`worlds` for world 5 or snapshot the volume before writing.
 
 ---
 
@@ -94,7 +94,7 @@ Recommended order: **A first** (immediate unblock + gives a non-empty dossier fi
 
 ---
 
-## Definition of done (per CLAUDE.md)
+## Definition of done (per AGENTS.md)
 - `npm run type-check`, `npm test` (incl. `depcruise`), `npm run test:mongo` green after B and C.
 - **A:** a backup taken; the script run once; the thread visible in the world-5 inspector and in narrator context on the next turn.
 - **B:** a real NPC-agent tick produces a `planned_action` for a present NPC (verify by streaming a turn in the browser on world 5 and confirming an NPC takes a staged, initiated action).

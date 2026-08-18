@@ -30,6 +30,8 @@ export class StubMetaStoryGenerator implements MetaStoryGenerator {
       institution: `${hubName} presents itself as a friendly posting, but it runs the simulations for a purpose it does not disclose.`,
       hiddenTruth: arcEngine.premise,
       antagonist: 'A senior member of the institution who will burn the newcomer to keep the program buried.',
+      antagonistSpeechRegister:
+        'clipped · formal · never explains the program · default: one instruction or a counter-question · no public warmth',
       allies: 'One of the friendly crew quietly doubts the program and will help when it counts.',
       acts: [
         { title: 'A Friendly Posting', summary: 'The newcomer is welcomed; everything seems ordinary.', lucidityThreshold: 0 },

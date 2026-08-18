@@ -256,7 +256,10 @@ export const ARCHIVIST_MODEL = HAIKU_MODEL
 // through that binding.
 export { sanitizeArchivistPatch }
 export {
+  constrainPlayerTravel,
   extractDeterministicPatch,
+  extractWakePlace,
+  mergeDeterministicTravel,
   normalizeTransitPlaceName,
 } from '@/domain/services/patch-sanitizer'
 
@@ -440,14 +443,8 @@ export async function extractPatch(
   const { object, usage } = await generateObject({
     model: anthropic(ARCHIVIST_MODEL),
     schema: ArchivistPatchSchema,
+    system: `${loadPrompt('archivist-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
     messages: [
-      {
-        role: 'system',
-        content: `${loadPrompt('archivist-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
-        providerOptions: {
-          anthropic: { cacheControl: { type: 'ephemeral' } },
-        },
-      },
       {
         role: 'user',
         content: buildArchivistUserContent({
@@ -459,6 +456,9 @@ export async function extractPatch(
         }),
       },
     ],
+    providerOptions: {
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    },
   })
 
   return { patch: sanitizeArchivistPatch(prior, recent, object, privateUtterance), usage }
@@ -522,14 +522,8 @@ export async function extractCorrectionPatch(
   const { object, usage } = await generateObject({
     model: anthropic(ARCHIVIST_MODEL),
     schema: CorrectionPatchSchema,
+    system: loadPrompt('archivist-correction'),
     messages: [
-      {
-        role: 'system',
-        content: loadPrompt('archivist-correction'),
-        providerOptions: {
-          anthropic: { cacheControl: { type: 'ephemeral' } },
-        },
-      },
       {
         role: 'user',
         content: [
@@ -546,6 +540,9 @@ export async function extractCorrectionPatch(
         ].join('\n'),
       },
     ],
+    providerOptions: {
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    },
   })
 
   const { reply, ...patchWithoutReply } = object

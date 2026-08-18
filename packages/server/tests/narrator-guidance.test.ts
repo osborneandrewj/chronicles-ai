@@ -186,7 +186,7 @@ describe('clear-handle stall cue (pressure theater)', () => {
   it('fires on crowded idle even without full stall text', () => {
     const out = formatNarratorTurnGuidance(
       ctx({
-        playerText: 'I wait',
+        playerText: 'I look around',
         recentTurns: [
           { role: 'user', content: 'I charge the line' },
           {
@@ -381,6 +381,33 @@ describe('sparse guidance matrix (Phase B)', () => {
     expect(guidance == null || !guidance.toLowerCase().includes('multi-sensory')).toBe(true)
   })
 
+  it('say-stance fold-in requires the protagonist line on the page', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'say',
+        playerText: 'Jordan, your hands are amazing. Don\'t tell Lee.',
+        presentNpcCount: 2,
+      }),
+    )
+    expect(out).toMatch(/fold-in/i)
+    expect(out).toMatch(/you speak/i)
+    expect(out).toMatch(/predicates/i)
+    expect(out).toMatch(/world'?s voice/i)
+  })
+
+  it('wake-advance cue does not wait for the protagonist', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'continue',
+        presentNpcCount: 2,
+        wakeAdvance: true,
+      }),
+    )
+    expect(out).toMatch(/cannot act/i)
+    expect(out).toMatch(/until they can act/i)
+  })
+
   it('investigative + dossier pressure keeps internal-pressure line', () => {
     const guidance = formatNarratorTurnGuidance({
       stance: 'say',
@@ -474,9 +501,23 @@ describe('tier-1 engagement cue (P5 + S1)', () => {
 
   it('fires on a single idle move with a present NPC and no salient plan', () => {
     const out = formatNarratorTurnGuidance(
-      ctx({ playerText: 'I wait', recentTurns: oneIdle, presentNpcCount: 1, plannedActionCount: 0 }),
+      ctx({
+        playerText: 'I look around',
+        recentTurns: oneIdle,
+        presentNpcCount: 1,
+        plannedActionCount: 0,
+      }),
     )
     expect(out!.toLowerCase()).toContain('take the initiative')
+  })
+
+  it('writes through a yielded floor instead of asking for another continue', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({ playerText: 'continue', recentTurns: oneIdle, presentNpcCount: 2, plannedActionCount: 0 }),
+    )
+    expect(out!.toLowerCase()).toContain('yielded the floor')
+    expect(out!.toLowerCase()).toContain('write through')
+    expect(out!.toLowerCase()).not.toContain('take the initiative')
   })
 
   it('does not fire when a salient NPC action is already planned', () => {
@@ -499,7 +540,7 @@ describe('tier-1 engagement cue (P5 + S1)', () => {
   it('still fires engagement when only busywork plans exist', () => {
     const out = formatNarratorTurnGuidance(
       ctx({
-        playerText: 'I wait',
+        playerText: 'I look around',
         recentTurns: oneIdle,
         presentNpcCount: 1,
         plannedActionCount: 1,
@@ -547,7 +588,40 @@ describe('dialogue beat cue (dialogue-depth Phase 1)', () => {
     )
     expect(out).not.toBeNull()
     expect(out!.toLowerCase()).toContain('dialogue beat')
-    expect(out!.toLowerCase()).toContain('one hard question')
+    expect(out!.toLowerCase()).toMatch(/two to four clauses|real conversation/)
+    expect(out!.toLowerCase()).toMatch(/addressed someone by name/)
+    expect(out!.toLowerCase()).not.toContain('one hard question')
+  })
+
+  it('fires a conversation exchange on yield when NPCs are present', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'do',
+        playerText: 'continue',
+        presentNpcCount: 2,
+      }),
+    )
+    expect(out!.toLowerCase()).toContain('dialogue beat')
+    expect(out!.toLowerCase()).toMatch(/two to four clauses|real conversation/)
+  })
+
+  it('flags a circling restage when the last two assistant turns overlap heavily', () => {
+    const slam =
+      'The numbness band clamps tighter across your throat. The right arm detonates, elbow locking rigid, fingers wrenching deeper into the claw until the forearm slams once more against your chest. The monitor spikes on the right side only.'
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'say',
+        playerText: '"What is for breakfast?"',
+        presentNpcCount: 2,
+        recentTurns: [
+          { role: 'assistant', content: slam },
+          { role: 'user', content: 'continue' },
+          { role: 'assistant', content: slam },
+        ],
+      }),
+    )
+    expect(out!.toLowerCase()).toContain('restaged the same physical beat')
+    expect(out!.toLowerCase()).toContain('talk to each other')
   })
 
   it('does not fire on observe/travel without speech and without present NPCs', () => {

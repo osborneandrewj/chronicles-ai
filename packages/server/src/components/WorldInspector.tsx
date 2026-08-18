@@ -280,13 +280,11 @@ function StoryView({ state }: { state: FullWorldState }) {
   const objectives = dossier.objectives.filter((o) => o.status === "active" || o.status === "blocked");
   const clues = dossier.clues.filter((c) => c.status === "open" || c.status === "interpreted");
   const resources = dossier.resources;
-  const worldEvents = state.worldEvents ?? [];
   const empty =
     threads.length === 0 &&
     objectives.length === 0 &&
     clues.length === 0 &&
-    resources.length === 0 &&
-    worldEvents.length === 0;
+    resources.length === 0;
 
   if (empty) {
     return (
@@ -298,24 +296,6 @@ function StoryView({ state }: { state: FullWorldState }) {
 
   return (
     <div className="space-y-4">
-      {worldEvents.length > 0 && (
-        <DossierGroup
-          label={`Events (${worldEvents.length})`}
-          items={worldEvents.map((e) => ({
-            id: `event-${e.id}`,
-            title: e.kind,
-            tag: e.source_agent,
-            body: (
-              <p className="mt-0.5 text-neutral-400">
-                {e.world_time ? `${e.world_time} · ` : ""}
-                turn {e.turn_id ?? "—"}
-                {e.thread_id != null ? ` · thread #${e.thread_id}` : ""}
-                {e.actor_id != null ? ` · actor #${e.actor_id}` : ""}
-              </p>
-            ),
-          }))}
-        />
-      )}
       {threads.length > 0 && (
         <DossierGroup
           label={`Threads (${threads.length})`}

@@ -6,6 +6,7 @@ import {
   pickPrimaryPressure,
   rankObjectives,
   rankQuests,
+  rankThreads,
 } from '@/domain/services/dossier-ranking'
 import { formatDossierBlock } from '@/lib/world-state'
 
@@ -153,5 +154,30 @@ describe('pickPrimaryPressure + formatDossierBlock', () => {
       }),
     ]
     expect(rankQuests(quests, { clockMinutes: null }, 1)[0]?.title).toBe('Stop the massacre')
+  })
+
+  it('does not let a somatic procedure threat outrank a live mystery', () => {
+    const ranked = rankThreads(
+      [
+        thread({
+          id: 16,
+          title: 'The Clawing Arm',
+          kind: 'threat',
+          summary: 'The right arm locks into a claw; vitals spike.',
+          source_turn_id: 1240,
+        }),
+        thread({
+          id: 15,
+          title: 'What the Sessions Are For',
+          kind: 'mystery',
+          summary: 'The crossings do not stay put.',
+          stakes: 'They will not know which memories are theirs.',
+          source_turn_id: 100,
+        }),
+      ],
+      { clockMinutes: null },
+      2,
+    )
+    expect(ranked[0]?.title).toBe('What the Sessions Are For')
   })
 })

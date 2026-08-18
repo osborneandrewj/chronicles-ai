@@ -1,6 +1,6 @@
 # Director + World Event Log
 
-**Status:** in progress (slice 5)
+**Status:** in progress (slice 6)
 **Trigger:** narrator is the implicit plot brain; other agents reconstruct after the fact.
 **Related:** [`living-world-roadmap.md`](./living-world-roadmap.md) (director depth), [`story-agency-latency-improvements.md`](./story-agency-latency-improvements.md) (A1 ranker shipped), [`plot-lifecycle-continuity.md`](./plot-lifecycle-continuity.md).
 
@@ -34,8 +34,8 @@ Do not reuse `timeline_events` (player-facing milestones). Do not put an LLM dir
 2. **`world_events` + port** (shipped locally) — first writers: director, reconciler.
 3. **Director drives plan-cast** (shipped locally) — NPC agent fills assigned slots only.
 4. **Commit plot lifecycle from events** (shipped locally) — close from brief + confirmation, not Haiku hope.
-5. **Gated `DirectorDecisionPort`** (this slice) — post-stream, writes pending beat for *next* turn.
-6. **Conductor** (later) — `lastResolvedOutcome`. Not part of director.
+5. **Gated `DirectorDecisionPort`** (shipped locally) — post-stream, writes pending beat for *next* turn.
+6. **Conductor** (this slice) — `lastResolvedOutcome`. Not part of director.
 
 ## Slice 1 done means
 
@@ -56,3 +56,7 @@ When the BeatBrief asks to close and prose (or a staged close beat) confirms, su
 ## Slice 5 done means
 
 `worlds.director_state_json` exists. A gated Haiku `DirectorDecisionPort` runs post-stream (background) on stall / climax / empty dossier / cast collision, with a 3-turn cooldown. Next turn's `decideDirector` consumes the pending beat unless the player engages a different thread. No pre-stream LLM. No version bump.
+
+## Slice 6 done means
+
+A contested assertion (`I kill the king`, `I cut off his leg`) stamps `turns.metadata.conductor.resolution` and a STATE `### OUTCOME` pin **before** Grok starts. Uncontested `say` / `observe` / `think` / ordinary `do` add no LLM and no pin. Haiku runs only when rules return null. Fail-open on Haiku error is a contested attempt, never granted success. `OUTCOME_RESOLVED` lands on `world_events` (`source_agent: conductor`). No director/BeatBrief changes. No version bump.

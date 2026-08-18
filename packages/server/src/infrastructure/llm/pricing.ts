@@ -3,7 +3,7 @@ import 'server-only'
 import { HAIKU_MODEL, NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 
 // USD per million tokens. Update when provider prices change. Model IDs come
-// from the registry so a model swap is a single edit. (CLAUDE.md: pricing lives
+// from the registry so a model swap is a single edit. (AGENTS.md: pricing lives
 // in infrastructure only.) Cache-write surcharge is intentionally omitted —
 // cost here is a signal, not an invoice.
 type Rate = { input: number; cachedInput: number; output: number }

@@ -37,6 +37,8 @@ export type GeneratedCompanion = {
   goal: string
   homeRoomKey: string
   dailyLoop: Record<WorldTimeBand, CompanionDailyLoopEntry>
+  /** Sticky how-they-talk fingerprint; authored once at world-gen. */
+  speechRegister: string
 }
 
 export type GeneratedRelationship = {

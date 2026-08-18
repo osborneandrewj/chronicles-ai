@@ -22,6 +22,7 @@ import type { CharacterInput } from '@/domain/ports/character-repository'
 import type { PlaceInput } from '@/domain/ports/place-repository'
 import type { CreateBoundedWorldInput } from '@/domain/ports/world-repository'
 import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
+import { StubOpeningPlotSeeder } from '@/infrastructure/world-gen/stub-opening-plot-seeder'
 
 // Unit test for SeedBoundedWorld (starship P1). Pure orchestration exercised with
 // in-memory fake ports that record their calls — no DB, no LLM (the deterministic
@@ -62,7 +63,9 @@ type Recorder = {
   placesAdded: PlaceInput[]
   edgesAdded: PlaceConnectionInput[]
   charactersAdded: CharacterInput[]
+  speechRegisters: { characterId: number; register: string }[]
   relationshipsUpserted: RelationshipInput[]
+  threadsInserted: { title: string; kind: string }[]
 }
 
 function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps; rec: Recorder } {
@@ -71,7 +74,9 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     placesAdded: [],
     edgesAdded: [],
     charactersAdded: [],
+    speechRegisters: [],
     relationshipsUpserted: [],
+    threadsInserted: [],
   }
   let nextPlaceId = 100
   let nextCharacterId = 200
@@ -201,7 +206,9 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     },
     async applyAgentNpcFields() {},
     async setDailyLoopIfEmpty() {},
-    async setSpeechRegisterIfEmpty() {},
+    async setSpeechRegisterIfEmpty(characterId, speechRegister) {
+      rec.speechRegisters.push({ characterId, register: speechRegister })
+    },
     async setClearanceLevel() {},
   }
   const relationships: RelationshipRepository = {
@@ -222,8 +229,26 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     },
   }
 
+  const dossierWriter = {
+    async insertThread(input: { title: string; kind: string }) {
+      rec.threadsInserted.push({ title: input.title, kind: input.kind })
+      return { id: 900 + rec.threadsInserted.length }
+    },
+  }
+
   return {
-    deps: { decks, crew: new StubEnsembleGenerator(), worlds, places, placeConnections, characters, relationships, clock },
+    deps: {
+      decks,
+      crew: new StubEnsembleGenerator(),
+      worlds,
+      places,
+      placeConnections,
+      characters,
+      relationships,
+      clock,
+      dossierWriter: dossierWriter as SeedBoundedWorldDeps['dossierWriter'],
+      openingPlotSeeder: new StubOpeningPlotSeeder(),
+    },
     rec,
   }
 }
@@ -302,6 +327,11 @@ describe('seedBoundedWorld', () => {
     for (const band of Object.values(loop)) {
       expect(seededIds.has(band.place_id)).toBe(true)
     }
+
+    expect(setup.rec.speechRegisters).toHaveLength(2)
+    expect(setup.rec.speechRegisters.every((r) => r.register.length > 0)).toBe(true)
+    const registers = new Set(setup.rec.speechRegisters.map((r) => r.register))
+    expect(registers.size).toBeGreaterThan(1)
   })
 
   it('upserts the relationship graph mapping roles to character ids', async () => {
@@ -318,6 +348,18 @@ describe('seedBoundedWorld', () => {
       expect(rel.valence).toBeGreaterThanOrEqual(-1)
       expect(rel.valence).toBeLessThanOrEqual(1)
     }
+  })
+
+  it('seeds 2–3 Booker-shaped opening threads', async () => {
+    await seedBoundedWorld(
+      { templateId: 'test-connected', name: 'Aurora', premise: 'lost in the deep' },
+      setup.deps,
+    )
+    expect(setup.rec.threadsInserted.length).toBeGreaterThanOrEqual(2)
+    expect(setup.rec.threadsInserted.length).toBeLessThanOrEqual(3)
+    expect(setup.rec.threadsInserted.some((t) => /clawing arm/i.test(t.title))).toBe(false)
+    const titles = new Set(setup.rec.threadsInserted.map((t) => t.title))
+    expect(titles.size).toBe(setup.rec.threadsInserted.length)
   })
 
   it('returns the world id, all place ids, and all character ids', async () => {

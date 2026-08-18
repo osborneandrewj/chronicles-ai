@@ -1,7 +1,7 @@
 import 'server-only'
 
-import type { WorldEvent, WorldEventInput } from '@/domain/entities'
-import { isWorldEventKind } from '@/domain/entities'
+import type { WorldEvent, WorldEventInput, WorldEventKind } from '@/domain/entities'
+import { isWorldEventKind, isWorldEventSource } from '@/domain/entities'
 import type { WorldEventRepository } from '@/domain/ports/world-event-repository'
 import { WORLD_EVENT_RECENT_CAP } from '@/domain/ports/world-event-repository'
 import { db } from '@/lib/db'
@@ -48,6 +48,23 @@ const recentStmt = db.prepare<[number, number]>(
     LIMIT ?`,
 )
 
+function queryRecentByKinds(
+  worldId: number,
+  cap: number,
+  kinds: readonly WorldEventKind[],
+): WorldEventRow[] {
+  const placeholders = kinds.map(() => '?').join(', ')
+  const stmt = db.prepare(
+    `SELECT id, world_id, turn_id, world_time, kind, source_agent,
+            actor_id, thread_id, payload_json, visibility, created_at
+       FROM world_events
+      WHERE world_id = ? AND kind IN (${placeholders})
+      ORDER BY id DESC
+      LIMIT ?`,
+  )
+  return stmt.all(worldId, ...kinds, cap) as WorldEventRow[]
+}
+
 function parsePayload(raw: string): Record<string, unknown> {
   try {
     const v = JSON.parse(raw) as unknown
@@ -61,10 +78,7 @@ function parsePayload(raw: string): Record<string, unknown> {
 
 function mapRow(row: WorldEventRow): WorldEvent | null {
   if (!isWorldEventKind(row.kind)) return null
-  const source =
-    row.source_agent === 'director' || row.source_agent === 'reconciler'
-      ? row.source_agent
-      : 'director'
+  const source = isWorldEventSource(row.source_agent) ? row.source_agent : 'director'
   const visibility =
     row.visibility === 'narrator' ||
     row.visibility === 'player' ||
@@ -105,9 +119,13 @@ export class SqliteWorldEventRepository implements WorldEventRepository {
   recentForWorld(
     worldId: number,
     limit: number = WORLD_EVENT_RECENT_CAP,
+    kinds?: readonly WorldEventKind[],
   ): Promise<WorldEvent[]> {
     const cap = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : WORLD_EVENT_RECENT_CAP
-    const rows = recentStmt.all(worldId, cap) as WorldEventRow[]
+    const filtered = kinds && kinds.length > 0
+    const rows = filtered
+      ? queryRecentByKinds(worldId, cap, kinds)
+      : (recentStmt.all(worldId, cap) as WorldEventRow[])
     return Promise.resolve(rows.map(mapRow).filter((e): e is WorldEvent => e != null))
   }
 }

@@ -37,6 +37,7 @@ describe('StubMetaStoryGenerator', () => {
     expect([...thresholds].sort((x, y) => x - y)).toEqual(thresholds)
     expect(bible.bleedMotifs.length).toBeGreaterThanOrEqual(1)
     expect(bible.endgameFork.length).toBe(4)
+    expect(bible.antagonistSpeechRegister?.length).toBeGreaterThan(8)
   })
 })
 

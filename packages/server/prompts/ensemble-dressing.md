@@ -24,6 +24,7 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 - `persona` — 1–2 sentences: who they are, how they carry themselves, a defining trait or tension. The resident ensemble is genuinely friendly toward a newcomer; any darkness lives in the wider story, not in open hostility here.
 - `goal` — one concrete present want driving them right now (not a life philosophy).
 - `homeRoomKey` — the slot's anchor room key, unchanged. MUST be a real room key.
+- `speechRegister` — a compact sticky how-they-talk fingerprint (≤200 chars), authored once. Include register (clipped/florid/bureaucratic/teasing/…), a default move (deflect, counter-question, threaten, joke, silence), optional taboo, optional max clauses. Genre- and era-appropriate. Each member MUST sound different — do not give the whole crew the same polished diction. Example: `clipped · formal under stress · default: counter-question · never monologues`.
 - `dailyLoop` — a routine with EXACTLY the four bands `morning`, `midday`, `evening`, `night`. Each band is `{ activity, place }`: a one-line in-world activity and the room it happens in. Every `place` MUST be one of the given room keys (or that room's name). Keep each member mostly near their home room but let routines overlap so people co-locate in shared spaces — that overlap is what makes the place feel alive.
 
 # Relationships

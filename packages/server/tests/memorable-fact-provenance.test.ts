@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_MEMORABLE_FACT_LINES,
   appendFactWithProvenance,
+  selectPinnedMemorableFacts,
   stripFactProvenance,
 } from '@/domain/services/memorable-fact-provenance'
 
@@ -65,5 +66,26 @@ describe('appendFactWithProvenance', () => {
 describe('stripFactProvenance', () => {
   it('removes the [t:N] suffix from every line', () => {
     expect(stripFactProvenance('a [t:1]\nb [t:2]')).toBe('a\nb')
+  })
+})
+
+describe('selectPinnedMemorableFacts', () => {
+  it('keeps a settled records finding after newer tremor-spike lines', () => {
+    const block = [
+      'Pre-assignment medical records confirm tremor was documented for the last eight months.',
+      'Morning baseline examination is required in Medical before starting shift.',
+      'The tremor spiked sharply in the corridor this morning.',
+      'Baseline examination in Medical at 07:00 confirmed tremor as pre-arrival pattern; cleared for shift duty.',
+      'Tremor spiked again sharply in the corridor near the Bunk Area.',
+    ].join('\n')
+
+    const pinned = selectPinnedMemorableFacts(block, [
+      'Obtain Andrew\'s pre-assignment medical records Retrieve prior medical history',
+      'Tremor documented eight months pre-arrival Ellis confirms records',
+    ])
+
+    expect(pinned.some((f) => /medical records confirm tremor/i.test(f))).toBe(true)
+    expect(pinned.some((f) => /cleared for shift/i.test(f))).toBe(true)
+    expect(pinned[pinned.length - 1]).toMatch(/spiked again/i)
   })
 })

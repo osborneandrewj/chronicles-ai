@@ -119,16 +119,11 @@ export async function reconcileNpcIntentsForTurn({
     const { object, usage } = await generateObject({
       model: anthropic(RECONCILER_MODEL),
       schema: ReconciliationSchema,
-      messages: [
-        {
-          role: 'system',
-          content: RECONCILER_SYSTEM,
-          providerOptions: {
-            anthropic: { cacheControl: { type: 'ephemeral' } },
-          },
-        },
-        { role: 'user', content: prompt },
-      ],
+      system: RECONCILER_SYSTEM,
+      messages: [{ role: 'user', content: prompt }],
+      providerOptions: {
+        anthropic: { cacheControl: { type: 'ephemeral' } },
+      },
     })
 
     // Drop any results referencing intent IDs we didn't ask about. The

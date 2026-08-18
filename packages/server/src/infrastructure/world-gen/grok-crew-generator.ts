@@ -68,6 +68,13 @@ const CrewSchema = z.object({
         persona: z.string().min(1).max(600),
         goal: z.string().min(1).max(400),
         homeRoomKey: z.string().min(1).max(80),
+        speechRegister: z
+          .string()
+          .min(8)
+          .max(200)
+          .describe(
+            'Sticky how-they-talk fingerprint (≤200 chars): register, default move, optional taboo, max clauses. Distinct per crew member. Genre/era-appropriate.',
+          ),
         dailyLoop: z.object({
           morning: DAILY_LOOP_ENTRY,
           midday: DAILY_LOOP_ENTRY,

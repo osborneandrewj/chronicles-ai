@@ -15,7 +15,7 @@ import type {
 import type { AgentNpcFields } from '@/domain/ports/character-repository'
 import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
 import { resolveClockMinutes } from '@/domain/services/narrative-clock'
-import type { OpenOrder } from '@/domain/services/open-order'
+import { isPlayerYieldingFloor, type OpenOrder } from '@/domain/services/open-order'
 import { missingPlannedActions } from '@/domain/services/npc-promotion'
 import type { DirectorCastHint } from '@/domain/services/plan-cast'
 import {
@@ -31,6 +31,12 @@ import {
   type PrivateUtterance,
 } from '@/domain/services/private-utterance'
 import { isOocPolicyRefusal } from '@/domain/services/ooc-refusal'
+import {
+  capSpeechRegister,
+  finalizeTalkPlan,
+} from '@/domain/services/speech-staging'
+
+export { sanitizeSpeechHint } from '@/domain/services/speech-staging'
 import { HAIKU_MODEL } from '@/infrastructure/llm/model-registry'
 import { DailyLoopSchema } from '@/lib/daily-loop'
 import { tolerateNulls } from '@/lib/llm-schema'
@@ -186,8 +192,9 @@ const PlannedActionSchema = z.object({
   planned_action: z
     .string()
     .describe(
-      'One short present-tense sentence describing the concrete action the NPC takes this turn ' +
-        '(e.g. "picks up the phone, dials Jordana", "stays at his monitor, headphones on, doesn\'t look up"). ' +
+      'One short present-tense sentence describing the concrete physical or social move this turn ' +
+        '(e.g. "picks up the phone, dials Jordana", "turns the chair to face Andrew"). ' +
+        'NEVER write quoted dialogue or the words they will say — narrator owns prose. ' +
         'The narrator stages this as the actual scene.',
     ),
   intent_type: z
@@ -222,8 +229,10 @@ const PlannedActionSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Optional staging edge for talk-shaped plans only — how they deliver, not the full line. ' +
-        'E.g. "cuts him off; one hard question; no softener; two clauses max". ' +
+      'REQUIRED on talk-shaped plans (confront, warn, recruit, question, withhold, inform, ' +
+        'or any planned_action that implies speech). Staging edge only — how they deliver, not the line. ' +
+        'E.g. "answers him, then turns to Lee; two or three clauses; not a one-liner". ' +
+        'Honor this NPC\'s speech_register (default move / taboo / max clauses). ' +
         'Never write the full dialogue the character will say (narrator owns prose). ' +
         'Ephemeral for this turn: not durable ledger state. Cap ~160 chars.',
     ),
@@ -271,26 +280,42 @@ const PlannedActionsOnlySchema = z.object({
 // Haiku occasionally serializes the whole patch wrong: instead of two arrays it
 // returns the object body crammed into a single stringified `npc_updates`
 // field (e.g. `{"npc_updates":"[…],\n\"planned_actions\": […]\n"}`), or returns
-// an array field as a JSON string. The content is intact — only the shape is
-// broken — so we rebuild the valid object before Zod sees it. Wired as
-// generateObject's experimental_repairText; returns null when it can't help (so
-// the SDK throws and the route's graceful skip kicks in). Pure + unit-tested.
-export function repairNpcAgentText(text: string): string | null {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return null
+// an array field as a JSON string, or swaps `:` for `>` / `=` between a field
+// name and `[`. The content is intact — only the shape is broken — so we
+// rebuild the valid object before Zod sees it. Wired as generateObject's
+// experimental_repairText; returns null when it can't help (so the SDK throws
+// and the route's graceful skip kicks in). Pure + unit-tested.
+const BROKEN_ARRAY_SEP = /"(npc_updates|planned_actions)"\s*(?:>|=>|=)\s*/g
+
+function normalizeBrokenFieldSeparators(s: string): string {
+  return s.replace(BROKEN_ARRAY_SEP, '"$1":')
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  for (const candidate of [text, normalizeBrokenFieldSeparators(text)]) {
+    try {
+      const parsed: unknown = JSON.parse(candidate)
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // try the next candidate
+    }
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-  const obj = parsed as Record<string, unknown>
+  return null
+}
+
+export function repairNpcAgentText(text: string): string | null {
+  const obj = parseJsonObject(text)
+  if (!obj) return null
 
   // Shape 1: the model opened a string after `"npc_updates":` and dumped the
   // rest of the body into it, so `planned_actions` never made it to the top
   // level. Re-wrap the stringified body with its key and re-parse.
   if (typeof obj.npc_updates === 'string' && !('planned_actions' in obj)) {
+    const inner = normalizeBrokenFieldSeparators(obj.npc_updates)
     try {
-      return JSON.stringify(JSON.parse(`{"npc_updates":${obj.npc_updates}}`))
+      return JSON.stringify(JSON.parse(`{"npc_updates":${inner}}`))
     } catch {
       // fall through to per-field repair
     }
@@ -301,7 +326,7 @@ export function repairNpcAgentText(text: string): string | null {
   for (const key of ['npc_updates', 'planned_actions'] as const) {
     if (typeof obj[key] === 'string') {
       try {
-        obj[key] = JSON.parse(obj[key] as string)
+        obj[key] = JSON.parse(normalizeBrokenFieldSeparators(obj[key] as string))
         changed = true
       } catch {
         return null
@@ -353,6 +378,7 @@ export function buildNpcAgentUserContent(parts: {
   playerAboutLine: string
   storyContext: ReturnType<typeof buildNpcStoryContext> | null
   planningOnlyNames?: string[]
+  yieldFloorLine?: string | null
 }): string {
   const storyBlock =
     parts.storyContext &&
@@ -384,12 +410,13 @@ export function buildNpcAgentUserContent(parts: {
         : 'PRIOR NARRATION: (none — this is the first turn)',
       '',
       parts.playerAboutLine,
+      parts.yieldFloorLine,
       '',
       `These PRESENT agent NPCs have NO plan yet and EACH must get one concrete present-tense ` +
         `move this turn: ${parts.planningOnlyNames.join(', ')}. At least one should target the protagonist ` +
         `directly. Return ONLY planned_actions — no npc_updates.`,
     ]
-      .filter((line) => line !== null)
+      .filter((line) => line != null)
       .join('\n')
   }
 
@@ -412,10 +439,11 @@ export function buildNpcAgentUserContent(parts: {
       : 'PRIOR NARRATION: (none — this is the first turn)',
     '',
     parts.playerAboutLine,
+    parts.yieldFloorLine,
     '',
     'Return state updates for what just happened AND planned actions for present agent NPCs this turn.',
   ]
-    .filter((line) => line !== null)
+    .filter((line) => line != null)
     .join('\n')
 }
 
@@ -654,6 +682,10 @@ export async function runNpcAgentTick(
       ].join('\n')
     : `PLAYER IS ABOUT TO (this turn): ${playerInput}`
 
+  const yieldFloorLine = isPlayerYieldingFloor(playerInput)
+    ? 'PLAYER YIELDED THE FLOOR this turn (continue / wait / until-done / time jump). Plan the rest of the current activity as one move — complete remaining checks, deliver the finding, finish the exchange. planned_action may be a short two-or-three-clause sequence. Do not plan a single next micro-step that will need another continue.'
+    : null
+
   let storyDossier: StoryDossier = {
     threads: [],
     clues: [],
@@ -684,8 +716,10 @@ export async function runNpcAgentTick(
     priorNarration,
     playerAboutLine,
     storyContext,
+    yieldFloorLine,
   })
 
+  const npcAgentSystem = `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`
   const { object, usage } = await generateObject({
     model: anthropic(NPC_AGENT_MODEL),
     schema: NpcAgentPatchSchema,
@@ -694,19 +728,11 @@ export async function runNpcAgentTick(
     // repair below recovers Haiku's common mis-serialization before that.
     maxRetries: 1,
     experimental_repairText: async ({ text }) => repairNpcAgentText(text),
-    messages: [
-      {
-        role: 'system',
-        content: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
-        providerOptions: {
-          anthropic: { cacheControl: { type: 'ephemeral' } },
-        },
-      },
-      {
-        role: 'user',
-        content: userContent,
-      },
-    ],
+    system: npcAgentSystem,
+    messages: [{ role: 'user', content: userContent }],
+    providerOptions: {
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    },
   })
 
   // Focused planning retry — guarantee a plan for every PRESENT agent NPC. Haiku
@@ -744,12 +770,8 @@ export async function runNpcAgentTick(
         schema: PlannedActionsOnlySchema,
         maxRetries: 1,
         experimental_repairText: async ({ text }) => repairNpcAgentText(text),
+        system: npcAgentSystem,
         messages: [
-          {
-            role: 'system',
-            content: `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`,
-            providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } },
-          },
           {
             role: 'user',
             content: buildNpcAgentUserContent({
@@ -764,9 +786,13 @@ export async function runNpcAgentTick(
               playerAboutLine,
               storyContext,
               planningOnlyNames: missing,
+              yieldFloorLine,
             }),
           },
         ],
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral' } },
+        },
       })
       mergedUsage = {
         inputTokens: (usage.inputTokens ?? 0) + (retryUsage.inputTokens ?? 0),
@@ -813,25 +839,26 @@ export async function runNpcAgentTick(
     const targetPlaceId = plan.target_place_name
       ? placesByLower.get(plan.target_place_name.toLowerCase()) ?? null
       : null
+    // Plans are decisions. Strip leaked lines; fill speech_hint on talk plans.
+    // speech_hint stays off npc_intents (ephemeral; no second migration).
+    const staged = finalizeTalkPlan(plan, agent.speech_register)
     const intentId = await npcIntents.insert({
       worldId,
       characterId: agent.id,
       playerTurnId: tickTurnId,
       agencyLevel: agent.agency_level,
       intentText: plan.intent,
-      plannedAction: plan.planned_action,
+      plannedAction: staged.planned_action,
       intentType: plan.intent_type ?? null,
       targetCharacterId,
       targetPlaceId,
       privateRationale: plan.private_rationale ?? null,
       expectedVisibility: 'narrator' satisfies IntentVisibility,
     })
-    // speech_hint stays on the in-memory plan for STATE render only — not
-    // written to npc_intents (ephemeral; no second migration).
-    const speech_hint = sanitizeSpeechHint(plan.speech_hint) ?? undefined
     plansOut.push({
       ...plan,
-      speech_hint,
+      planned_action: staged.planned_action,
+      speech_hint: staged.speech_hint ?? undefined,
       intent_id: intentId,
       character_id: agent.id,
     })
@@ -1022,29 +1049,6 @@ export async function applyNpcAgentPatch(
       }
     }
   })
-}
-
-/** Sticky register: trim + hard cap (author-once storage). */
-function capSpeechRegister(raw: string): string | null {
-  const trimmed = raw.replace(/\s+/g, ' ').trim()
-  if (!trimmed) return null
-  return trimmed.length > 200 ? trimmed.slice(0, 200) : trimmed
-}
-
-/**
- * Ephemeral speech_hint for STATE only — never written to npc_intents.
- * Strip accidental quoted monologues and hard-cap length.
- */
-export function sanitizeSpeechHint(raw: string | undefined | null): string | null {
-  if (raw == null) return null
-  let t = raw.replace(/\s+/g, ' ').trim()
-  if (!t) return null
-  // Drop long quoted dialogue dumps; keep staging edges only.
-  if (/["“][^"”]{40,}["”]/.test(t)) {
-    t = t.replace(/["“][^"”]{40,}["”]/g, '').replace(/\s+/g, ' ').trim()
-  }
-  if (!t) return null
-  return t.length > 160 ? t.slice(0, 160) : t
 }
 
 function formatKnownPlaceLine(p: {

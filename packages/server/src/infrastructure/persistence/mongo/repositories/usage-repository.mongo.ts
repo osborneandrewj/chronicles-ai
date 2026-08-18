@@ -8,7 +8,7 @@ import type { MongoContext } from '../mongo-context'
 // Mongo UsageRepository (spec §4.2, §5.1-P1). `metadata` is native BSON, so the
 // SQLite `json_extract` SUMs become an in-JS reduction over the agent usage
 // blocks. The key set mirrors the SQLite repos exactly (narrator + archivist +
-// the legacy extractor key + classifier + npc_agent), so cost totals stay
+// the legacy extractor key + classifier + npc_agent + conductor), so cost totals stay
 // continuous across the v0.5 cutover and the daily cap never undercounts.
 
 type AgentUsage = { usage?: { inputTokens?: number; outputTokens?: number } }
@@ -68,7 +68,14 @@ export class MongoUsageRepository implements UsageRepository {
     for (const d of docs) {
       const meta = (d.metadata ?? {}) as Record<string, unknown>
       if (Object.keys(meta).length === 0) continue
-      for (const key of ['narrator', 'archivist', 'extractor', 'classifier', 'npc_agent']) {
+      for (const key of [
+        'narrator',
+        'archivist',
+        'extractor',
+        'classifier',
+        'npc_agent',
+        'conductor',
+      ]) {
         total += agentIn(meta, key) + agentOut(meta, key)
       }
     }

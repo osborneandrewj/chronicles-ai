@@ -19,8 +19,22 @@ export type DirectorState = {
   pending: PendingDirectorBeat | null
   lastBrainTurnId: number | null
   lastBrainReason: DirectorBrainReason | null
+  /** Last consumed BeatBrief kind — used to detect stall streaks and in-scene play. */
+  lastBeatKind: DirectorBeatKind | null
+  lastForegroundThreadId: number | null
+  stallStreak: number
+  /** Protagonist cannot act (unconscious, restrained, etc.) until restore. */
+  agencyLocked: boolean
 }
 
 export function emptyDirectorState(): DirectorState {
-  return { pending: null, lastBrainTurnId: null, lastBrainReason: null }
+  return {
+    pending: null,
+    lastBrainTurnId: null,
+    lastBrainReason: null,
+    lastBeatKind: null,
+    lastForegroundThreadId: null,
+    stallStreak: 0,
+    agencyLocked: false,
+  }
 }

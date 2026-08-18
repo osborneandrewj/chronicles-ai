@@ -13,7 +13,7 @@
 //   DATABASE_URL='mongodb://localhost:27017/chronicles?replicaSet=rs0' \
 //   npx tsx --conditions=react-server packages/server/scripts/seed-sequence-vigil-thread.ts
 //
-// Back up first (CLAUDE.md data-repair rule). Idempotent: re-running detects the
+// Back up first (AGENTS.md data-repair rule). Idempotent: re-running detects the
 // existing thread by title and skips.
 
 import { initContainer } from '@/composition/container'

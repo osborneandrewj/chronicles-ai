@@ -114,4 +114,14 @@ describe('StubEnsembleGenerator', () => {
     const b = await stub.generate({ template: template!, premise: 'Run A.' })
     expect(a.crew.map((c) => c.name)).toEqual(b.crew.map((c) => c.name))
   })
+
+  it('authors a distinct speechRegister for each crew member', async () => {
+    const template = await provider.getTemplate('scout-vessel')
+    const result = await stub.generate({ template: template!, premise: 'A deep-space scouting run.' })
+    for (const member of result.crew) {
+      expect(member.speechRegister.length).toBeGreaterThan(8)
+    }
+    const unique = new Set(result.crew.map((c) => c.speechRegister))
+    expect(unique.size).toBeGreaterThan(1)
+  })
 })

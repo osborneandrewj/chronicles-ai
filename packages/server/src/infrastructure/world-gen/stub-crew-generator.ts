@@ -8,6 +8,7 @@ import type {
   GeneratedRelationship,
 } from '@/domain/ports/ensemble-generator'
 import { sample } from '@/domain/services/name-pool'
+import { stubSpeechRegisterForRole } from '@/domain/services/speech-staging'
 import type { WorldTimeBand } from '@/domain/services/world-clock'
 
 // StubEnsembleGenerator (starship P1) — a deterministic, LLM-free EnsembleGenerator for
@@ -77,6 +78,7 @@ export class StubEnsembleGenerator implements EnsembleGenerator {
         goal: `Carry out ${slot.role} duties through the voyage.`,
         homeRoomKey,
         dailyLoop,
+        speechRegister: stubSpeechRegisterForRole(slot.role),
       }
     })
 

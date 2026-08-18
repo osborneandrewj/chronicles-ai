@@ -32,6 +32,13 @@ const BibleSchema = z.object({
   institution: z.string(),
   hiddenTruth: z.string(),
   antagonist: z.string(),
+  antagonistSpeechRegister: z
+    .string()
+    .max(200)
+    .optional()
+    .describe(
+      'Sticky how-the-antagonist-talks fingerprint (≤200 chars): register, default move, taboo. Distinct from the friendly crew.',
+    ),
   allies: z.string(),
   acts: z.array(ActSchema).min(3),
   bleedMotifs: z.array(z.string()).min(1),

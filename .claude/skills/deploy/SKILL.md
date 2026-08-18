@@ -1,45 +1,34 @@
 ---
 name: deploy
-description: Deploy the application to a target environment. Runs pre-flight checks, builds, and deploys.
+description: Release and deploy Chronicles AI. Follow docs/RELEASING.md. Use only when the user asks to bump a version, promote to production, or deploy.
 disable-model-invocation: true
-arguments: [environment]
 ---
 
-Deploy to **$ARGUMENTS** environment.
+# Deploy
 
-## Current State
-!`git status --short`
+Authoritative playbook: `docs/RELEASING.md`. There is no `npm run deploy`, no `staging` branch, and no health-check script. Do not invent them.
 
-## Pre-flight Checks
+`main` is integration and is **not** auto-deployed. Railway deploys on push to `production`.
 
-1. Verify working tree is clean — no uncommitted changes
-2. Run linting: `npm run lint`
-3. Run type checking: `npm run type-check`
-4. Run test suite: `npm test`
-5. Verify on correct branch:
-   - `staging` — any branch
-   - `production` — `main` branch only
+## Confirm first
 
-## Build
+Still confirm before `git push`, `railway redeploy` / `down` / `delete`, or anything that posts to GitHub. Do not bump a version or open a PR unless this invocation asked for it.
 
-1. Run `npm run build`
-2. Verify build output exists and has no errors
+## Version bump (on the feature branch, before merge)
 
-## Deploy
+- Feature → MINOR (plain integer; `0.9.0` → `0.10.0`, never auto-roll to `1.0.0`). Fix → PATCH. `v1.0.0` is Andrew's explicit call only.
+- Bump root + `@chronicles/server` + `@chronicles/contracts` + `package-lock.json` (top-level `"version"` and `"packages": { "": … }`) in one commit.
+- Prepend a player-facing entry to `packages/server/src/components/release-notes/data.ts`.
+- Restart `npm run dev` and confirm the header on `/` matches `packages/server/package.json`. Next does not HMR `package.json` imports.
 
-1. Run `npm run deploy:$ARGUMENTS`
-2. Monitor deployment output for errors
-3. Run smoke tests if available: `npm run test:smoke -- --env=$ARGUMENTS`
+Do not write a version number into `AGENTS.md`.
 
-## Post-Deploy Verification
+## Promote to production
 
-1. Confirm health check endpoint returns 200
-2. Verify key functionality is operational
-3. Report deployment status
+1. Working tree clean; `npm test` and `npm run type-check` green on the commit you are promoting.
+2. Merge or fast-forward `main` → `production`, then push `production`. That is the deploy.
+3. Confirm the prod header shows the new version.
 
-## Rollback
+Hotfix: branch from `production`, bump PATCH, merge to **both** `main` and `production`.
 
-If deployment fails:
-1. Run `npm run deploy:rollback -- --env=$ARGUMENTS`
-2. Verify rollback succeeded
-3. Report failure details for debugging
+Andrew repoints Railway's watched branch himself. Do not run railway commands for that.

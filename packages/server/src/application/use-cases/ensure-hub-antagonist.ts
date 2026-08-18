@@ -1,6 +1,7 @@
 import type { MetaStoryBible } from '@/domain/entities'
 import type { CharacterRepository, PlaceRepository, WorldRepository } from '@/domain/ports'
 import { linkAntagonistCharacter } from '@/domain/services/link-antagonist'
+import { antagonistSpeechRegister } from '@/domain/services/speech-staging'
 
 // Ensure hub antagonist is linked after hub seed / meta-story write.
 // Idempotent; safe to call on every hub create.
@@ -37,11 +38,19 @@ export async function ensureHubAntagonist(
 
   if (decision.action === 'already_linked') {
     await deps.characters.setClearanceLevel(decision.characterId, 'antagonist')
+    await deps.characters.setSpeechRegisterIfEmpty(
+      decision.characterId,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
     return decision.characterId
   }
   if (decision.action === 'match_existing') {
     await deps.characters.setClearanceLevel(decision.characterId, 'antagonist')
     await deps.worlds.setAntagonistCharacterId(hubWorldId, decision.characterId)
+    await deps.characters.setSpeechRegisterIfEmpty(
+      decision.characterId,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
     return decision.characterId
   }
   if (decision.action === 'create') {
@@ -59,6 +68,10 @@ export async function ensureHubAntagonist(
     })
     await deps.characters.setClearanceLevel(id, 'antagonist')
     await deps.worlds.setAntagonistCharacterId(hubWorldId, id)
+    await deps.characters.setSpeechRegisterIfEmpty(
+      id,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
     return id
   }
   return null
