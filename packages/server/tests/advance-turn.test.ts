@@ -24,6 +24,7 @@ import type { BackgroundTasks, TurnRepository, WorldRepository } from '@/domain/
 
 class FakeTurnRepository {
   readonly turns: Turn[] = []
+  latestUserTurnIdCalls = 0
   private nextId = 1
 
   async insert(
@@ -62,6 +63,7 @@ class FakeTurnRepository {
   }
 
   async latestUserTurnId(worldId: number): Promise<number | null> {
+    this.latestUserTurnIdCalls += 1
     const last = [...this.turns].reverse().find((t) => t.world_id === worldId && t.role === 'user')
     return last?.id ?? null
   }
@@ -225,6 +227,25 @@ describe('AdvanceTurn — fail-open post-stream', () => {
     // Both turns persisted despite the archivist failure (fail-open).
     expect(turns.userTurns(1).map((t) => t.content)).toEqual(['I open the door.'])
     expect(turns.assistantTurns(1).map((t) => t.content)).toEqual(['The door creaks open.'])
+  })
+
+  it('uses the insert return id and does not re-query latestUserTurnId', async () => {
+    const turns = new FakeTurnRepository()
+    const bg = new FakeBackgroundTasks()
+    let seenPlayerTurnId: number | undefined
+    const result = await advanceTurn(
+      baseInput,
+      buildDeps(turns, bg, {
+        buildNarration: async (ctx) => {
+          seenPlayerTurnId = ctx.playerTurnId
+          expect(ctx.world.id).toBe(1)
+          return emptyNarration()
+        },
+      }),
+    )
+    expect(result.kind).toBe('stream')
+    expect(seenPlayerTurnId).toBe(1)
+    expect(turns.latestUserTurnIdCalls).toBe(0)
   })
 })
 

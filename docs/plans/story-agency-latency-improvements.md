@@ -1,6 +1,6 @@
 # Story Arcs, NPC Agency, Spatial Presence & Turn Latency — Improvement Plan
 
-**Status:** implemented (core tracks O/A/M/B3/C1–C4, 2026-08-12) — remaining polish: C5–C6 planning-only/speculative agent, B2 subworld relationship seed, A7 director_state schema, prod Threshold antagonist backfill  
+**Status:** implemented (core tracks O/A/M/B3/C1–C4, 2026-08-12). C5–C6 landed on `feat/turn-latency-ttft`. Remaining polish: B2 subworld relationship seed, prod Threshold antagonist backfill  
 **Branch (recommended):** `feat/director-and-closure` · `feat/travel-with-time` · then `feat/agency-depth` · `feat/turn-latency-a6`  
 **Shipped as:** v0.11.0 (MINOR — Director + structured travel + closure + latency instrumentation)  
 
@@ -511,11 +511,11 @@ Replay-context turn read; insert return id; occupancy skip; Mongo `createdAt` in
 
 B3 cast cap; batch intent outcomes; parallelize agent reads; Director + M OFF-SCENE already bound pressure.
 
-## C5 — Planning-only NPC hot path
+## C5 — Planning-only NPC hot path — **done**
 
 Pre-stream write-free `planNpcActions`; post-stream durable NPC updates. Prerequisite for safe speculation.
 
-## C6 — Speculative planNpc // classify
+## C6 — Speculative planNpc // classify — **done**
 
 Only after C5. Discard on meta/think/OOC; record usage.
 

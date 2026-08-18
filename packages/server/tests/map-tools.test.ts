@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { lookupMapRoute } from '@/lib/map-tools'
+import { lookupMapRoute, shouldAttachNarratorMapTools } from '@/lib/map-tools'
 
 const originalProvider = process.env.MAP_ROUTE_PROVIDER
 
@@ -91,5 +91,17 @@ describe('lookupMapRoute', () => {
 
     expect(result.status).toBe('not_found')
     expect(result.summary).toContain('Avoid exact street names')
+  })
+})
+
+describe('shouldAttachNarratorMapTools', () => {
+  it('omits tools on bounded interiors', () => {
+    expect(shouldAttachNarratorMapTools('bounded')).toBe(false)
+  })
+
+  it('attaches tools on open/geo worlds', () => {
+    expect(shouldAttachNarratorMapTools('open')).toBe(true)
+    expect(shouldAttachNarratorMapTools(null)).toBe(true)
+    expect(shouldAttachNarratorMapTools(undefined)).toBe(true)
   })
 })

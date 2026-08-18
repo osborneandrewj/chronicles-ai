@@ -83,7 +83,10 @@ import {
   minutesToWorldTime,
   resolveClockMinutes,
 } from '@/domain/services/narrative-clock'
-import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
+import {
+  shouldSpeculateNpcAgent,
+  shouldTickNpcAgent,
+} from '@/domain/services/npc-agent-gating'
 import {
   deriveActiveOpenOrder,
   formatOpenOrderStatusLine,
@@ -116,9 +119,16 @@ import {
 } from '@/lib/archivist'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
-import { narratorMapTools } from '@/lib/map-tools'
+import { narratorMapTools, shouldAttachNarratorMapTools } from '@/lib/map-tools'
 import { formatNarratorTurnGuidance } from '@/lib/narrator-guidance'
-import { NPC_AGENT_MODEL, runNpcAgentTick } from '@/lib/npc-agent'
+import {
+  applyNpcUpdatesToCharacters,
+  NPC_AGENT_MODEL,
+  persistNpcAgentDraft,
+  planNpcActions,
+  plansFromDraft,
+  type NpcAgentDraft,
+} from '@/lib/npc-agent'
 import { buildPlaceOccupancySnapshot, type PlaceOccupancy } from '@/lib/place-population'
 import { resolveUnresolvedPlaces } from '@/lib/place-resolver'
 import { formatPremiseBlock, NARRATOR_BASE } from '@/lib/prompt'
@@ -163,7 +173,7 @@ const SIM_ARC_WINDOW = 14
 const ARCHIVIST_LAG_LOOKBACK_ROLE_ROWS = 20
 
 export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream> {
-  const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks } = ctx
+  const { worldId, playerText, activeSceneId, playerTurnId, backgroundTasks, world } = ctx
   const prestreamStartedAt = Date.now()
   const timingSpans: Record<string, number> = {}
   const mark = (name: string, started: number): void => {
@@ -203,13 +213,6 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     worlds,
   } = getContainer()
   const stateDeps = { characters, dossiers, occupancy, places, scenes, worlds }
-
-  const world = await worlds.getWorld(worldId)
-  // AdvanceTurn already gated world existence; this is a defensive re-read for
-  // `premise`. If it somehow vanished, surface an empty stream.
-  if (!world) {
-    return { chunks: emptyStream(), completion: Promise.resolve(undefined) }
-  }
 
   // State is read before the classifier so it can see who's present and where.
   // Single assembly (Track A2): later writes merge into this snapshot in memory.
@@ -379,11 +382,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     },
   )
   if (activeOpenOrder && activeOpenOrder.status !== 'expired') {
-    try {
-      await turns.mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder))
-    } catch (err) {
-      console.error('[open-order metadata]', err)
-    }
+    backgroundTasks.register(
+      turns.mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder)).catch(
+        (err) => {
+          console.error('[open-order metadata]', err)
+        },
+      ),
+    )
   }
 
   // Private-channel audience: detect + durable stamp before agent / STATE / archivist.
@@ -393,47 +398,31 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     playerTurnId,
   )
   if (activePrivateUtterance) {
-    try {
-      await turns.mergeMetadata(
-        playerTurnId,
-        'private_utterance',
-        privateUtteranceToMetadata(activePrivateUtterance),
-      )
-    } catch (err) {
-      console.error('[private-utterance metadata]', err)
-    }
+    backgroundTasks.register(
+      turns
+        .mergeMetadata(
+          playerTurnId,
+          'private_utterance',
+          privateUtteranceToMetadata(activePrivateUtterance),
+        )
+        .catch((err) => {
+          console.error('[private-utterance metadata]', err)
+        }),
+    )
   }
 
-  // Await classifier (started after first state read) before NPC gate.
-  const classification = await classificationPromise
-  const { stance, input_mode } = classification
-  const conductorStarted = Date.now()
-  const conductorPromise = settleConductorResolution(conductor, {
-    playerText,
-    stance,
-    inputMode: input_mode,
-    sceneDigest: formatSceneDigestForClassifier(priorState),
-  })
-  const shouldRunNpcAgent = shouldTickNpcAgent({
-    stance,
-    inputMode: input_mode,
-    presentCharacters: postPromotionState.presentCharacters,
-  })
   // Open-order targets force an agent tick even when no present agents (S2).
   const forceAgentForOpenOrder =
     activeOpenOrder?.status === 'pending' && activeOpenOrder.targetCharacterId != null
   const npcAgentDeps = { characters, dossiers, npcIntents, places, reveries, unitOfWork, worlds }
   const era = eraFromGenreTags(parseGenreTags(world.genre_tags))
-
-  // C3: skip occupancy builder when the in-memory snapshot already has a valid
-  // same-scene occupancy payload (avoids redundant scene/place/latest reads).
   const occupancyReuse =
     postPromotionState.occupancy != null &&
     postPromotionState.currentScene != null &&
     postPromotionState.currentPlace != null
 
   // Director before the NPC agent so CAST slots drive plan-cast (slice 3).
-  // Arrivals + present cast are already known; occupancy is not required.
+  // Pure; persist is best-effort and does not need to finish before Grok.
   const enRouteNames = postPromotionState.knownCharacters
     .filter((c) => c.in_transit_to_place_id != null)
     .map((c) => c.name)
@@ -477,62 +466,102 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     agencyLocked:
       agencyLock.collapsingThisTurn || (agencyLock.locked && agencyLock.stayUnder),
   }
-  try {
-    await worlds.setDirectorState(worldId, serializeDirectorState(directorState))
-  } catch (err) {
-    console.error('[director-state consume]', err)
-  }
+  backgroundTasks.register(
+    worlds.setDirectorState(worldId, serializeDirectorState(directorState)).catch((err) => {
+      console.error('[director-state consume]', err)
+    }),
+  )
 
+  const speculateAgent = shouldSpeculateNpcAgent({
+    presentCharacters: postPromotionState.presentCharacters,
+    pendingOpenOrder: forceAgentForOpenOrder,
+  })
+  const npcAgentPreload = {
+    knownPlaces: postPromotionState.knownPlaces,
+    knownCharacters: postPromotionState.knownCharacters,
+    dossier: postPromotionState.dossier,
+    worldTime: postPromotionState.worldTime,
+    settingRegion: world.setting_region,
+  }
+  const occupancyPromise = occupancyReuse
+    ? Promise.resolve(postPromotionState.occupancy)
+    : buildPlaceOccupancySnapshot(
+        { dossiers, occupancy, places, scenes, worlds },
+        worldId,
+        playerTurnId,
+        era,
+      ).catch((err) => {
+        console.error('[place-population]', err)
+        return null
+      })
   const agentOccStarted = Date.now()
+  const planPromise = speculateAgent
+    ? planNpcActions(
+        npcAgentDeps,
+        worldId,
+        playerTurnId,
+        world.premise,
+        playerText,
+        recentForAgents,
+        activeOpenOrder?.status === 'pending' ? activeOpenOrder : null,
+        activePrivateUtterance,
+        directorDecision.cast,
+        npcAgentPreload,
+      ).catch((err) => {
+        console.error('[npc agent failed pre-narrator]', err)
+        return { error: String(err) } as const
+      })
+    : Promise.resolve(null)
+
+  // Await classifier (started after first state read) before conductor + persist gate.
+  const classification = await classificationPromise
+  const { stance, input_mode } = classification
+  const conductorStarted = Date.now()
+  const conductorPromise = settleConductorResolution(conductor, {
+    playerText,
+    stance,
+    inputMode: input_mode,
+    sceneDigest: formatSceneDigestForClassifier(priorState),
+  })
+  const shouldRunNpcAgent = shouldTickNpcAgent({
+    stance,
+    inputMode: input_mode,
+    presentCharacters: postPromotionState.presentCharacters,
+  })
+  const keepNpcAgent = shouldRunNpcAgent || forceAgentForOpenOrder
+
   const [npcAgentSettled, occupancySettled, conductorSettled] = await Promise.all([
-    shouldRunNpcAgent || forceAgentForOpenOrder
-      ? runNpcAgentTick(
-          npcAgentDeps,
-          worldId,
-          playerTurnId,
-          world.premise,
-          playerText,
-          recentForAgents,
-          activeOpenOrder?.status === 'pending' ? activeOpenOrder : null,
-          activePrivateUtterance,
-          directorDecision.cast,
-        ).catch((err) => {
-          console.error('[npc agent failed pre-narrator]', err)
-          return { error: String(err) } as const
-        })
-      : Promise.resolve(null),
-    occupancyReuse
-      ? Promise.resolve(postPromotionState.occupancy)
-      : buildPlaceOccupancySnapshot(
-          { dossiers, occupancy, places, scenes, worlds },
-          worldId,
-          playerTurnId,
-          era,
-        ).catch((err) => {
-          console.error('[place-population]', err)
-          return null
-        }),
+    planPromise,
+    occupancyPromise,
     conductorPromise,
   ])
   mark('agent_occupancy_ms', agentOccStarted)
   mark('conductor_ms', conductorStarted)
 
-  const npcAgentResult = npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
-  const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
-  const plans = npcAgentResult?.plans ?? []
+  const npcAgentError =
+    npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
+  let npcAgentDraft: NpcAgentDraft | null =
+    keepNpcAgent && npcAgentSettled && 'patch' in npcAgentSettled ? npcAgentSettled : null
+  const discardedAgentUsage =
+    !keepNpcAgent && npcAgentSettled && 'usage' in npcAgentSettled
+      ? npcAgentSettled.usage
+      : null
+  let plans = npcAgentDraft ? plansFromDraft(npcAgentDraft) : []
   const turnOccupancy: PlaceOccupancy | null = occupancySettled
   const resolvedOutcome = conductorSettled.resolution
   if (isBindingOutcome(resolvedOutcome)) {
-    try {
-      await turns.mergeMetadata(playerTurnId, 'conductor', {
-        model: conductorSettled.model,
-        method: conductorSettled.method,
-        resolution: outcomeToMetadata(resolvedOutcome),
-        usage: conductorSettled.usage,
-      })
-    } catch (err) {
-      console.error('[conductor metadata]', err)
-    }
+    backgroundTasks.register(
+      turns
+        .mergeMetadata(playerTurnId, 'conductor', {
+          model: conductorSettled.model,
+          method: conductorSettled.method,
+          resolution: outcomeToMetadata(resolvedOutcome),
+          usage: conductorSettled.usage,
+        })
+        .catch((err) => {
+          console.error('[conductor metadata]', err)
+        }),
+    )
     const outcomeEvent = outcomeResolvedEvent({
       worldId,
       turnId: playerTurnId,
@@ -540,18 +569,42 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       resolution: resolvedOutcome,
     })
     if (outcomeEvent) {
-      try {
-        await worldEvents.append(outcomeEvent)
-      } catch (err) {
-        console.error('[conductor world-event]', err)
-      }
+      backgroundTasks.register(
+        worldEvents.append(outcomeEvent).catch((err) => {
+          console.error('[conductor world-event]', err)
+        }),
+      )
     }
   }
 
-  // Merge occupancy into the in-memory snapshot (no third state assembly).
+  // Merge occupancy + in-memory NPC patch so STATE this turn matches the draft
+  // before persistNpcAgentDraft runs post-stream.
+  const placeIdByLower = new Map(
+    postPromotionState.knownPlaces.map((p) => [p.name.toLowerCase(), p.id]),
+  )
+  const knownAfterPatch = npcAgentDraft
+    ? applyNpcUpdatesToCharacters(
+        postPromotionState.knownCharacters,
+        placeIdByLower,
+        npcAgentDraft.patch.npc_updates ?? [],
+      )
+    : postPromotionState.knownCharacters
+  const playerAfter = knownAfterPatch.filter((c) => c.is_player === 1)
+  const placeIdAfter =
+    playerAfter[0]?.current_place_id ?? postPromotionState.currentPlace?.id ?? null
+  const presentAfter = placeIdAfter
+    ? knownAfterPatch.filter(
+        (c) =>
+          c.is_player === 0 &&
+          c.current_place_id === placeIdAfter &&
+          c.in_transit_to_place_id == null,
+      )
+    : []
   const narratorState = {
     ...postPromotionState,
     occupancy: turnOccupancy ?? postPromotionState.occupancy,
+    knownCharacters: knownAfterPatch,
+    presentCharacters: [...playerAfter, ...presentAfter],
   }
   const recentNarratorProse = recentForAgents
     .filter((t) => t.role === 'assistant')
@@ -578,10 +631,12 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     presentCharacterIds: presentNpcIds,
     currentTurnId: playerTurnId,
   })
-  try {
-    await reveries.stampFlared(flaringReverieIds, playerTurnId)
-  } catch (err) {
-    console.error('[reverie-flare]', err)
+  if (flaringReverieIds.length > 0) {
+    backgroundTasks.register(
+      reveries.stampFlared(flaringReverieIds, playerTurnId).catch((err) => {
+        console.error('[reverie-flare]', err)
+      }),
+    )
   }
 
   // Pre-stream open-order STATUS (S2): system fact before streamText. Re-read
@@ -594,18 +649,9 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   } | null = null
   if (activeOpenOrder && activeOpenOrder.status === 'pending') {
     const placeNameById = new Map(narratorState.knownPlaces.map((p) => [p.id, p.name]))
-    let target = narratorState.knownCharacters.find(
+    const target = narratorState.knownCharacters.find(
       (c) => c.id === activeOpenOrder!.targetCharacterId,
     )
-    try {
-      const fresh = await characters.findByExactLowerName(
-        worldId,
-        activeOpenOrder.targetName,
-      )
-      if (fresh) target = fresh
-    } catch (err) {
-      console.error('[open-order target re-read]', err)
-    }
     const presentNow =
       target != null &&
       (presentIds.has(target.id) ||
@@ -641,11 +687,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         status: 'resolved',
         resolution: 'arrived',
       }
-      try {
-        await turns.mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder))
-      } catch (err) {
-        console.error('[open-order resolve metadata]', err)
-      }
+      backgroundTasks.register(
+        turns
+          .mergeMetadata(playerTurnId, 'open_order', openOrderToMetadata(activeOpenOrder))
+          .catch((err) => {
+            console.error('[open-order resolve metadata]', err)
+          }),
+      )
     }
   }
 
@@ -892,19 +940,37 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // C1: instrument pre-stream wall time + span breakdown before Grok starts.
   const prestreamMs = Date.now() - prestreamStartedAt
   timingSpans.prestream_ms = prestreamMs
-  try {
-    await turns.mergeMetadata(playerTurnId, 'timing', {
-      prestream_ms: prestreamMs,
-      spans: timingSpans,
-      classifier_method: classification.method,
-      conductor_method: conductorSettled.method,
-      npc_agent_ran: Boolean(npcAgentResult),
-      arrivals_applied: arrivalPatches.length,
-      occupancy_reused: occupancyReuse,
-    })
-  } catch (err) {
-    console.error('[prestream timing]', err)
-  }
+  console.info('[prestream timing]', {
+    worldId,
+    playerTurnId,
+    prestream_ms: prestreamMs,
+    spans: timingSpans,
+    classifier_method: classification.method,
+    conductor_method: conductorSettled.method,
+    npc_agent_ran: Boolean(npcAgentDraft),
+    npc_agent_retried: npcAgentDraft?.retried ?? false,
+    npc_agent_discarded: Boolean(discardedAgentUsage),
+    arrivals_applied: arrivalPatches.length,
+    occupancy_reused: occupancyReuse,
+  })
+  backgroundTasks.register(
+    turns
+      .mergeMetadata(playerTurnId, 'timing', {
+        prestream_ms: prestreamMs,
+        spans: timingSpans,
+        classifier_method: classification.method,
+        conductor_method: conductorSettled.method,
+        npc_agent_ran: Boolean(npcAgentDraft),
+        npc_agent_retried: npcAgentDraft?.retried ?? false,
+        npc_agent_discarded: Boolean(discardedAgentUsage),
+        arrivals_applied: arrivalPatches.length,
+        occupancy_reused: occupancyReuse,
+        ...(discardedAgentUsage ? { npc_agent_discarded_usage: discardedAgentUsage } : {}),
+      })
+      .catch((err) => {
+        console.error('[prestream timing]', err)
+      }),
+  )
 
   // `completion` resolves with the persisted narrator turn id once onFinish has
   // run all post-stream work. It must settle ONLY after the source stream
@@ -917,13 +983,16 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   })
   let narratorTurnId: number | undefined
   const streamStartedAt = Date.now()
+  let ttftMs: number | undefined
+  const attachMapTools = shouldAttachNarratorMapTools(world.spatial_mode)
 
   const result = streamText({
     model: xai(NARRATOR_MODEL),
     system: narratorSystem,
     messages: modelMessages,
-    tools: narratorMapTools,
-    stopWhen: stepCountIs(2),
+    ...(attachMapTools
+      ? { tools: narratorMapTools, stopWhen: stepCountIs(2) }
+      : {}),
     onFinish: async ({ text, usage: narratorUsage, toolResults }) => {
       const trimmed = text.trim()
       if (trimmed.length === 0) return
@@ -955,6 +1024,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           await turns.mergeMetadata(narratorTurn.id, 'timing', {
             prestream_ms: prestreamMs,
             stream_ms: streamDurationMs,
+            ttft_ms: ttftMs ?? streamDurationMs,
             spans: timingSpans,
           })
         } catch (err) {
@@ -963,12 +1033,24 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         return
       }
 
+      if (npcAgentDraft) {
+        try {
+          plans = await persistNpcAgentDraft(
+            npcAgentDeps,
+            worldId,
+            playerTurnId,
+            npcAgentDraft,
+          )
+        } catch (err) {
+          console.error('[npc agent persist]', err)
+        }
+      }
+
       try {
         await turns.mergeMetadata(narratorTurn.id, 'timing', {
           prestream_ms: prestreamMs,
           stream_ms: streamDurationMs,
-          // Full stream duration is a coarse TTFT proxy until token-level hooks land.
-          ttft_ms: streamDurationMs,
+          ttft_ms: ttftMs ?? streamDurationMs,
           spans: timingSpans,
           classifier_method: classification.method,
         })
@@ -1068,14 +1150,21 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         narrator: narratorMeta,
         classifier: classifierMeta,
       }
-      if (npcAgentResult) {
+      if (npcAgentDraft) {
         upfrontMeta.npc_agent = {
           model: NPC_AGENT_MODEL,
-          usage: npcAgentResult.usage,
-          patch: npcAgentResult.patch,
+          usage: npcAgentDraft.usage,
+          patch: npcAgentDraft.patch,
+          retried: npcAgentDraft.retried,
         }
       } else if (npcAgentError) {
         upfrontMeta.npc_agent = { model: NPC_AGENT_MODEL, error: npcAgentError }
+      } else if (discardedAgentUsage) {
+        upfrontMeta.npc_agent = {
+          model: NPC_AGENT_MODEL,
+          usage: discardedAgentUsage,
+          discarded: true,
+        }
       }
       if (
         directorDecision.foregroundThreadId != null ||
@@ -1133,7 +1222,9 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
             worldId,
             turnId: narratorTurn.id,
             worldTime: narratorState.worldTime,
-            plans,
+            plans: plans.filter(
+              (p): p is typeof p & { intent_id: number } => p.intent_id != null,
+            ),
             results: reconciliation.results,
           })
           for (const event of reconcileEvents) {
@@ -1589,6 +1680,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     .pipeThrough(
       new TransformStream<UIMessageChunk, UIMessageChunk>({
         transform(chunk, controller) {
+          if (
+            ttftMs == null &&
+            typeof chunk === 'object' &&
+            chunk !== null &&
+            'type' in chunk &&
+            chunk.type === 'text-delta'
+          ) {
+            ttftMs = Date.now() - streamStartedAt
+          }
           controller.enqueue(chunk)
         },
         flush() {

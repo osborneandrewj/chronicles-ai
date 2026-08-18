@@ -1,4 +1,4 @@
-import type { Turn } from '@/domain/entities'
+import type { Turn, World } from '@/domain/entities'
 import type {
   BackgroundTasks,
   NarrationStream,
@@ -111,6 +111,8 @@ export type NarrationContext = {
   activeSceneId: number | null
   playerTurnId: number
   backgroundTasks: BackgroundTasks
+  /** Already loaded by AdvanceTurn — skip a second getWorld in the adapter. */
+  world: World
 }
 
 export type AdvanceTurnResult =
@@ -161,7 +163,8 @@ export async function advanceTurn(
   const { worlds, turns, backgroundTasks } = deps
 
   // ── Pre-stream fail-closed gates (the only hard errors) ──────────────────
-  if (!(await worlds.getWorld(worldId))) {
+  const world = await worlds.getWorld(worldId)
+  if (!world) {
     throw new WorldNotFoundError(worldId)
   }
   if (!playerText) {
@@ -176,10 +179,20 @@ export async function advanceTurn(
     }
   }
 
-  // Retry / replay dedup.
-  const persistedLatestUserContent = await turns.latestUserContent(worldId)
-  const latestPersistedTurn = await turns.latestTurn(worldId)
-  const persistedAssistant = await turns.latestAssistantAfterLatestUser(worldId)
+  // Replay probes, budget, and scene are independent — one wave.
+  const [
+    persistedLatestUserContent,
+    latestPersistedTurn,
+    persistedAssistant,
+    overLimit,
+    activeSceneId,
+  ] = await Promise.all([
+    turns.latestUserContent(worldId),
+    turns.latestTurn(worldId),
+    turns.latestAssistantAfterLatestUser(worldId),
+    deps.isOverDailyLimit(),
+    deps.activeSceneId(worldId),
+  ])
   const { replay, insertUserTurn } = decideReplay(
     playerText,
     persistedLatestUserContent,
@@ -196,18 +209,18 @@ export async function advanceTurn(
 
   // Daily shared cost cap — gated before any LLM call so an exhausted budget
   // never starts a stream we'd have to error mid-flight.
-  if (await deps.isOverDailyLimit()) {
+  if (overLimit) {
     throw new BudgetExceededError(await deps.todaysTokens(), deps.dailyTokenLimit())
   }
 
   // ── PRE-STREAM transaction boundary: persist the player turn (fail-closed) ─
-  const activeSceneId = await deps.activeSceneId(worldId)
+  let playerTurnId: number
   if (insertUserTurn) {
-    await turns.insert(worldId, 'user', playerText, activeSceneId)
+    const inserted = await turns.insert(worldId, 'user', playerText, activeSceneId)
+    playerTurnId = inserted.id
+  } else {
+    playerTurnId = (await turns.latestUserTurnId(worldId)) ?? 0
   }
-  // [t:N] provenance: the just-inserted player turn id (narrator turn doesn't
-  // exist yet — the NPC agent runs pre-narrator).
-  const playerTurnId = (await turns.latestUserTurnId(worldId)) ?? 0
 
   // ── Stream + POST-stream fail-open factual work (delegated, SQL+SDK) ──────
   const stream = await deps.buildNarration({
@@ -216,6 +229,7 @@ export async function advanceTurn(
     activeSceneId,
     playerTurnId,
     backgroundTasks,
+    world,
   })
 
   return { kind: 'stream', stream }

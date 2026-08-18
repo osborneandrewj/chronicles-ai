@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
+import { shouldSpeculateNpcAgent, shouldTickNpcAgent } from '@/domain/services/npc-agent-gating'
 
 const npc = (over: Partial<{ is_player: number; status: 'active' | 'inactive' | 'dead' }> = {}) => ({
   is_player: 0,
@@ -68,6 +68,44 @@ describe('shouldTickNpcAgent', () => {
         stance: 'observe',
         inputMode: 'in-character',
         presentCharacters: [npc({ is_player: 1 }), npc({ status: 'dead' })],
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('shouldSpeculateNpcAgent', () => {
+  it('speculates when a living non-player NPC is present', () => {
+    expect(
+      shouldSpeculateNpcAgent({
+        presentCharacters: [npc({ is_player: 1 }), npc()],
+        pendingOpenOrder: false,
+      }),
+    ).toBe(true)
+  })
+
+  it('speculates for a pending open-order even with no present NPC', () => {
+    expect(
+      shouldSpeculateNpcAgent({
+        presentCharacters: [npc({ is_player: 1 })],
+        pendingOpenOrder: true,
+      }),
+    ).toBe(true)
+  })
+
+  it('does not speculate when only the player is present and no open order', () => {
+    expect(
+      shouldSpeculateNpcAgent({
+        presentCharacters: [npc({ is_player: 1 })],
+        pendingOpenOrder: false,
+      }),
+    ).toBe(false)
+  })
+
+  it('does not speculate on a dead co-located NPC', () => {
+    expect(
+      shouldSpeculateNpcAgent({
+        presentCharacters: [npc({ status: 'dead' })],
+        pendingOpenOrder: false,
       }),
     ).toBe(false)
   })
