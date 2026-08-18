@@ -8,11 +8,12 @@ export const WORLD_EVENT_KINDS = [
   'NPC_IGNORED',
   'THREAD_CLOSED',
   'OBJECTIVE_COMPLETED',
+  'OUTCOME_RESOLVED',
 ] as const
 
 export type WorldEventKind = (typeof WORLD_EVENT_KINDS)[number]
 
-export const WORLD_EVENT_SOURCES = ['director', 'reconciler'] as const
+export const WORLD_EVENT_SOURCES = ['director', 'reconciler', 'conductor'] as const
 export type WorldEventSource = (typeof WORLD_EVENT_SOURCES)[number]
 
 export const WORLD_EVENT_VISIBILITIES = ['system', 'narrator', 'player'] as const
@@ -36,4 +37,8 @@ export type WorldEventInput = Omit<WorldEvent, 'id' | 'created_at'>
 
 export function isWorldEventKind(value: string): value is WorldEventKind {
   return (WORLD_EVENT_KINDS as readonly string[]).includes(value)
+}
+
+export function isWorldEventSource(value: string): value is WorldEventSource {
+  return (WORLD_EVENT_SOURCES as readonly string[]).includes(value)
 }

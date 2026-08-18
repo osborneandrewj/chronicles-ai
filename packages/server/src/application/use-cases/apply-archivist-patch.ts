@@ -30,10 +30,17 @@ import { resolveThreadReference } from '@/domain/services/dossier-thread-referen
 import { resolvePossession } from '@/domain/services/inventory-resolution'
 import { hygieneFromClosedRows } from '@/domain/services/lifecycle-hygiene'
 import {
+  collectSettledAnchors,
+  isSettledLeftoverThread,
+  planNpcFocusHygiene,
+  titlesAreSameThread,
+} from '@/domain/services/settled-findings'
+import {
   appendFactWithProvenance,
 } from '@/domain/services/memorable-fact-provenance'
 import { normalizeTransitPlacesInPatch } from '@/domain/services/patch-sanitizer'
 import { decideSceneTransition } from '@/domain/services/scene-transition'
+import { resolveNewThreadKind } from '@/domain/services/basic-plots'
 
 // ApplyArchivistPatch (Phase 4) — the structural world-state update that follows
 // a narrator turn, carved out of `lib/archivist.applyArchivistPatch` onto the P4a
@@ -279,14 +286,38 @@ export async function applyArchivistPatch(
     target.updated_at = new Date().toISOString().replace('T', ' ').slice(0, 19)
   }
 
+  async function findThreadRow(title: string) {
+    const exact = await dossierWriter.threadByTitle(worldId, title)
+    if (exact) return exact
+    if (!dossiers) return null
+    const dossier = await dossiers.forWorld(worldId)
+    const alias = dossier.threads.find((t) => titlesAreSameThread(t.title, title))
+    if (!alias) return null
+    return dossierWriter.threadByTitle(worldId, alias.title)
+  }
+
   async function upsertStoryThread(patch: StoryThreadPatch): Promise<number> {
-    const existing = await dossierWriter.threadByTitle(worldId, patch.title)
-    const kind = patch.kind ?? existing?.kind ?? 'mystery'
-    const status = patch.status ?? existing?.status ?? 'active'
+    const existing = await findThreadRow(patch.title)
+    let kind = patch.kind ?? existing?.kind ?? 'mystery'
+    const incoming = patch.status ?? existing?.status ?? 'active'
+    const closed =
+      existing != null &&
+      (existing.status === 'resolved' ||
+        existing.status === 'failed' ||
+        existing.status === 'dormant')
+    const status = closed && incoming === 'active' ? existing.status : incoming
     const resolvedTurnId = status === 'resolved' || status === 'failed' ? narratorTurnId : null
     const relevanceTagsJson = patch.relevance_tags
       ? JSON.stringify(patch.relevance_tags)
       : (existing?.relevance_tags_json ?? '[]')
+
+    if (!existing && dossiers) {
+      const dossier = await dossiers.forWorld(worldId)
+      kind = resolveNewThreadKind(
+        { title: patch.title, summary: patch.summary, stakes: patch.stakes, kind },
+        dossier.threads,
+      )
+    }
 
     if (existing) {
       await dossierWriter.updateThread({
@@ -335,7 +366,7 @@ export async function applyArchivistPatch(
     // reopening resolved/failed/dormant parents. Lifecycle status changes only
     // via explicit story_threads[] patches (upsertStoryThread). Soft kinds may
     // still upgrade to quest while the thread is active.
-    const existing = await dossierWriter.threadByTitle(worldId, threadTitle)
+    const existing = await findThreadRow(threadTitle)
     const decision = resolveThreadReference(
       existing
         ? { id: existing.id, kind: existing.kind, status: existing.status }
@@ -685,6 +716,7 @@ export async function applyArchivistPatch(
             id: currentSceneId,
           })
         }
+        await completeOtherActiveScenes(scenes, worldId, null, narratorTurnId)
       } else {
         // action === 'open' — auto-close the prior active scene if one exists,
         // then create the new scene. Auto-close has no summary; v0.6's CRUD UI
@@ -704,6 +736,7 @@ export async function applyArchivistPatch(
         })
         await worlds.setCurrentScene(row.id, worldId)
         await characters.setPlayersPlace(placeId, worldId)
+        await completeOtherActiveScenes(scenes, worldId, row.id, narratorTurnId)
       }
     }
 
@@ -741,6 +774,7 @@ export async function applyArchivistPatch(
       })
       await worlds.setCurrentScene(newScene.id, worldId)
       await characters.setPlayersPlace(placeId, worldId)
+      await completeOtherActiveScenes(scenes, worldId, newScene.id, narratorTurnId)
       if (reason === 'player-move') {
         console.warn('[archivist] player-move scene invariant fired', {
           world_id: worldId,
@@ -839,6 +873,40 @@ export async function applyArchivistPatch(
       }
     }
 
+    if (dossiers) {
+      const dossier = await dossiers.forWorld(worldId)
+      for (const t of dossier.threads) {
+        if (!isSettledLeftoverThread(t, dossier.threads, dossier.objectives)) continue
+        await dossierWriter.updateThread({
+          id: t.id,
+          kind: t.kind,
+          status: 'dormant',
+          summary: t.summary,
+          stakes: t.stakes,
+          rewards: t.rewards,
+          consequences: t.consequences,
+          hidden: t.hidden,
+          relevance_tags_json: t.relevance_tags_json,
+          resolved_turn_id: null,
+        })
+      }
+      const focusWrites = planNpcFocusHygiene(
+        await listCharacters(),
+        collectSettledAnchors(dossier),
+      )
+      for (const w of focusWrites) {
+        await characters.applyAgentNpcFields(w.characterId, {
+          ...(w.current_focus ? { current_focus: w.current_focus } : {}),
+          ...(w.last_known_situation
+            ? { last_known_situation: w.last_known_situation }
+            : {}),
+        })
+        if (w.active_goal) {
+          await characters.setActiveGoal(w.characterId, w.active_goal)
+        }
+      }
+    }
+
     if (patch.story_resources) {
       for (const resource of patch.story_resources) {
         await upsertStoryResource(resource)
@@ -862,4 +930,19 @@ export async function applyArchivistPatch(
       }
     }
   })
+}
+
+/** Close leftover active scenes so a seed "Arrival" cannot become the cursor. */
+async function completeOtherActiveScenes(
+  scenes: SceneRepository,
+  worldId: number,
+  keepId: number | null,
+  turnId: number,
+): Promise<void> {
+  const rows = await scenes.forWorld(worldId)
+  for (const scene of rows) {
+    if (scene.status !== 'active') continue
+    if (keepId != null && scene.id === keepId) continue
+    await scenes.autoClose(turnId, scene.id)
+  }
 }

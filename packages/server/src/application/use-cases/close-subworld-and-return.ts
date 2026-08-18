@@ -19,6 +19,7 @@ import type {
 import { returnToHub } from '@/application/use-cases/return-to-hub'
 import { concludeSubworldDossier } from '@/domain/services/conclude-subworld-dossier'
 import { linkAntagonistCharacter } from '@/domain/services/link-antagonist'
+import { antagonistSpeechRegister } from '@/domain/services/speech-staging'
 import {
   refreshPlayerModelFromReport,
 } from '@/domain/services/player-model'
@@ -252,11 +253,19 @@ async function ensureAntagonistLinked(
 
   if (decision.action === 'already_linked') {
     await deps.characters.setClearanceLevel(decision.characterId, 'antagonist')
+    await deps.characters.setSpeechRegisterIfEmpty(
+      decision.characterId,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
     return
   }
   if (decision.action === 'match_existing') {
     await deps.characters.setClearanceLevel(decision.characterId, 'antagonist')
     await deps.worlds.setAntagonistCharacterId(hubWorldId, decision.characterId)
+    await deps.characters.setSpeechRegisterIfEmpty(
+      decision.characterId,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
     return
   }
   if (decision.action === 'create') {
@@ -274,5 +283,9 @@ async function ensureAntagonistLinked(
     })
     await deps.characters.setClearanceLevel(id, 'antagonist')
     await deps.worlds.setAntagonistCharacterId(hubWorldId, id)
+    await deps.characters.setSpeechRegisterIfEmpty(
+      id,
+      antagonistSpeechRegister(bible?.antagonistSpeechRegister),
+    )
   }
 }

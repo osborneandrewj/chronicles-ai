@@ -1,44 +1,18 @@
 ---
 paths:
-  - "src/backend/**"
-  - "src/api/**"
-  - "src/routes/**"
-  - "src/handlers/**"
+  - "packages/server/src/app/api/**"
+  - "packages/server/src/app/**/actions.ts"
+  - "packages/server/src/app/**/route.ts"
 ---
 
-# Backend API Rules
+# Route handlers
 
-## Route Organization
-- Group routes by resource: `/api/v1/users`, `/api/v1/posts`
-- Keep handler functions thin — delegate business logic to service layer
-- Middleware for cross-cutting concerns (auth, logging, rate limiting)
+These files are inbound adapters. Parse input, call one use case from `application/use-cases/`, pipe the result. They own no pipeline logic and import no SQL, `db.ts`, or LLM SDK.
 
-## Request Handling
-- Validate request body/params/query at the handler level
-- Return early on validation failure — don't proceed with bad input
-- Use async/await — no callback-based patterns
-- Set appropriate timeouts on external calls
-
-## Response Standards
-- Always return JSON with consistent structure
-- Include appropriate HTTP status codes (don't return 200 for errors)
-- Paginate list endpoints by default
-- Never expose internal IDs, stack traces, or implementation details in error responses
-
-## Database Access
-- Use a repository or service layer — don't query directly in handlers
-- Use transactions for multi-step operations
-- Close connections properly (use connection pooling)
-- Handle constraint violations gracefully (unique, foreign key)
-
-## Logging
-- Log request ID on every request for traceability
-- Log: timestamp, level, message, request ID, relevant IDs
-- Don't log: passwords, tokens, PII, full request bodies
-- Use structured logging (JSON) for production
-
-## Error Handling
-- Catch errors at the route level with a global error handler
-- Map domain errors to HTTP status codes
-- Log unexpected errors with full stack trace
-- Return user-friendly messages (not raw error strings)
+- Validate with Zod at the edge. Prefer a schema from `@chronicles/contracts` over a one-off copy.
+- Map domain errors to HTTP only here (`WorldNotFound` → 404, `BudgetExceeded` → 429, etc.).
+- `POST /api/chat` is a UI-message stream. Do not wrap it in a JSON envelope.
+- There is no `/api/v1/` and no REST resource layer. Add a use case before adding a route.
+- React Server Components read through a repository port on `getContainer()`. They never write SQL.
+- Auth stays at this edge (`lib/app-auth.ts`, middleware, the login action). Do not re-check it inside a use case.
+- Do not log secrets, session tokens, API keys, or raw player/LLM payloads.

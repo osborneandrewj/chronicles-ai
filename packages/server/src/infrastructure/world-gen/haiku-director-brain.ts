@@ -48,10 +48,8 @@ export class HaikuDirectorBrain implements DirectorDecisionPort {
           model: anthropic(HAIKU_MODEL),
           schema: DirectorBrainSchema,
           maxRetries: 1,
-          messages: [
-            { role: 'system', content: loadPrompt('director-brain') },
-            { role: 'user', content: buildUserContent(input) },
-          ],
+          system: loadPrompt('director-brain'),
+          messages: [{ role: 'user', content: buildUserContent(input) }],
         }),
       )
       return mapResult(object, input)

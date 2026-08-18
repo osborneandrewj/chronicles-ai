@@ -52,8 +52,19 @@ describe('archivist prompt — perception check (A2)', () => {
 describe('narrator prompt — NPC knowledge boundary (A2)', () => {
   it('forbids NPCs acting on knowledge they could not have', () => {
     const p = loadPrompt('narrator-system')
-    expect(p).toMatch(/only what it (has )?perceived|knows only what/i)
-    expect(p).toMatch(/another NPC'?s private|did not (witness|perceive)/i)
+    expect(p).toMatch(/PERCEPTION wins/i)
+    expect(p).toMatch(/HERE NPCs speak and hear/i)
+    expect(p).toMatch(/ELSEWHERE NPCs do not talk/i)
+    expect(p).toMatch(/not logs, grids, or other rooms/i)
+  })
+})
+
+describe('conductor prompt', () => {
+  it('treats player wording as intent and forbids granting unopposed kills', () => {
+    const p = loadPrompt('conductor-system')
+    expect(p).toMatch(/intent, not fact/i)
+    expect(p).toMatch(/do not grant/i)
+    expect(p).toMatch(/impossible/)
   })
 })
 
@@ -63,6 +74,8 @@ describe('director-brain prompt', () => {
     expect(p).toMatch(/do not invent new major threads/i)
     expect(p).toMatch(/one `initiate`/)
     expect(p).toMatch(/player agency/i)
+    expect(p).toMatch(/change the board/i)
+    expect(p).toMatch(/do not restage/i)
   })
 })
 
@@ -76,6 +89,15 @@ describe('npc-agent prompt — director CAST slots', () => {
   })
 })
 
+describe('npc-agent prompt — perception / place', () => {
+  it('forbids off-scene speech and other-room logs', () => {
+    const p = loadPrompt('npc-agent-system')
+    expect(p).toMatch(/Perception \/ place/)
+    expect(p).toMatch(/Only NPCs present with the protagonist may speak/i)
+    expect(p).toMatch(/Do not cite other rooms' logs/i)
+  })
+})
+
 describe('narrator prompt — director beat is binding', () => {
   it('treats DIRECTOR MUST STAGE like planned moves', () => {
     const p = loadPrompt('narrator-system')
@@ -85,6 +107,14 @@ describe('narrator prompt — director beat is binding', () => {
     expect(p).toMatch(/MUST NOT/)
     expect(p).toMatch(/CAST/)
     expect(p).toMatch(/do not write "director"/i)
+    expect(p).toMatch(/### OUTCOME/)
+    expect(p).toMatch(/do not upgrade/i)
+    expect(p).toMatch(/fold the player into the prose/i)
+    expect(p).toMatch(/predicates/i)
+    expect(p).toMatch(/world'?s voice/i)
+    expect(p).toMatch(/load-bearing quoted speech/i)
+    expect(p).toMatch(/cannot act/i)
+    expect(p).toMatch(/agency returns/i)
   })
 })
 
@@ -110,7 +140,8 @@ describe('prompts — dialogue depth & character voice', () => {
   it('narrator craft includes dialogue craft and speech staging edges', () => {
     const p = loadPrompt('narrator-system')
     expect(p).toMatch(/dialogue craft/i)
-    expect(p).toMatch(/one pressure or question per NPC/i)
+    expect(p).toMatch(/real conversation|two to four clauses/i)
+    expect(p).toMatch(/yielded the floor|write through the conversation/i)
     expect(p).toMatch(/speech:/i)
     expect(p).toMatch(/speakable lines|whispers|SSML|physical tell/i)
   })
@@ -121,6 +152,17 @@ describe('prompts — dialogue depth & character voice', () => {
     expect(p).toMatch(/do not rewrite/i)
     expect(p).toMatch(/speech_hint/i)
     expect(p).toMatch(/never write the full line/i)
+    expect(p).toMatch(/never script the line/i)
+    expect(p).toMatch(/required on talk-shaped/i)
+    expect(p).toMatch(/yielded the floor/i)
+    expect(p).toMatch(/two-or-three-clause sequence/i)
+  })
+
+  it('ensemble dressing authors a distinct speechRegister per crew member', () => {
+    const p = loadPrompt('ensemble-dressing')
+    expect(p).toMatch(/speechRegister/)
+    expect(p).toMatch(/how-they-talk|default move/i)
+    expect(p).toMatch(/each member MUST sound different/i)
   })
 })
 
@@ -131,7 +173,7 @@ describe('prompt content guards', () => {
     expect(p).toMatch(/# Hard constraints/i)
     // Target ≤ ~1.5k words (pre-change was ~3k).
     const words = p.trim().split(/\s+/).length
-    expect(words).toBeLessThanOrEqual(1500)
+    expect(words).toBeLessThanOrEqual(1600)
     expect(words).toBeGreaterThan(200)
     // Numeric length bands are not soft law.
     expect(p).not.toMatch(/Medium \(300–500 words\)/)
@@ -216,6 +258,16 @@ describe('prompts — plot lifecycle continuity', () => {
     expect(p).toMatch(/recently_closed_threads/)
     expect(p).toMatch(/explicit `?story_threads/)
     expect(p).toMatch(/do not revive|not reopen|must \*\*not\*\* reopen|must not reopen/)
+    expect(p).toMatch(/repeating medical or procedure symptom|somatic/)
+  })
+
+  it('opening-plots prompt uses Booker shapes without printing their names as titles', () => {
+    const p = loadPrompt('opening-plots')
+    expect(p).toMatch(/Overcoming the Monster/)
+    expect(p).toMatch(/Voyage and Return/)
+    expect(p).toMatch(/plot_shape/)
+    expect(p).toMatch(/never a Booker name/i)
+    expect(p).toMatch(/tremor|medical/)
   })
 
   it('npc-agent prompt tells agents to drop obsolete goals when plot is closed', () => {

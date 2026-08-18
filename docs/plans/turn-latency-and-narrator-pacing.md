@@ -22,7 +22,7 @@ These two tracks are separable but share a surface: `infrastructure/narrator/nar
 - Two persistence adapters stay at parity: `persistence/sqlite/` + `persistence/mongo/` + the port + the Mongo mappers.
 - Gates before each PR: `npm run depcruise`, `npm run type-check`, `npm test`, `npm run test:mongo`.
 - If `better-sqlite3` fails with a `NODE_MODULE_VERSION` mismatch, run `npm rebuild better-sqlite3` — it's a Node-upgrade artifact, not a regression.
-- **Definition of done for Track A: a turn streamed end-to-end in the browser**, per CLAUDE.md. Unit tests cannot prove a latency change.
+- **Definition of done for Track A: a turn streamed end-to-end in the browser**, per AGENTS.md. Unit tests cannot prove a latency change.
 
 ---
 
@@ -247,7 +247,7 @@ After C0–C3, expect `overlapped=true` on most multi-sentence turns and lower r
 - P1 cold-open eligibility → `isPlanEligible` in `domain/services/npc-promotion.ts:63`
 - P6 off-screen tension → `domain/services/seed-tension.ts`, used by `seed-bounded-world.ts:20`
 
-**Action: `git mv docs/plans/npc-initiation-fixes.md docs/plans/archive/`** per the CLAUDE.md archiving rule.
+**Action: `git mv docs/plans/npc-initiation-fixes.md docs/plans/archive/`** per the AGENTS.md archiving rule.
 
 The cheap prompt-level pacing wins are therefore spent. What remains is structural.
 

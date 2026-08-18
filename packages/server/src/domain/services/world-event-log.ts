@@ -1,10 +1,27 @@
-// Map director / reconciler outputs onto WorldEventInput rows. Pure.
+// Map director / reconciler / conductor outputs onto WorldEventInput rows. Pure.
 
-import type { WorldEventInput, WorldEventKind } from '@/domain/entities'
+import type {
+  ResolvedOutcome,
+  WorldEvent,
+  WorldEventInput,
+  WorldEventKind,
+} from '@/domain/entities'
 import type { DirectorDecision } from '@/domain/services/director'
 import { directorBeatToMetadata } from '@/domain/services/director'
+import { isBindingOutcome, outcomeToMetadata } from '@/domain/services/outcome-resolution'
 
 export type ReconcileDisposition = 'staged' | 'modified' | 'ignored' | 'contradicted'
+
+/** Rows allowed on the inspector Story tab. Closure/completion stays in the
+ * durable log for coordination; it is not operator-facing UI. Per-turn
+ * BEAT_DIRECTED and NPC_* stay in the log only. */
+export const STORY_TAB_EVENT_KINDS = [
+  'OUTCOME_RESOLVED',
+] as const satisfies readonly WorldEventKind[]
+
+export function isStoryTabWorldEvent(event: Pick<WorldEvent, 'kind'>): boolean {
+  return (STORY_TAB_EVENT_KINDS as readonly string[]).includes(event.kind)
+}
 
 export function beatDirectedEvent(args: {
   worldId: number
@@ -100,6 +117,26 @@ export function objectiveCompletedEvent(args: {
     actor_id: null,
     thread_id: null,
     payload: { status: args.status, title: args.title, objective_id: args.objectiveId },
+    visibility: 'system',
+  }
+}
+
+export function outcomeResolvedEvent(args: {
+  worldId: number
+  turnId: number
+  worldTime: string | null
+  resolution: ResolvedOutcome
+}): WorldEventInput | null {
+  if (!isBindingOutcome(args.resolution)) return null
+  return {
+    world_id: args.worldId,
+    turn_id: args.turnId,
+    world_time: args.worldTime,
+    kind: 'OUTCOME_RESOLVED',
+    source_agent: 'conductor',
+    actor_id: null,
+    thread_id: null,
+    payload: outcomeToMetadata(args.resolution),
     visibility: 'system',
   }
 }

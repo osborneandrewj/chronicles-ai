@@ -164,7 +164,7 @@ Do **not** pass all 20 narrator history role rows into the archivist by default 
 - `packages/server/tests/` — add or extend a thin test for “20 role rows all full” if logic is extracted; otherwise test pure helper if you extract `toFullHistoryMessages(history)`
 - `domain/services/history-packer.ts` + `tests/history-packer.test.ts` — **keep** (still pure, may be reused later); no need to delete in this PR
 
-**Agents.md / CLAUDE.md budget line:** update the “~4.2k-token full-content window” sentence to “last 20 prior role rows full (uncompacted); system + STATE + action pinned” so agents don’t reintroduce packing as a hard rule.
+**AGENTS.md budget line:** update the “~4.2k-token full-content window” sentence to “last 20 prior role rows full (uncompacted); system + STATE + action pinned” so agents don’t reintroduce packing as a hard rule.
 
 **Tests:**
 
@@ -273,7 +273,7 @@ Skipped:
 
 1. Update this plan status → implemented when merged.
 2. Touch `docs/specs/system-design-rebuild-spec.md` constants table if it still lists `NARRATOR_HISTORY_TURNS = 13` / packing numbers (spec drift already exists vs code at 16).
-3. `AGENTS.md` + `CLAUDE.md` “Respect the budget” bullet: replace 4.2k packing claim with 20 full prior role rows.
+3. `AGENTS.md` “Respect the budget” bullet: replace 4.2k packing claim with 20 full prior role rows.
 4. `docs/specs/memory-architecture.md`: update Phase 1 recent-turn budget text if it still describes truncation / 2.5k–4k recent turns as current behavior.
 5. Version bump on release branch per `docs/RELEASING.md` when shipping.
 
@@ -355,7 +355,7 @@ npm run test:mongo
 - [x] Phase 0: confirm fetch/limit vs current user turn duplication
   - **Fetch limit = 21** (`NARRATOR_PRIOR_ROLE_ROWS + 1`): current player turn is already inserted before `narrateTurn`; `priorHistory = allRecent.slice(0, -1)` drops it so it is not duplicated with the pinned PLAYER ACTION message.
 - [x] Phase 1: 20 full prior role rows; drop narrator compaction path
-- [x] Phase 1: update `AGENTS.md` / `CLAUDE.md` budget bullet
+- [x] Phase 1: update `AGENTS.md` budget bullet
 - [x] Phase 2: pure lag + composed run policy + tests
 - [x] Phase 3: wire `onFinish`; since-last-success window; metadata `run_reason` / `lag_before`
 - [x] Phase 4: spec/doc drift (`system-design-rebuild-spec`, `memory-architecture`) + plan status

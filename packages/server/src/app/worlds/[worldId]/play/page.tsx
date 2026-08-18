@@ -122,7 +122,7 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
         }))
       : []
 
-  const chat = (
+  return (
     <Chat
       worldId={worldId}
       worldName={world.name}
@@ -130,14 +130,11 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       initialUsage={initialUsage}
       initialOldestId={turns[0]?.id ?? null}
       initialHasOlder={hasOlder}
+      headerEnd={
+        world.world_layer === 'hub' ? (
+          <HubSimulationsMenu simulations={pastSimulations} />
+        ) : undefined
+      }
     />
-  )
-
-  if (world.world_layer !== 'hub') return chat
-  return (
-    <div className="relative">
-      {chat}
-      <HubSimulationsMenu simulations={pastSimulations} />
-    </div>
   )
 }

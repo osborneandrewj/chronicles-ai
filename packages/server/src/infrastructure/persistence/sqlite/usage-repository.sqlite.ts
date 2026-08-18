@@ -10,7 +10,7 @@ import type { UsageRepository } from '@/domain/ports/usage-repository'
 // hardcoding `date('now')` and the day boundary is decided in the application.
 //
 // Key set mirrors `cost-cap.ts`: narrator + archivist + extractor (pre-v0.5)
-// + classifier + npc_agent, input and output, so the cap never undercounts.
+// + classifier + npc_agent + conductor, input and output, so the cap never undercounts.
 const todaysTokensStmt = db.prepare<[string]>(`
   SELECT COALESCE(SUM(
     COALESCE(json_extract(metadata, '$.narrator.usage.inputTokens'),    0) +
@@ -22,7 +22,9 @@ const todaysTokensStmt = db.prepare<[string]>(`
     COALESCE(json_extract(metadata, '$.classifier.usage.inputTokens'),  0) +
     COALESCE(json_extract(metadata, '$.classifier.usage.outputTokens'), 0) +
     COALESCE(json_extract(metadata, '$.npc_agent.usage.inputTokens'),   0) +
-    COALESCE(json_extract(metadata, '$.npc_agent.usage.outputTokens'),  0)
+    COALESCE(json_extract(metadata, '$.npc_agent.usage.outputTokens'),  0) +
+    COALESCE(json_extract(metadata, '$.conductor.usage.inputTokens'),   0) +
+    COALESCE(json_extract(metadata, '$.conductor.usage.outputTokens'),  0)
   ), 0) AS total
   FROM turns
   WHERE metadata IS NOT NULL

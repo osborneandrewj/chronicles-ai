@@ -81,7 +81,11 @@ export function decideSceneTransition(inputs: SceneTransitionInputs): SceneTrans
         inferredPlaceId = pid
       }
     }
-    const clearMajority = inferredPlaceId !== null && topCount * 2 > totalRelocated
+    // A single NPC walking toward a door is not a cluster. Threshold 1187:
+    // Jordan "steps back toward the Medical doorway" relocated 1 NPC and
+    // dragged the player out of the corridor / bunk walk.
+    const clearMajority =
+      inferredPlaceId !== null && topCount >= 2 && topCount * 2 > totalRelocated
     const movingPlayerAway =
       playerPlaceFromPatch !== null && playerPlaceFromPatch !== inferredPlaceId
 

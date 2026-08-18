@@ -78,6 +78,51 @@ describe('formatStateBlock reverie rendering', () => {
   })
 })
 
+describe('formatStateBlock settled memorable facts', () => {
+  it('keeps a completed-records finding on the player after newer spikes', () => {
+    const player = {
+      id: 16,
+      world_id: 2,
+      name: 'Andrew Osborne',
+      description: null,
+      is_player: 1,
+      status: 'active',
+      memorable_facts: [
+        'Pre-assignment medical records confirm tremor was documented for the last eight months.',
+        'The tremor spiked sharply in the corridor this morning.',
+        'Baseline examination in Medical at 07:00 confirmed tremor as pre-arrival pattern; cleared for shift duty.',
+        'Tremor spiked again sharply in the corridor near the Bunk Area.',
+      ].join('\n'),
+    } as never
+    const block = formatStateBlock(
+      baseState({
+        presentCharacters: [player],
+        dossier: {
+          threads: [],
+          clues: [
+            {
+              title: 'Tremor documented eight months pre-arrival',
+              detail: 'Ellis confirms records show the tremor for eight months.',
+              status: 'interpreted',
+            },
+          ],
+          objectives: [
+            {
+              title: "Obtain Andrew's pre-assignment medical records",
+              detail: 'Retrieve prior medical history.',
+              status: 'completed',
+            },
+          ],
+          resources: [],
+          timeline: [],
+        } as never,
+      }),
+    )
+    expect(block).toMatch(/medical records confirm tremor/i)
+    expect(block).toMatch(/cleared for shift/i)
+  })
+})
+
 describe('private-belief scoping (A2)', () => {
   it('emits only the first belief, scoped to the owning NPC, and never broadcasts the rest', () => {
     const marcus = {

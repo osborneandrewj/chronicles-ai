@@ -16,6 +16,7 @@ import type {
   StoryThread,
   TimelineEvent,
 } from '@/domain/entities'
+import { isSomaticProcedureThread } from '@/domain/services/basic-plots'
 import { tryParseWorldTime } from '@/domain/services/narrative-clock'
 
 export const DOSSIER_CAPS = {
@@ -134,7 +135,9 @@ function threadScore(t: RankableThread, ctx: RankingContext): number {
   const kindBoost =
     t.kind === 'quest' ? 25 : t.kind === 'threat' ? 30 : t.kind === 'mystery' ? 10 : 0
   const recency = recencyKey(t) / 1e6
-  return proximity * 10 + stakes + kindBoost + recency
+  // A repeating medical/procedure "threat" must not outrank a real mystery/quest.
+  const somaticPenalty = isSomaticProcedureThread(t) ? 80 : 0
+  return proximity * 10 + stakes + kindBoost + recency - somaticPenalty
 }
 
 export function rankObjectives<T extends RankableObjective>(

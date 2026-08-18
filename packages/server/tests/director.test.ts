@@ -225,6 +225,379 @@ describe('decideDirector', () => {
     expect(d.mustNot.every((l) => !/must climax|force climax/i.test(l))).toBe(true)
   })
 
+  it('gives the addressed present NPC the initiate slot and their thread the floor', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 17,
+          title: 'What the Sessions Are For',
+          kind: 'mystery',
+          summary: 'The crossings do not stay put.',
+          source_turn_id: 200,
+        }),
+        thread({
+          id: 18,
+          title: 'The Face Lena Hides',
+          kind: 'threat',
+          summary: 'Commander Lena Korr will burn a newcomer to keep the cycles running.',
+          source_turn_id: 201,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5400,
+      currentTurnId: 1280,
+      playerText: '"Lena, speak now."',
+      presentCast: [
+        { id: 12, name: 'Ellis Shaw' },
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+        { id: 34, name: 'Lena Korr' },
+      ],
+    })
+    expect(d.foregroundThreadId).toBe(18)
+    const lena = d.cast.find((c) => c.name === 'Lena Korr')
+    expect(lena?.role).toBe('initiate')
+    expect(d.mustStage.join(' ')).toMatch(/lena korr initiates/i)
+  })
+
+  it('does not stall when the player is talking to someone on stage', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 5,
+          title: 'The Deep Session Effect',
+          kind: 'mystery',
+          summary: 'Memory gaps after the session',
+          source_turn_id: 350,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 4900,
+      currentTurnId: 1036,
+      playerText: 'Jordan, your hands are amazing. Don\'t tell Lee.',
+      presentCast: [
+        { id: 16, name: 'Andrew', isPlayer: true },
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+      ],
+    })
+    expect(d.beatKind).not.toBe('stall_escalate')
+  })
+
+  it('does not stall when play continues on the live foreground', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 5,
+          title: 'The Deep Session Effect',
+          kind: 'mystery',
+          summary: 'Memory gaps after the session',
+          source_turn_id: 350,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 4900,
+      currentTurnId: 1034,
+      playerText: 'What are you picking up and what does it mean?',
+      presentCast: [
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+      ],
+      lastBeatKind: 'stall_escalate',
+      lastForegroundThreadId: 5,
+    })
+    expect(d.beatKind).not.toBe('stall_escalate')
+  })
+
+  it('drops a stall pending when the player is in-scene on that thread', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 5,
+          title: 'The Deep Session Effect',
+          kind: 'mystery',
+          summary: 'Memory gaps after the session',
+          source_turn_id: 350,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 4900,
+      currentTurnId: 1036,
+      playerText: 'I ask Lee what the reading means',
+      presentCast: [{ id: 15, name: 'Lee Ingram' }],
+      pendingBeat: {
+        beatKind: 'stall_escalate',
+        foregroundThreadId: 5,
+        mustStage: ['Jordan initiates a facility-wide monitoring sequence'],
+        mustNot: ['Do not resolve or explain the nature of the Deep Session Effect'],
+        cast: [{ characterId: 14, name: 'Jordan Lacy', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'stall',
+        sourceTurnId: 1033,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/facility-wide monitoring/i)
+    expect(d.beatKind).not.toBe('stall_escalate')
+  })
+
+  it('repeat stall_escalate must change the board', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'Stalled plot',
+          kind: 'quest',
+          stakes: 'something important',
+          source_turn_id: 1,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 40,
+      playerText: 'I drink coffee and stare at the wall',
+      lastBeatKind: 'stall_escalate',
+      lastForegroundThreadId: 1,
+      stallStreak: 1,
+    })
+    expect(d.beatKind).toBe('stall_escalate')
+    expect(d.mustStage.some((l) => /change the board/i.test(l))).toBe(true)
+  })
+
+  it('bare continue after live pressure yields and writes through', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 14,
+          title: 'Pre-Arrival Tremor Baseline',
+          kind: 'mystery',
+          source_turn_id: 1140,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5200,
+      currentTurnId: 1160,
+      playerText: 'continue',
+      presentCast: [
+        { id: 12, name: 'Ellis Shaw' },
+        { id: 14, name: 'Jordan Lacy' },
+      ],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 14,
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/yielded the floor/i)
+    expect(d.mustStage.join(' ')).toMatch(/write through/i)
+    expect(d.mustStage.join(' ')).toMatch(/another continue/i)
+    expect(d.mustStage.join(' ')).toMatch(/ellis shaw initiates/i)
+  })
+
+  it('prefers a live mystery over a somatic clawing-arm threat', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 16,
+          title: 'The Clawing Arm',
+          kind: 'threat',
+          summary: 'Right arm spasming into a rigid claw with blood-pressure spikes.',
+          source_turn_id: 1240,
+        }),
+        thread({
+          id: 8,
+          title: 'What the Sessions Are For',
+          kind: 'mystery',
+          summary: 'The work sends people into other lives.',
+          stakes: 'They will not know which memories are theirs.',
+          source_turn_id: 200,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5400,
+      currentTurnId: 1262,
+      playerText: '"I\'m starved. Talk to me."',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+    })
+    expect(d.foregroundThreadId).toBe(8)
+    expect(d.mustStage.join(' ')).not.toMatch(/clawing arm/i)
+  })
+
+  it('repeat pressure on the same thread must advance, not restage the body', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 16,
+          title: 'The Clawing Arm',
+          kind: 'threat',
+          source_turn_id: 1230,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5400,
+      currentTurnId: 1262,
+      playerText: '"Oh I\'m still here. I\'m starved. Talk to me."',
+      presentCast: [
+        { id: 12, name: 'Ellis Shaw' },
+        { id: 14, name: 'Jordan Lacy' },
+      ],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 16,
+    })
+    expect(d.beatKind).toBe('pressure')
+    expect(d.mustStage.join(' ')).toMatch(/new consequence/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/stage a concrete beat of "the clawing arm"/i)
+    expect(d.mustNot.join(' ')).toMatch(/unchanged symptom/i)
+  })
+
+  it('wait-until-done yields even when the text contains "done"', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 12,
+          title: "Jordan's Interest in Andrew",
+          kind: 'relationship',
+          source_turn_id: 1080,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5100,
+      currentTurnId: 1150,
+      playerText: '"No change that I\'ve noticed." I wait until the examination is done.',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+      lastBeatKind: 'close',
+      lastForegroundThreadId: 12,
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/write through/i)
+  })
+
+  it('does not press a leftover tremor thread after the baseline resolved', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 14,
+          title: 'Pre-Arrival Tremor Baseline',
+          kind: 'mystery',
+          status: 'resolved',
+          source_turn_id: 1040,
+        }),
+        thread({
+          id: 13,
+          title: 'Unexplained Tremor',
+          kind: 'mystery',
+          status: 'active',
+          source_turn_id: 320,
+        }),
+      ],
+      objectives: [
+        objective({
+          id: 15,
+          title: "Obtain Andrew's pre-assignment medical records",
+          status: 'completed',
+        }),
+      ],
+      clockMinutes: 5300,
+      currentTurnId: 1203,
+      playerText: 'I head to medical',
+      presentCast: [{ id: 12, name: 'Ellis Shaw' }],
+    })
+    expect(d.foregroundThreadId).not.toBe(13)
+    expect(d.suggestDormantThreadIds).toContain(13)
+    expect(d.mustStage.join(' ')).not.toMatch(/unexplained tremor/i)
+  })
+
+  it('must not reverse completed findings', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 13,
+          title: 'Unexplained Tremor',
+          kind: 'mystery',
+          source_turn_id: 10,
+        }),
+      ],
+      objectives: [
+        objective({
+          id: 15,
+          title: "Obtain Andrew's pre-assignment medical records",
+          status: 'completed',
+        }),
+      ],
+      clockMinutes: 100,
+      currentTurnId: 1203,
+      playerText: 'I head to medical',
+    })
+    expect(d.mustNot.join(' ')).toMatch(/settled findings/i)
+    expect(d.mustNot.join(' ')).toMatch(/pre-assignment medical records/i)
+  })
+
+  it('does not treat "continue the investigation" as a floor yield', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 1,
+          title: 'Sequence Vigil investigation',
+          kind: 'quest',
+          source_turn_id: 100,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 200,
+      currentTurnId: 120,
+      playerText: 'continue the investigation',
+    })
+    expect(d.beatKind).not.toBe('yield')
+    expect(d.mustStage.join(' ')).not.toMatch(/yielded the floor/i)
+  })
+
+  it('wake-advance yields and does not wait for the protagonist', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 5,
+          title: 'Mapping the Facility Tremor',
+          kind: 'mystery',
+          source_turn_id: 1040,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 5000,
+      currentTurnId: 1050,
+      playerText: 'continue',
+      presentCast: [
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+      ],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 5,
+      wakeAdvance: true,
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/cannot act/i)
+    expect(d.mustStage.join(' ')).toMatch(/changed board/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/jordan lacy initiates/i)
+  })
+
+  it('stay-under advances the world without restoring agency', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 5,
+          title: 'The cellar rope',
+          kind: 'threat',
+          source_turn_id: 10,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 20,
+      playerText: "I don't respond, and don't wake yet",
+      stayUnder: true,
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/still cannot act/i)
+    expect(d.mustStage.join(' ')).toMatch(/do not restore/i)
+  })
+
+
   it('assigns one initiator from present cast and must-stage them', () => {
     const d = decideDirector({
       threads: [

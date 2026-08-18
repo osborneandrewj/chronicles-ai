@@ -212,6 +212,37 @@ export function isYieldMove(text: string): boolean {
   return false
 }
 
+/**
+ * Player gave the floor — write through the current activity.
+ * Narrower than `isYieldMove`: "continue the investigation" is still driving.
+ */
+export function isPlayerYieldingFloor(text: string): boolean {
+  const compact = normalize(text)
+  if (!compact) return false
+  if (
+    compact === 'continue' ||
+    compact === 'go on' ||
+    compact === 'keep going' ||
+    compact === '...' ||
+    compact === '…'
+  ) {
+    return true
+  }
+  if (isExplicitTimeJump(compact)) return true
+  if (/\buntil\s+.{0,48}\b(done|complete|finished|over|cleared)\b/.test(compact)) {
+    return true
+  }
+  if (
+    compact.length <= 100 &&
+    /\b(wait|waits|waiting|lay still|lie still|stay still|remain still)\b/.test(compact) &&
+    !/\b(ask|tell|say|confront|search|examine|attack)\b/.test(compact) &&
+    !/\bwait(?:s|ing)?\s+for\b.{0,48}\b(respond|answer|speak|reply|talk)\b/.test(compact)
+  ) {
+    return true
+  }
+  return false
+}
+
 export function isExplicitTimeJump(text: string): boolean {
   const compact = normalize(text)
   return (

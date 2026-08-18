@@ -73,3 +73,9 @@ export type {
   DirectorBrainResult,
   DirectorDecisionPort,
 } from './director-decision'
+export type {
+  ConductorInput,
+  ConductorPort,
+  ConductorResult,
+  ConductorUsage,
+} from './conductor'

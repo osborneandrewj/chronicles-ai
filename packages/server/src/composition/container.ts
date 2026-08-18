@@ -32,7 +32,9 @@ import type {
   WorldRepository,
 } from '@/domain/ports'
 import type { EnsembleGenerator } from '@/domain/ports/ensemble-generator'
+import type { OpeningPlotSeeder } from '@/domain/ports/opening-plot-seeder'
 import type { ThreadBootstrapper } from '@/domain/ports/thread-bootstrapper'
+import type { ConductorPort } from '@/domain/ports/conductor'
 import type { DirectorDecisionPort } from '@/domain/ports/director-decision'
 import type { MetaStoryGenerator } from '@/domain/ports/meta-story-generator'
 import { ProcessBackgroundTasks } from '@/infrastructure/background/process-background-tasks'
@@ -63,10 +65,12 @@ import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
 import { GrokEnsembleGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
+import { GrokOpeningPlotSeeder } from '@/infrastructure/world-gen/grok-opening-plot-seeder'
 import { GrokThreadBootstrapper } from '@/infrastructure/world-gen/grok-thread-bootstrapper'
 import { GrokMetaStoryGenerator } from '@/infrastructure/world-gen/grok-meta-story-generator'
 import { HaikuDramaPort } from '@/infrastructure/world-gen/haiku-drama-port'
 import { HaikuTimePassageEstimator } from '@/infrastructure/world-gen/haiku-time-passage-estimator'
+import { HaikuConductor } from '@/infrastructure/conductor/haiku-conductor'
 import { HaikuDirectorBrain } from '@/infrastructure/world-gen/haiku-director-brain'
 
 // Composition root (spec §3.7, §5.1-P1, §5.1-P2) — the ONLY module that
@@ -109,12 +113,14 @@ export type Container = {
   backgroundTasks: BackgroundTasks
   decks: WorldArchetypeProvider
   ensembleGenerator: EnsembleGenerator
+  openingPlotSeeder: OpeningPlotSeeder
   threadBootstrapper: ThreadBootstrapper
   metaStoryGenerator: MetaStoryGenerator
   drama: DramaPort
   timePassage: TimePassageEstimator
   worldEvents: WorldEventRepository
   directorBrain: DirectorDecisionPort
+  conductor: ConductorPort
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -171,12 +177,14 @@ function buildSqlite(): Container {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredWorldArchetypeProvider(),
     ensembleGenerator: new GrokEnsembleGenerator(),
+    openingPlotSeeder: new GrokOpeningPlotSeeder(),
     threadBootstrapper: new GrokThreadBootstrapper(),
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
     worldEvents: new SqliteWorldEventRepository(),
     directorBrain: new HaikuDirectorBrain(),
+    conductor: new HaikuConductor(),
   }
 }
 
@@ -224,11 +232,13 @@ export async function initContainer(): Promise<Container> {
     backgroundTasks: new ProcessBackgroundTasks(),
     decks: new AuthoredWorldArchetypeProvider(),
     ensembleGenerator: new GrokEnsembleGenerator(),
+    openingPlotSeeder: new GrokOpeningPlotSeeder(),
     threadBootstrapper: new GrokThreadBootstrapper(),
     metaStoryGenerator: new GrokMetaStoryGenerator(),
     drama: new HaikuDramaPort(),
     timePassage: new HaikuTimePassageEstimator(),
     directorBrain: new HaikuDirectorBrain(),
+    conductor: new HaikuConductor(),
     ...repos,
   })
 }

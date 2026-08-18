@@ -1,4 +1,4 @@
-import type { WorldEvent, WorldEventInput } from '@/domain/entities'
+import type { WorldEvent, WorldEventInput, WorldEventKind } from '@/domain/entities'
 
 export const WORLD_EVENT_RECENT_CAP = 20
 
@@ -7,5 +7,9 @@ export const WORLD_EVENT_RECENT_CAP = 20
 export interface WorldEventRepository {
   append(event: WorldEventInput): Promise<void>
   /** Newest first. Caps at `limit` (default WORLD_EVENT_RECENT_CAP). */
-  recentForWorld(worldId: number, limit?: number): Promise<WorldEvent[]>
+  recentForWorld(
+    worldId: number,
+    limit?: number,
+    kinds?: readonly WorldEventKind[],
+  ): Promise<WorldEvent[]>
 }

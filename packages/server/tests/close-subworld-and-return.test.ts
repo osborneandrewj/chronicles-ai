@@ -118,6 +118,7 @@ describe('closeSubworldAndReturn', () => {
         ]
       },
       async setClearanceLevel() {},
+      async setSpeechRegisterIfEmpty() {},
       async add() {
         return { id: 99 }
       },

@@ -6,13 +6,25 @@
 // (no behavior change); world-state.ts re-exports for back-compat.
 import 'server-only'
 
-import type { Character, Place, Scene, StoryDossier, StoryThread } from '@/domain/entities'
+import type {
+  Character,
+  Place,
+  ResolvedOutcome,
+  Scene,
+  StoryDossier,
+  StoryThread,
+} from '@/domain/entities'
 import {
   CLOSED_DOSSIER_CAPS,
   selectRecentlyClosedObjectives,
   selectRecentlyClosedThreads,
 } from '@/domain/services/closed-dossier'
 import type { DirectorDecision } from '@/domain/services/director'
+import { isBindingOutcome } from '@/domain/services/outcome-resolution'
+import {
+  buildPerceptionPin,
+  type PerceptionPin,
+} from '@/domain/services/perception-pin'
 import {
   pickPrimaryPressure,
   rankClues,
@@ -23,9 +35,12 @@ import {
   rankTimeline,
   type RankingContext,
 } from '@/domain/services/dossier-ranking'
+import {
+  selectPinnedMemorableFacts,
+  stripFactProvenance,
+} from '@/domain/services/memorable-fact-provenance'
 import { minutesToWorldTime, tryParseWorldTime } from '@/domain/services/narrative-clock'
 import { activityForBand, parseDailyLoop } from '@/lib/daily-loop'
-import { stripFactProvenance } from '@/lib/memorable-facts'
 import { type PlaceOccupancy } from '@/lib/place-population'
 import { type ReverieRow } from '@/lib/reveries'
 import type { NarratorWorldState } from '@/lib/world-state'
@@ -145,7 +160,18 @@ export function formatStateBlock(
       }
       const facts = stripFactProvenance(c.memorable_facts)
       if (facts) {
-        const factLines = facts.split('\n').filter((f) => f.trim().length > 0).slice(-3)
+        const anchors =
+          c.is_player === 1
+            ? [
+                ...state.dossier.objectives
+                  .filter((o) => o.status === 'completed')
+                  .map((o) => `${o.title} ${o.detail ?? ''}`),
+                ...state.dossier.clues
+                  .filter((cl) => cl.status === 'interpreted')
+                  .map((cl) => `${cl.title} ${cl.detail ?? ''}`),
+              ]
+            : []
+        const factLines = selectPinnedMemorableFacts(facts, anchors)
         for (const fact of factLines) {
           lines.push(`  - ${fact}`)
         }
@@ -247,6 +273,11 @@ export function formatStateBlock(
         }
       }
     }
+  }
+
+  const perception = formatPerceptionPin(perceptionPinFromState(state))
+  if (perception) {
+    lines.push('', perception)
   }
 
   // Items resting in the current place — dropped, stored, or left behind. The
@@ -611,6 +642,61 @@ export function formatDirectorBlock(
     }
   }
   return lines.join('\n')
+}
+
+/**
+ * Binding referee pin. Fail-open empty when the outcome is not_applicable.
+ */
+export function formatResolvedOutcomeBlock(resolution: ResolvedOutcome | null): string {
+  if (!resolution || !isBindingOutcome(resolution)) return ''
+  return [
+    '### OUTCOME',
+    "The player's words are intent, not fact. Narrate ONLY this resolved result.",
+    `- result: ${resolution.outcome}`,
+    `- intent: ${resolution.intent}`,
+    `- fact: ${resolution.worldStateDelta}`,
+    'Do not upgrade this into a stronger success than listed.',
+  ].join('\n')
+}
+
+export function formatPerceptionPin(pin: PerceptionPin): string {
+  if (!pin.placeName && pin.here.length === 0 && pin.elsewhere.length === 0) return ''
+  const lines = [
+    '### PERCEPTION (authoritative)',
+    pin.placeName ? `This room: ${pin.placeName}` : 'This room: (unset)',
+    `HERE (can hear/see/speak here): ${pin.here.length > 0 ? pin.here.join(', ') : '(none)'}`,
+  ]
+  if (pin.elsewhere.length > 0) {
+    lines.push(
+      "ELSEWHERE (cannot speak into this room; do not give them this scene's facts):",
+    )
+    for (const row of pin.elsewhere.slice(0, 8)) {
+      lines.push(`- ${row.name}${row.place ? ` — ${row.place}` : ''}`)
+    }
+  }
+  lines.push(
+    'HERE NPCs know only what they perceived in this place or while present with you. They do not share a plot file. No voice from a doorway unless that NPC is listed HERE. A radio/terminal must be in this room to carry another room\'s facts.',
+  )
+  return lines.join('\n')
+}
+
+function perceptionPinFromState(state: NarratorWorldState): PerceptionPin {
+  return buildPerceptionPin({
+    placeName: state.currentPlace?.name ?? null,
+    present: state.presentCharacters.map((c) => ({
+      name: c.name,
+      isPlayer: c.is_player === 1,
+      status: c.status,
+      currentPlaceId: c.current_place_id,
+    })),
+    known: state.knownCharacters.map((c) => ({
+      name: c.name,
+      isPlayer: c.is_player === 1,
+      status: c.status,
+      currentPlaceId: c.current_place_id,
+    })),
+    placeNameById: new Map(state.knownPlaces.map((p) => [p.id, p.name])),
+  })
 }
 
 function rankingContextFrom(options?: FormatDossierOptions): RankingContext {

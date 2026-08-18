@@ -90,3 +90,46 @@ export function stripFactProvenance(facts: string | null): string | null {
     .map((line) => line.replace(FACT_PROVENANCE_RE, '').trimEnd())
     .join('\n')
 }
+
+const NARRATOR_RECENT_FACT_LINES = 3
+const NARRATOR_SETTLED_FACT_LINES = 3
+const SETTLED_FACT_OVERLAP = 0.28
+
+/**
+ * Narrator STATE pins the last few facts plus older lines that still match
+ * settled dossier work (completed objectives / interpreted clues), so a
+ * medical-records finding does not vanish after three tremor-spike appends.
+ */
+export function selectPinnedMemorableFacts(
+  factsBlock: string | null,
+  anchors: string[],
+): string[] {
+  if (!factsBlock) return []
+  const facts = factsBlock
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  const recent = facts.slice(-NARRATOR_RECENT_FACT_LINES)
+  const recentSet = new Set(recent)
+  const normAnchors = anchors.map(normalizeFact).filter((a) => a.length > 0)
+  if (normAnchors.length === 0) return recent
+
+  const settled: string[] = []
+  for (const fact of facts) {
+    if (recentSet.has(fact)) continue
+    const tokens = tokenSet(normalizeFact(fact))
+    const hits = normAnchors.some((anchor) => {
+      const overlap = jaccardTokens(tokens, tokenSet(anchor))
+      return overlap >= SETTLED_FACT_OVERLAP
+    })
+    if (hits) settled.push(fact)
+  }
+  return [...settled.slice(-NARRATOR_SETTLED_FACT_LINES), ...recent]
+}
+
+function jaccardTokens(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let inter = 0
+  for (const t of a) if (b.has(t)) inter += 1
+  return inter / (a.size + b.size - inter)
+}

@@ -5,6 +5,7 @@ import {
   deriveActiveOpenOrder,
   formatOpenOrderStatusLine,
   isExplicitTimeJump,
+  isPlayerYieldingFloor,
   isYieldMove,
   openOrderFromMetadata,
   openOrderToMetadata,
@@ -56,6 +57,23 @@ describe('isYieldMove / isExplicitTimeJump', () => {
     expect(isExplicitTimeJump('10 minutes later')).toBe(true)
     expect(isYieldMove('10 minutes later')).toBe(true)
     expect(isYieldMove('I charge the line with my spear')).toBe(false)
+  })
+})
+
+describe('isPlayerYieldingFloor', () => {
+  it('treats bare continue, wait-until-done, and time jumps as yielding the floor', () => {
+    expect(isPlayerYieldingFloor('continue')).toBe(true)
+    expect(isPlayerYieldingFloor('I wait')).toBe(true)
+    expect(isPlayerYieldingFloor('I lay still until the tests are done')).toBe(true)
+    expect(isPlayerYieldingFloor('I wait until the examination is done.')).toBe(true)
+    expect(isPlayerYieldingFloor('10 minutes later')).toBe(true)
+  })
+
+  it('does not treat driving continue-the-X or look-around as yielding the floor', () => {
+    expect(isPlayerYieldingFloor('continue the investigation')).toBe(false)
+    expect(isPlayerYieldingFloor('I look around')).toBe(false)
+    expect(isPlayerYieldingFloor('I ask Ellis what the tests show')).toBe(false)
+    expect(isPlayerYieldingFloor('I stand as I wait for Lena to respond')).toBe(false)
   })
 })
 

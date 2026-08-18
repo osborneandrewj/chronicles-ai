@@ -13,5 +13,6 @@ Return exactly **one** thread (rarely two, only if a second is genuinely indepen
 Rules:
 
 - Ground the thread in the narration and premise — do not invent a plot that hasn't been set up. If the pressure is faint, name the strongest real thread you can see; do not fabricate a grand conspiracy from nothing.
+- Prefer a Booker-shaped situation (quest, voyage-and-return, overcoming a willful antagonist, rebirth/identity, crossed purposes) over a medical/procedure loop. A tremor or exam is a clue inside a mystery, not the thread title.
 - The thread is the protagonist's situation, not an NPC's private agenda.
 - No prose, no commentary, no scene-setting — return only the structured object.

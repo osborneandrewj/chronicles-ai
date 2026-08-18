@@ -1,6 +1,6 @@
 import 'server-only'
 
-// Single source of truth for LLM model IDs (spec §1.3, §3.3, CLAUDE.md). These
+// Single source of truth for LLM model IDs (spec §1.3, §3.3, AGENTS.md). These
 // literals were previously duplicated across seven agent modules
 // (claude-haiku-4-5-20251001) and two narrator call sites (grok-4.3). Model IDs
 // live in infrastructure only — never as literals in domain or application code.

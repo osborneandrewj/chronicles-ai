@@ -12,6 +12,7 @@ import {
 } from '@/domain/services/plan-salience'
 import {
   isExplicitTimeJump,
+  isPlayerYieldingFloor,
   isYieldMove,
   type OpenOrder,
 } from '@/domain/services/open-order'
@@ -46,6 +47,12 @@ export type GuidanceContext = {
   activeThreatTitles?: string[]
   /** Highest-stakes active quest/objective title for idle primary pressure. */
   primaryPressureTitle?: string | null
+  /** They cannot act; world should advance and restore agency. */
+  wakeAdvance?: boolean
+  /** Player text this turn authors a collapse or restraint. */
+  collapsingThisTurn?: boolean
+  /** Player asked to remain unable to act. */
+  stayUnder?: boolean
 }
 
 /**
@@ -62,6 +69,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
 
   const lines: string[] = []
   const salience = resolveSalience(ctx)
+
+  const incapacitatedCue = pickIncapacitatedCue(ctx)
+  if (incapacitatedCue) lines.push(incapacitatedCue)
+
+  const yieldComplete = pickYieldCompleteCue(ctx)
+  if (yieldComplete) lines.push(yieldComplete)
 
   // Private-channel audience pin: never sparse-away.
   const privateCue = pickPrivateUtteranceCue(ctx)
@@ -101,6 +114,11 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
   // Vigil sanctum class). High priority — not suppressed by plan salience.
   const clearHandle = pickClearHandleCue(ctx)
   if (clearHandle) lines.push(clearHandle)
+
+  // Same-board restage: last turns already slammed the same body/room. Never
+  // sparse-away — this is the medical-loop / sanctum-loop class.
+  const circling = pickCirclingBeatCue(ctx)
+  if (circling) lines.push(circling)
 
   // Dialogue-heavy beats: interactional craft (never sparse-away on stance=say
   // with present NPCs). Replaces the weak "summarized speech only" branch in
@@ -159,6 +177,44 @@ function openOrderAsSalience(order: OpenOrder | null | undefined): OpenOrderForS
     kind: order.kind,
     status: order.status,
   }
+}
+
+function pickIncapacitatedCue(ctx: GuidanceContext): string | null {
+  if (ctx.stayUnder) {
+    return (
+      'The protagonist still cannot act. Do not wait for their line or choice and do not restore agency. ' +
+      'Advance time. Others act. Land one changed board ' +
+      '(named place, named result, logged incident, or new presence).'
+    )
+  }
+  if (ctx.wakeAdvance) {
+    return (
+      'The protagonist cannot act. Do not wait for their next line or choice. ' +
+      'Advance time until they can act again. Others act. Land one changed board ' +
+      '(named place, named result, logged incident, or new presence). ' +
+      'Open on the first moment they can act — they do not speak or choose until then.'
+    )
+  }
+  if (ctx.collapsingThisTurn) {
+    return (
+      'The protagonist loses the ability to act this turn. Stage that. ' +
+      'Others may start to move after. Do not ask them a question or a choice.'
+    )
+  }
+  return null
+}
+
+/** Player gave the floor — finish the current activity. Never sparse-away. */
+function pickYieldCompleteCue(ctx: GuidanceContext): string | null {
+  if (ctx.wakeAdvance || ctx.stayUnder || ctx.collapsingThisTurn) return null
+  if (!isPlayerYieldingFloor(ctx.playerText)) return null
+  return (
+    'The protagonist yielded the floor. Write through the current procedure or exchange this turn — ' +
+    'complete remaining checks, deliver the finding, finish the conversation. ' +
+    'Land one changed board (named result, next place, logged incident, or new presence). ' +
+    'Do not stop after one micro-step or end on a question whose only useful answer is continue. ' +
+    'More scene, not a restatement of the last paragraph.'
+  )
 }
 
 function pickOpenOrderCue(ctx: GuidanceContext): string | null {
@@ -280,6 +336,7 @@ function isPressureStalled(turns: RecentTurn[]): boolean {
  */
 function pickClearHandleCue(ctx: GuidanceContext): string | null {
   if (ctx.presentNpcCount < 1) return null
+  if (isPlayerYieldingFloor(ctx.playerText)) return null
 
   const stalled = isPressureStalled(ctx.recentTurns)
   const idle = countTrailingIdleMoves(ctx) >= 1
@@ -306,29 +363,61 @@ function pickClearHandleCue(ctx: GuidanceContext): string | null {
  * Dialogue-beat craft cue (dialogue-depth Phase 1). Fires on talk-shaped turns
  * with present NPCs so interactional depth is not left to chance.
  */
+function pickCirclingBeatCue(ctx: GuidanceContext): string | null {
+  const recent = ctx.recentTurns.filter((t) => t.role === 'assistant').slice(-2)
+  if (recent.length < 2) return null
+  if (openingOverlap(recent[0].content, recent[1].content) < 0.32) return null
+  return (
+    'The last turns restaged the same physical beat. Do not re-describe an unchanged body, monitor, or room. ' +
+    'Answer what the player said. Let present NPCs talk to each other. Land a new fact, destination, or person.'
+  )
+}
+
+function openingOverlap(a: string, b: string): number {
+  const tokens = (s: string): Set<string> =>
+    new Set((s.slice(0, 480).toLowerCase().match(/[a-z]{4,}/g) ?? []).filter(Boolean))
+  const left = tokens(a)
+  const right = tokens(b)
+  if (left.size === 0 || right.size === 0) return 0
+  let inter = 0
+  for (const t of left) {
+    if (right.has(t)) inter += 1
+  }
+  return inter / Math.min(left.size, right.size)
+}
+
 function pickDialogueBeatCue(ctx: GuidanceContext): string | null {
   if (ctx.presentNpcCount < 1) return null
 
+  const yielding = isPlayerYieldingFloor(ctx.playerText)
   const talkShaped =
+    yielding ||
     ctx.stance === 'say' ||
     isSpeechyPlayerText(ctx.playerText) ||
     (isLowAgencyMove(ctx.playerText) && isPressureStalled(ctx.recentTurns))
 
   if (!talkShaped) return null
 
-  // Always on stance=say with present NPCs (dialogue is the point of the turn).
-  // For speechy do/other stances, still fire — someone is talking.
   const language = detectMarkedSpokenLanguage(ctx.playerText)
   const languageNote = language
     ? ` The player marked their speech as ${language}; a light romanized touch keeps it audible while the meaning stays clear in English.`
     : ''
 
+  const foldIn = yielding
+    ? ''
+    : 'Fold-in: stage the protagonist\'s speech as audible dialogue this turn. Keep the predicates ' +
+      '(ask, offer, confess, joke). Render in this world\'s voice unless they marked a language/register, ' +
+      'the world already matches their vernacular, or the line is load-bearing quoted speech. ' +
+      'Do not write "You speak" / "the words settle" / "a compliment" and skip the line. '
+
   return (
-    'Dialogue beat: stage present NPCs with distinct spoken lines. Prefer one hard question or demand per speaker. ' +
-    'Allow interruption, silence, or withhold when it fits goals. Do not summarize what someone “explains” — write the words. ' +
-    'Keep scenic restatement thin unless the room or bodies change; prefer speakable lines over dense monologue blocks. ' +
-    // Phase 4 ear packing: post-hoc TTS has no style tags — shape the prose for listening.
-    'Ear packing: one short physical tell between spoken lines is enough; do not re-paint a static room between every exchange. ' +
+    foldIn +
+    'Dialogue beat: write a real conversation. Each speaking NPC gets two to four clauses — not one line apiece. ' +
+    'If the player addressed someone by name, that person speaks first and at length; do not let a colleague answer for them. ' +
+    'They answer, add, interrupt, or talk to each other. One new demand is enough; do not stop after a single clause. ' +
+    'Do not summarize what someone “explains” — write the words. ' +
+    'Keep scenic restatement thin unless the room or body changes; do not re-paint an unchanged tremor or room. ' +
+    'Ear packing: one short physical tell between spoken lines is enough. ' +
     'Do not invent stage-direction tags ([whispers], [pause], SSML) — they are not rendered by TTS and will be read aloud as text.' +
     languageNote
   )
@@ -480,6 +569,7 @@ function pickEngagementCue(
   salience: PlanSalienceSummary,
 ): string | null {
   if (ctx.presentNpcCount < 1) return null
+  if (isPlayerYieldingFloor(ctx.playerText)) return null
   if (hasSalientIntrusion(salience)) return null
   if (ctx.recentTurns.length === 0) return null
   const idle = countTrailingIdleMoves(ctx)

@@ -15,7 +15,7 @@
 //   VERIFY_SAMPLE_N=50 \
 //   npx tsx --conditions=react-server packages/server/scripts/verify-parity.ts
 //
-// DO NOT run against prod without a fresh backup (CLAUDE.md rule); run against a
+// DO NOT run against prod without a fresh backup (AGENTS.md rule); run against a
 // copy. This script never writes — it is read-only on both stores. (The migrate
 // script already ran createIndexes after insert.)
 

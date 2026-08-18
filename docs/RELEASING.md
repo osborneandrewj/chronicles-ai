@@ -1,6 +1,6 @@
 # Releasing Chronicles AI
 
-The authoritative release playbook. The short binding form lives in `CLAUDE.md` ("Release version bump & deploy"); this is the worked-out version the team follows.
+The authoritative release playbook. The short binding form lives in `AGENTS.md` ("Release"); this is the worked-out version the team follows.
 
 The version is load-bearing: the header at `src/app/page.tsx:17` reads `pkg.version` from `package.json`, and that one number is the user's only at-a-glance trust signal for "what's running". Don't let it lie.
 
@@ -83,4 +83,4 @@ Each version has a milestone doc under `docs/plans/milestones/`. The template (`
 
 > **Caveat — pre-restart milestone docs.** `docs/plans/milestones/` already contains `v0.1.0`–`v0.6.x` docs from the **pre-restart** numbering. They stay as historical record (other docs and project memory reference them) — **do NOT move or rename them.** New, post-restart milestone docs must disambiguate by carrying a **date prefix** in the filename, e.g. `2026-06-05-v0.2.0-<slug>.md`, so a new `v0.2.0` never clobbers the old `v0.2.0.md`.
 
-See also: `CLAUDE.md` → "Release version bump & deploy".
+See also: `AGENTS.md` → "Release".

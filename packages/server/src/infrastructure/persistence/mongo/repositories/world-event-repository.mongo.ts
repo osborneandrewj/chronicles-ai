@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { WorldEvent, WorldEventInput } from '@/domain/entities'
+import type { WorldEvent, WorldEventInput, WorldEventKind } from '@/domain/entities'
 import type { WorldEventRepository } from '@/domain/ports/world-event-repository'
 import { WORLD_EVENT_RECENT_CAP } from '@/domain/ports/world-event-repository'
 
@@ -36,9 +36,12 @@ export class MongoWorldEventRepository implements WorldEventRepository {
   async recentForWorld(
     worldId: number,
     limit: number = WORLD_EVENT_RECENT_CAP,
+    kinds?: readonly WorldEventKind[],
   ): Promise<WorldEvent[]> {
     const cap = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : WORLD_EVENT_RECENT_CAP
-    const rows = await this.ctx.models.WorldEvent.find({ worldId })
+    const filter =
+      kinds && kinds.length > 0 ? { worldId, kind: { $in: [...kinds] } } : { worldId }
+    const rows = await this.ctx.models.WorldEvent.find(filter)
       .sort({ id: -1 })
       .limit(cap)
       .session(this.ctx.currentSession)

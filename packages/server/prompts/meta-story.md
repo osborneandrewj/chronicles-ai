@@ -14,6 +14,7 @@ Return a single JSON object matching the schema. No prose outside the JSON.
 - `institution` — the program and its TRUE purpose behind the friendly face (Crichton/Westworld hubris; Clancy black-program secrecy).
 - `hiddenTruth` — what running the simulations is really for, and the ticking consequence if it continues.
 - `antagonist` — who inside will burn the player to stay hidden. `allies` — who is secretly on their side.
+- `antagonistSpeechRegister` — compact sticky how they talk (≤200 chars): register, default move, optional taboo. Distinct from the friendly crew. Example: `clipped · formal · never explains the program · default: one instruction or a counter-question`.
 - `acts` — the escalation ladder, ordered, each `{ title, summary, lucidityThreshold }`: a friendly posting (0) → first glitch (1) → first awakening (2) → discovering the program (3) → learning to bend reality (4) → the choice (5). Thresholds ascend.
 - `bleedMotifs` — 3–5 recurring figures / phrases / symbols / impossible objects that cross EVERY simulation regardless of era — the thread that whispers "something is wrong with all of this".
 - `endgameFork` — the final choices: master the system / free it / expose it / escape it (4 options).

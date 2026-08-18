@@ -4,7 +4,10 @@ import {
   applyArchivistPatch,
   buildArchivistPriorState,
   buildArchivistUserContent,
+  constrainPlayerTravel,
   extractDeterministicPatch,
+  extractWakePlace,
+  mergeDeterministicTravel,
   normalizeTransitPlaceName,
   PLACE_KIND_DIRECTIVE,
   sanitizeArchivistPatch,
@@ -17,6 +20,7 @@ import {
   getCharactersForWorld,
   getPlacesForWorld,
   getScenesForWorld,
+  insertBoundedScene,
   getStoryDossierForWorld,
   getWorldCursor,
   insertTurn,
@@ -766,6 +770,26 @@ describe('applyArchivistPatch', () => {
     expect(player.current_place_id).toBe(shipInn.id)
   })
 
+  it('closing the current scene also completes leftover seed actives', async () => {
+    const prior = getActiveSceneForWorld(worldId)!
+    const leftover = insertBoundedScene({
+      world_id: worldId,
+      place_id: prior.place_id ?? 1,
+      title: 'Arrival',
+      scene_number: 0,
+      status: 'active',
+    })
+    expect(leftover.id).not.toBe(prior.id)
+
+    await applyArchivistPatch(worldId, turnId, {
+      scene: { action: 'close', summary: 'The morning briefing ended.' },
+    })
+
+    const leftoverRow = getScenesForWorld(worldId).find((s) => s.id === leftover.id)!
+    expect(leftoverRow.status).toBe('completed')
+    expect(getActiveSceneForWorld(worldId)).toBeNull()
+  })
+
   it("'keep_open' is a no-op for scenes", async () => {
     const before = getScenesForWorld(worldId).map((s) => ({ id: s.id, status: s.status }))
     await applyArchivistPatch(worldId, turnId, { scene: { action: 'keep_open' } })
@@ -1222,6 +1246,87 @@ describe('extractDeterministicPatch', () => {
         place_name: 'Whitworth university',
       },
     })
+  })
+
+  it('extracts follow-him-to travel when the narrator stages the arrival', async () => {
+    const { worldId } = seedWorld(`FollowTo-${Math.random()}`)
+    const prior = await loadNarratorState(worldId)
+
+    const patch = extractDeterministicPatch(
+      prior,
+      'I groan and follow him to medical',
+      'You groan and fall in step behind Ellis. He leads without comment until the Medical doorway opens ahead.',
+    )
+
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Medical')
+    expect(patch?.scene).toEqual({
+      action: 'open',
+      title: 'At Medical',
+      place_name: 'Medical',
+    })
+  })
+
+  it('ignores typed travel when skipPlayerTravel is set', async () => {
+    const { worldId } = seedWorld(`SkipTravel-${Math.random()}`)
+    const prior = await loadNarratorState(worldId)
+    const patch = extractDeterministicPatch(
+      prior,
+      'I follow the corridor and head to the isolation chamber.',
+      'The isolation chamber door seals behind you.',
+      { skipPlayerTravel: true },
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBeUndefined()
+  })
+
+  it('lands a wake-advance at the depicted cot, not the typed isolation walk', async () => {
+    const { worldId } = seedWorld(`WakePlace-${Math.random()}`)
+    const prior = await loadNarratorState(worldId)
+    const prose =
+      'You remain motionless. Time advances. You wake on the cot, leads still attached. The isolation chamber is not in sight. The clock reads 21:14.'
+    expect(extractWakePlace(prose, ['Medical', 'Isolation Chamber', 'Corridor'])).toBe(
+      'Medical',
+    )
+    const patch = extractDeterministicPatch(
+      prior,
+      'I follow the corridor and head to the isolation chamber.',
+      prose,
+      { skipPlayerTravel: true, wakePlace: 'Medical' },
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Medical')
+    const constrained = constrainPlayerTravel(
+      {
+        scene: { action: 'open', title: 'At Isolation chamber', place_name: 'Isolation chamber' },
+        characters: [
+          { name: 'Edith', is_player: true, current_place_name: 'Isolation chamber' },
+          { name: 'Ellis Shaw', current_place_name: 'Medical' },
+        ],
+      },
+      'Medical',
+    )
+    expect(constrained.scene).toBeUndefined()
+    expect(
+      constrained.characters?.find((c) => c.is_player)?.current_place_name,
+    ).toBeUndefined()
+    expect(
+      constrained.characters?.find((c) => c.name === 'Ellis Shaw')?.current_place_name,
+    ).toBe('Medical')
+  })
+
+  it('overlays deterministic player travel onto an LLM patch that only moved NPCs', () => {
+    const merged = mergeDeterministicTravel(
+      {
+        characters: [{ name: 'Ellis Shaw', current_place_name: 'Medical' }],
+      },
+      {
+        places: [{ name: 'Medical' }],
+        characters: [{ name: 'Edith', is_player: true, current_place_name: 'Medical' }],
+        scene: { action: 'open', title: 'At Medical', place_name: 'Medical' },
+      },
+    )
+    expect(merged.characters?.some((c) => c.is_player && c.current_place_name === 'Medical')).toBe(
+      true,
+    )
+    expect(merged.scene?.action).toBe('open')
   })
 
   it('does not extract a destination the narrator did not confirm', async () => {

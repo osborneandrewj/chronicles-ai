@@ -98,6 +98,17 @@ describe('repairNpcAgentText', () => {
   it('returns null for unparseable text', () => {
     expect(repairNpcAgentText('not json at all')).toBeNull()
   })
+
+  it('recovers Shape 1 when Haiku uses > instead of : before planned_actions', () => {
+    const inner = `${JSON.stringify(intended.npc_updates)},\n"planned_actions">${JSON.stringify(intended.planned_actions)}`
+    const malformed = JSON.stringify({ npc_updates: inner })
+
+    const repaired = repairNpcAgentText(malformed)
+    expect(repaired).not.toBeNull()
+    const obj = JSON.parse(repaired!)
+    expect(NpcAgentPatchSchema.safeParse(obj).success).toBe(true)
+    expect(obj).toEqual(intended)
+  })
 })
 
 describe('NpcAgentPatchSchema (planned_actions reordered first)', () => {
@@ -554,5 +565,24 @@ describe('NPC story context (plot lifecycle)', () => {
     expect(content).toContain('recently_closed')
     expect(content).toContain('director_slot')
     expect(content).toContain('initiate')
+  })
+
+  it('pins a write-through instruction when the player yielded the floor', () => {
+    const content = buildNpcAgentUserContent({
+      worldTime: 'Night',
+      settingRegion: null,
+      protagonistPlace: 'Medical',
+      openOrderLine: null,
+      privateChannelLine: null,
+      npcContext: [{ name: 'Ellis Shaw', director_slot: 'initiate' }],
+      knownPlacesBlock: '- Medical',
+      priorNarration: 'Ellis closes the ledger.',
+      playerAboutLine: 'PLAYER IS ABOUT TO (this turn): continue',
+      storyContext: null,
+      yieldFloorLine:
+        'PLAYER YIELDED THE FLOOR this turn (continue / wait / until-done / time jump). Plan the rest of the current activity as one move.',
+    })
+    expect(content).toContain('PLAYER YIELDED THE FLOOR')
+    expect(content).toContain('rest of the current activity')
   })
 })

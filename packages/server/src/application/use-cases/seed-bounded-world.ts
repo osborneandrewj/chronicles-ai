@@ -2,6 +2,7 @@ import type { PlaceConnection } from '@/domain/entities'
 import type {
   CharacterRepository,
   Clock,
+  DossierWriter,
   WorldArchetypeProvider,
   WorldArchetype,
   PlaceConnectionInput,
@@ -11,6 +12,7 @@ import type {
   RelationshipRepository,
   WorldRepository,
 } from '@/domain/ports'
+import type { OpeningPlotSeeder } from '@/domain/ports/opening-plot-seeder'
 import type {
   CompanionDailyLoopEntry,
   EnsembleGenerator,
@@ -18,6 +20,7 @@ import type {
 } from '@/domain/ports/ensemble-generator'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
 import { ensureSeedTension } from '@/domain/services/seed-tension'
+import { capSpeechRegister } from '@/domain/services/speech-staging'
 
 // SeedBoundedWorld (starship P1) — pure orchestration that turns an authored
 // deck-plan template plus LLM-generated dressing into a bounded world: one
@@ -69,6 +72,9 @@ export type SeedBoundedWorldDeps = {
   characters: CharacterRepository
   relationships: RelationshipRepository
   clock: Clock
+  /** When set, seed 2–3 Booker-shaped opening threads after the ensemble. */
+  dossierWriter?: DossierWriter
+  openingPlotSeeder?: OpeningPlotSeeder
 }
 
 // Resolve a crew member's daily-loop place reference (a template room key OR its
@@ -158,6 +164,8 @@ export async function seedBoundedWorld(
       active_goal: member.goal,
       daily_loop: JSON.stringify(dailyLoop),
     })
+    const register = capSpeechRegister(member.speechRegister)
+    if (register) await characters.setSpeechRegisterIfEmpty(id, register)
     characterIdByRole.set(member.role, id)
   }
 
@@ -184,6 +192,16 @@ export async function seedBoundedWorld(
   }
   if (relationshipEdges.length > 0) await relationships.upsert(relationshipEdges)
 
+  await seedOpeningPlots(worldId, {
+    premise: dressing.premise || premise,
+    worldName: dressing.worldName || name,
+    crew: dressing.crew,
+    relationships: dressing.relationships,
+    seed: hashSeed(`${templateId}\0${premise}`),
+    dossierWriter: deps.dossierWriter,
+    openingPlotSeeder: deps.openingPlotSeeder,
+  })
+
   // Validate the seeded topology forms a single connected component.
   const connections: PlaceConnection[] = edges.map((edge, index) => ({
     id: index + 1,
@@ -200,4 +218,58 @@ export async function seedBoundedWorld(
   }
 
   return { worldId, placeIds, characterIds: dressing.crew.map((m) => characterIdByRole.get(m.role) as number) }
+}
+
+async function seedOpeningPlots(
+  worldId: number,
+  args: {
+    premise: string
+    worldName: string
+    crew: GeneratedEnsemble['crew']
+    relationships: GeneratedEnsemble['relationships']
+    seed: number
+    dossierWriter?: DossierWriter
+    openingPlotSeeder?: OpeningPlotSeeder
+  },
+): Promise<void> {
+  if (!args.dossierWriter || !args.openingPlotSeeder) return
+  try {
+    const { threads } = await args.openingPlotSeeder.generate({
+      premise: args.premise,
+      worldName: args.worldName,
+      crew: args.crew.map((c) => ({
+        name: c.name,
+        role: c.role,
+        persona: c.persona,
+        goal: c.goal,
+      })),
+      relationships: args.relationships,
+      seed: args.seed,
+    })
+    for (const t of threads) {
+      await args.dossierWriter.insertThread({
+        world_id: worldId,
+        title: t.title,
+        kind: t.kind,
+        status: 'active',
+        summary: t.summary,
+        stakes: t.stakes,
+        rewards: null,
+        consequences: null,
+        hidden: null,
+        relevance_tags_json: JSON.stringify(t.relevanceTags),
+        source_turn_id: null,
+      })
+    }
+  } catch (err) {
+    console.error('[opening plots seed]', err)
+  }
+}
+
+function hashSeed(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i += 1) {
+    h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0
+  }
+  return h || 1
 }

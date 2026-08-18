@@ -9,6 +9,9 @@ import {
 } from 'ai'
 
 import type { NarrationContext, NarratorStream } from '@/application/use-cases/advance-turn'
+import type { ResolvedOutcome } from '@/domain/entities/resolved-outcome'
+import type { ConductorPort, ConductorUsage } from '@/domain/ports/conductor'
+import type { InputMode, Stance } from '@/domain/services/action-classifier-rules'
 import { ensureHubAntagonist } from '@/application/use-cases/ensure-hub-antagonist'
 import { tickLivingWorld } from '@/application/use-cases/tick-living-world'
 import { getContainer } from '@/composition/container'
@@ -25,6 +28,14 @@ import {
   shouldRunCloseBiasPass,
 } from '@/domain/services/close-bias'
 import { decideDirector, directorBeatToMetadata } from '@/domain/services/director'
+import { resolveAgencyLock } from '@/domain/services/incapacitation'
+import { applySettledFindingsToSnapshot } from '@/domain/services/settled-findings'
+import {
+  contestedFallback,
+  isBindingOutcome,
+  outcomeToMetadata,
+  resolveOutcomeWithRules,
+} from '@/domain/services/outcome-resolution'
 import { shouldRunDirectorBrain } from '@/domain/services/director-brain-gate'
 import { decideDirectorCloses } from '@/domain/services/director-lifecycle'
 import {
@@ -35,6 +46,7 @@ import {
   beatDirectedEvent,
   npcReconcileEvents,
   objectiveCompletedEvent,
+  outcomeResolvedEvent,
   threadClosedEvent,
 } from '@/domain/services/world-event-log'
 import {
@@ -96,8 +108,11 @@ import { NARRATOR_MODEL } from '@/infrastructure/llm/model-registry'
 import {
   ARCHIVIST_MODEL,
   applyArchivistPatch,
+  constrainPlayerTravel,
   extractDeterministicPatch,
   extractPatch,
+  extractWakePlace,
+  mergeDeterministicTravel,
 } from '@/lib/archivist'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
@@ -112,6 +127,7 @@ import {
   applyPromotionDeltaToState,
   collectSceneTags,
   formatDirectorBlock,
+  formatResolvedOutcomeBlock,
   formatSceneDigestForClassifier,
   formatStateBlock,
   getNarratorWorldState,
@@ -162,6 +178,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const {
     characters,
     clock,
+    conductor,
     decks,
     directorBrain,
     dossiers,
@@ -273,8 +290,42 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     priorState.presentCharacters,
     playerTurnId,
   )
-  const postPromotionState = applyPromotionDeltaToState(priorState, promotion, playerTurnId)
+  let postPromotionState = applyPromotionDeltaToState(priorState, promotion, playerTurnId)
   mark('promotion_ms', promoStarted)
+
+  try {
+    const settled = applySettledFindingsToSnapshot(postPromotionState)
+    postPromotionState = settled.next
+    for (const w of settled.focusWrites) {
+      await characters.applyAgentNpcFields(w.characterId, {
+        ...(w.current_focus ? { current_focus: w.current_focus } : {}),
+        ...(w.last_known_situation
+          ? { last_known_situation: w.last_known_situation }
+          : {}),
+      })
+      if (w.active_goal) {
+        await characters.setActiveGoal(w.characterId, w.active_goal)
+      }
+    }
+    for (const id of settled.dormantThreadIds) {
+      const t = postPromotionState.dossier.threads.find((row) => row.id === id)
+      if (!t) continue
+      await dossierWriter.updateThread({
+        id: t.id,
+        kind: t.kind,
+        status: 'dormant',
+        summary: t.summary,
+        stakes: t.stakes,
+        rewards: t.rewards,
+        consequences: t.consequences,
+        hidden: t.hidden,
+        relevance_tags_json: t.relevance_tags_json,
+        resolved_turn_id: null,
+      })
+    }
+  } catch (err) {
+    console.error('[settled-findings]', err)
+  }
 
   // Geocode off the critical path (Track A3). Comment already claimed
   // "never blocks the narrator"; now it actually doesn't. Resolution lands
@@ -356,6 +407,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   // Await classifier (started after first state read) before NPC gate.
   const classification = await classificationPromise
   const { stance, input_mode } = classification
+  const conductorStarted = Date.now()
+  const conductorPromise = settleConductorResolution(conductor, {
+    playerText,
+    stance,
+    inputMode: input_mode,
+    sceneDigest: formatSceneDigestForClassifier(priorState),
+  })
   const shouldRunNpcAgent = shouldTickNpcAgent({
     stance,
     inputMode: input_mode,
@@ -379,7 +437,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   const enRouteNames = postPromotionState.knownCharacters
     .filter((c) => c.in_transit_to_place_id != null)
     .map((c) => c.name)
+  const lastAssistant = [...priorHistory].reverse().find((t) => t.role === 'assistant')
   let directorState = parseDirectorState(world.director_state_json)
+  const agencyLock = resolveAgencyLock({
+    playerText,
+    recentAssistantText: lastAssistant?.content ?? null,
+    persistedLocked: directorState.agencyLocked,
+  })
   const directorDecision = decideDirector({
     threads: postPromotionState.dossier.threads,
     objectives: postPromotionState.dossier.objectives,
@@ -396,18 +460,31 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       .filter((c) => c.in_transit_to_place_id != null)
       .map((c) => ({ id: c.id, name: c.name })),
     pendingBeat: directorState.pending,
+    lastBeatKind: directorState.lastBeatKind,
+    lastForegroundThreadId: directorState.lastForegroundThreadId,
+    stallStreak: directorState.stallStreak,
+    wakeAdvance: agencyLock.restoreAgency,
+    collapsingThisTurn: agencyLock.collapsingThisTurn,
+    stayUnder: agencyLock.stayUnder,
   })
-  if (directorState.pending) {
-    directorState = { ...directorState, pending: null }
-    try {
-      await worlds.setDirectorState(worldId, serializeDirectorState(directorState))
-    } catch (err) {
-      console.error('[director-state consume]', err)
-    }
+  directorState = {
+    ...directorState,
+    pending: null,
+    lastBeatKind: directorDecision.beatKind,
+    lastForegroundThreadId: directorDecision.foregroundThreadId,
+    stallStreak:
+      directorDecision.beatKind === 'stall_escalate' ? directorState.stallStreak + 1 : 0,
+    agencyLocked:
+      agencyLock.collapsingThisTurn || (agencyLock.locked && agencyLock.stayUnder),
+  }
+  try {
+    await worlds.setDirectorState(worldId, serializeDirectorState(directorState))
+  } catch (err) {
+    console.error('[director-state consume]', err)
   }
 
   const agentOccStarted = Date.now()
-  const [npcAgentSettled, occupancySettled] = await Promise.all([
+  const [npcAgentSettled, occupancySettled, conductorSettled] = await Promise.all([
     shouldRunNpcAgent || forceAgentForOpenOrder
       ? runNpcAgentTick(
           npcAgentDeps,
@@ -435,13 +512,41 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
           console.error('[place-population]', err)
           return null
         }),
+    conductorPromise,
   ])
   mark('agent_occupancy_ms', agentOccStarted)
+  mark('conductor_ms', conductorStarted)
 
   const npcAgentResult = npcAgentSettled && 'plans' in npcAgentSettled ? npcAgentSettled : null
   const npcAgentError = npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
   const plans = npcAgentResult?.plans ?? []
   const turnOccupancy: PlaceOccupancy | null = occupancySettled
+  const resolvedOutcome = conductorSettled.resolution
+  if (isBindingOutcome(resolvedOutcome)) {
+    try {
+      await turns.mergeMetadata(playerTurnId, 'conductor', {
+        model: conductorSettled.model,
+        method: conductorSettled.method,
+        resolution: outcomeToMetadata(resolvedOutcome),
+        usage: conductorSettled.usage,
+      })
+    } catch (err) {
+      console.error('[conductor metadata]', err)
+    }
+    const outcomeEvent = outcomeResolvedEvent({
+      worldId,
+      turnId: playerTurnId,
+      worldTime: postPromotionState.worldTime,
+      resolution: resolvedOutcome,
+    })
+    if (outcomeEvent) {
+      try {
+        await worldEvents.append(outcomeEvent)
+      } catch (err) {
+        console.error('[conductor world-event]', err)
+      }
+    }
+  }
 
   // Merge occupancy into the in-memory snapshot (no third state assembly).
   const narratorState = {
@@ -569,6 +674,10 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
   )
   if (directorBlock) {
     stateBlock = `${stateBlock}\n\n${directorBlock}`
+  }
+  const outcomeBlock = formatResolvedOutcomeBlock(resolvedOutcome)
+  if (outcomeBlock) {
+    stateBlock = `${stateBlock}\n\n${outcomeBlock}`
   }
 
   // Hub sim-ops: clearance-filtered index ambient; full body only at console gate.
@@ -718,6 +827,9 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     planSalience,
     openOrder: activeOpenOrder,
     privateUtterance: activePrivateUtterance,
+    wakeAdvance: agencyLock.restoreAgency,
+    collapsingThisTurn: agencyLock.collapsingThisTurn,
+    stayUnder: agencyLock.stayUnder,
     worldTime: narratorState.worldTime,
     activeObjectiveTitles,
     openClueTitles: narratorState.dossier.clues
@@ -771,8 +883,8 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     role: 'user',
     content: `${stateBlock}${offScreenBlock}${realityBlock}\n\nCLASSIFICATION: stance=${stance}, input_mode=${input_mode}${guidanceSection}\n\nPLAYER ACTION:\n${playerText}`,
   }
+  const narratorSystem = `${NARRATOR_BASE}\n\n${premiseBlock}`
   const modelMessages: ModelMessage[] = [
-    { role: 'system', content: `${NARRATOR_BASE}\n\n${premiseBlock}` },
     ...historyMessages,
     trailingUser,
   ]
@@ -785,6 +897,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       prestream_ms: prestreamMs,
       spans: timingSpans,
       classifier_method: classification.method,
+      conductor_method: conductorSettled.method,
       npc_agent_ran: Boolean(npcAgentResult),
       arrivals_applied: arrivalPatches.length,
       occupancy_reused: occupancyReuse,
@@ -807,6 +920,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   const result = streamText({
     model: xai(NARRATOR_MODEL),
+    system: narratorSystem,
     messages: modelMessages,
     tools: narratorMapTools,
     stopWhen: stepCountIs(2),
@@ -1154,6 +1268,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
               await worlds.setDirectorState(
                 worldId,
                 serializeDirectorState({
+                  ...directorState,
                   pending: {
                     ...proposed,
                     reason: brainReason,
@@ -1239,7 +1354,23 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         }
       }
 
-      const deterministicPatch = extractDeterministicPatch(priorState, playerText, trimmed)
+      const skipPlayerTravel =
+        agencyLock.locked ||
+        agencyLock.restoreAgency ||
+        agencyLock.stayUnder ||
+        agencyLock.collapsingThisTurn
+      const wakePlace = agencyLock.restoreAgency
+        ? extractWakePlace(
+            trimmed,
+            priorState.knownPlaces.map((p) => p.name),
+          )
+        : null
+      const deterministicPatch = extractDeterministicPatch(
+        priorState,
+        playerText,
+        trimmed,
+        { skipPlayerTravel, wakePlace },
+      )
       const activeDossierCount = countActiveDossierRows(priorState.dossier)
       const signal = shouldRunArchivistLlm(
         playerText,
@@ -1271,10 +1402,13 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       const decision = shouldRunArchivistLlmWithLag({ signal, lag: lagBefore })
 
       if (!decision.run && deterministicPatch) {
-        await applyArchivistPatch(worldId, narratorTurn.id, deterministicPatch)
+        const travelSafe = skipPlayerTravel
+          ? constrainPlayerTravel(deterministicPatch, wakePlace)
+          : deterministicPatch
+        await applyArchivistPatch(worldId, narratorTurn.id, travelSafe)
         await turns.mergeMetadata(narratorTurn.id, 'archivist', {
           model: 'deterministic-archivist',
-          patch: deterministicPatch,
+          patch: travelSafe,
           lag_before: lagBefore,
         })
         runDupDetector(characters, worldId)
@@ -1312,11 +1446,15 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
         activePrivateUtterance,
       )
         .then(async ({ patch, usage: archivistUsage }) => {
-          await applyArchivistPatch(worldId, narratorTurn.id, patch)
+          let merged = mergeDeterministicTravel(patch, deterministicPatch)
+          if (skipPlayerTravel) {
+            merged = constrainPlayerTravel(merged, wakePlace)
+          }
+          await applyArchivistPatch(worldId, narratorTurn.id, merged)
           const archivistMeta: Record<string, unknown> = {
             model: ARCHIVIST_MODEL,
             usage: archivistUsage,
-            patch,
+            patch: merged,
             run_reason: decision.reason,
             lag_before: lagBefore,
           }
@@ -1533,4 +1671,64 @@ function emptyStream(): ReadableStream<unknown> {
       controller.close()
     },
   })
+}
+
+type ConductorSettled = {
+  resolution: ResolvedOutcome
+  method: 'rules' | 'llm' | 'fallback'
+  model: string
+  usage?: ConductorUsage
+}
+
+function settleConductorResolution(
+  port: ConductorPort,
+  input: {
+    playerText: string
+    stance: Stance
+    inputMode: InputMode
+    sceneDigest: string
+  },
+): Promise<ConductorSettled> {
+  const rules = resolveOutcomeWithRules({
+    playerText: input.playerText,
+    stance: input.stance,
+    inputMode: input.inputMode,
+  })
+  if (rules) {
+    return Promise.resolve({
+      resolution: rules,
+      method: 'rules',
+      model: 'rule-based-conductor',
+    })
+  }
+  return port
+    .resolve({
+      playerText: input.playerText,
+      stance: input.stance,
+      inputMode: input.inputMode,
+      sceneDigest: input.sceneDigest,
+    })
+    .then((result) => {
+      if (result) {
+        return {
+          resolution: result.resolution,
+          method: 'llm' as const,
+          model: result.model,
+          usage: result.usage,
+        }
+      }
+      return fallbackConductor(input.playerText)
+    })
+    .catch((err) => {
+      console.error('[conductor]', err)
+      return fallbackConductor(input.playerText)
+    })
+}
+
+function fallbackConductor(playerText: string): ConductorSettled {
+  return {
+    resolution: contestedFallback(playerText),
+    method: 'fallback',
+    model: 'rule-based-conductor',
+  }
 }

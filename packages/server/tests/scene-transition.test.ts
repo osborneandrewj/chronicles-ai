@@ -63,6 +63,19 @@ describe('decideSceneTransition — NPC-cluster fallback (Call-In Case)', () => 
     expect(intent).toEqual({ placeId: 7, reason: 'npc-cluster', priorScenePlaceId: 3 })
   })
 
+  it('does not drag the player when only one NPC relocates (Threshold 1187)', () => {
+    expect(
+      decideSceneTransition({
+        sceneUnchanged: true,
+        playerPlaceFromPatch: null,
+        scenePlaceId: 38, // corridor
+        playerPlaceId: 38,
+        relocatedNpcByPlace: new Map([[39, ['Jordan Lacy']]]), // medical
+        npcPlacesInPatch: new Set([39]),
+      }),
+    ).toBeNull()
+  })
+
   it('does not fire without a clear majority cluster', () => {
     expect(
       decideSceneTransition({

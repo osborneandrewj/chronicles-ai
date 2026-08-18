@@ -30,6 +30,8 @@ export type MetaStoryBible = {
   hiddenTruth: string
   // Who inside will burn the player to stay hidden, and who is secretly an ally.
   antagonist: string
+  /** Optional sticky voice for the antagonist; authored at bible gen. */
+  antagonistSpeechRegister?: string
   allies: string
   // The escalation ladder, ordered.
   acts: MetaStoryAct[]

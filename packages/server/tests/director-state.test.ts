@@ -23,6 +23,10 @@ describe('parseDirectorState', () => {
       },
       lastBrainTurnId: 11,
       lastBrainReason: 'stall' as const,
+      lastBeatKind: 'stall_escalate' as const,
+      lastForegroundThreadId: 7,
+      stallStreak: 2,
+      agencyLocked: true,
     }
     expect(parseDirectorState(serializeDirectorState(state))).toEqual(state)
   })
