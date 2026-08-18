@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Lora } from "next/font/google";
+import { Cinzel, Inter, Lora, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({
@@ -11,6 +11,19 @@ const inter = Inter({
 const lora = Lora({
   subsets: ["latin"],
   variable: "--font-serif",
+  display: "swap",
+});
+
+const cinzel = Cinzel({
+  subsets: ["latin"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const shareTech = Share_Tech_Mono({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-mono-display",
   display: "swap",
 });
 
@@ -33,7 +46,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${lora.variable}`}>
+    <html lang="en" className={`${inter.variable} ${lora.variable} ${cinzel.variable} ${shareTech.variable}`}>
       <body className="min-h-screen bg-neutral-950 font-sans text-neutral-100 antialiased">
         {children}
       </body>

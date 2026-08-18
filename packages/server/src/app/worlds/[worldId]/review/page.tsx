@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation'
 
 import { Chat, type ChroniclesMessage } from '@/components/Chat'
 import { getContainer } from '@/composition/container'
+import { parseGenreTags } from '@/domain/services/occupancy-sim'
+import { effectiveUiSkin } from '@/domain/services/ui-skin'
 import { summarizeTurn, type TurnCost } from '@/lib/turn-cost'
 
 export const dynamic = 'force-dynamic'
@@ -41,14 +43,14 @@ export default async function ReviewPage({ params }: { params: Promise<Params> }
     <div className="relative flex min-h-screen flex-col">
       <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-2.5 sm:px-6">
         <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
-          Simulation record — read only
+          Past life — read only
         </span>
         {world.parent_world_id !== null && (
           <Link
             href={`/worlds/${world.parent_world_id}/play`}
             className="text-sm text-neutral-500 transition hover:text-neutral-300"
           >
-            ← Back to hub
+            ← Back to Animus
           </Link>
         )}
       </div>
@@ -59,6 +61,12 @@ export default async function ReviewPage({ params }: { params: Promise<Params> }
         initialUsage={initialUsage}
         initialOldestId={turns[0]?.id ?? null}
         initialHasOlder={hasOlder}
+        skin={effectiveUiSkin(
+          world.ui_skin,
+          parseGenreTags(world.genre_tags),
+          world.world_layer,
+        )}
+        worldLayer="subworld"
         readOnly
       />
     </div>

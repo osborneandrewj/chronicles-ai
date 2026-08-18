@@ -1,23 +1,17 @@
 import type { SimulationSession, WorldLayer } from '@/domain/entities'
 
-// Pure domain service (Phase C, C7) — the concealment gate. The simulation-hub
-// reveal must not be spoiled by ANY read surface (join UI, world list, world
-// title, the inspector, route JSON) — even for test users — until the in-fiction
-// awakening flips `has_awoken`. This decides, server-side, what a given world may
-// expose right now, so concealment is enforced at the query/use-case layer and
-// no view can leak it. No I/O.
-//
-// While a session is concealed (in a subworld, not yet awoken):
-//   - the HUB world is hidden entirely (not inspectable, not listed);
-//   - any premise is scrubbed from payloads (the rich hidden premise lives only
-//     in narrator/archivist context, never in a client view).
-// Once `has_awoken` is true (or there is no session — a standalone world), the
-// gate relaxes and everything is visible.
+// Pure domain service (Phase C, C7; Animus visibility pass) — what a read
+// surface may expose. The Animus (hub) is a named, player-facing world type,
+// so it is never hidden. The Meta-Story Bible is still never rendered (that
+// lives in meta_story_json and is not part of this gate). The rich hidden
+// premise of a first life is still scrubbed from list/inspector payloads
+// while the player is inside that life. No I/O.
 
 export type ConcealmentView = {
-  // Is the playthrough currently concealed?
+  // True while the player is inside a first life (session in_subworld).
   concealed: boolean
   // Must this world be hidden from every read surface right now?
+  // Always false: the Animus is named.
   hideWorld: boolean
   // Must this world's premise be scrubbed from any payload right now?
   hidePremise: boolean
@@ -27,10 +21,12 @@ export function concealmentView(
   session: SimulationSession | null,
   world: { id: number; world_layer: WorldLayer },
 ): ConcealmentView {
-  const concealed = session !== null && session.has_awoken === 0 && session.status === 'in_subworld'
-  if (!concealed) {
+  const inLife = session !== null && session.status === 'in_subworld'
+  if (!inLife) {
     return { concealed: false, hideWorld: false, hidePremise: false }
   }
-  const isHub = world.world_layer === 'hub' || (session !== null && world.id === session.hub_world_id)
-  return { concealed: true, hideWorld: isHub, hidePremise: true }
+  const isSubworld =
+    world.world_layer === 'subworld' ||
+    (session !== null && world.id === session.subworld_world_id)
+  return { concealed: true, hideWorld: false, hidePremise: isSubworld }
 }

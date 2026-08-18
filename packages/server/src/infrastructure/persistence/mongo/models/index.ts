@@ -63,6 +63,8 @@ export type WorldDoc = {
   // Genre signal (genre-coupling audit, Phase 4): JSON string array of era/tone
   // tags, or null. SQLite: genre_tags.
   genreTags: string | null
+  // Play-chrome skin (v40). SQLite: ui_skin.
+  uiSkin: 'signal' | 'relic' | null
   // Hub sim ops
   playerModelJson: string | null
   antagonistCharacterId: number | null
@@ -88,6 +90,7 @@ const WorldSchema = new Schema<WorldDoc>(
     parentWorldId: { type: Number, default: null },
     metaStory: { type: String, default: null },
     genreTags: { type: String, default: null },
+    uiSkin: { type: String, enum: ['signal', 'relic'], default: null },
     playerModelJson: { type: String, default: null },
     antagonistCharacterId: { type: Number, default: null },
     influencePacketJson: { type: String, default: null },

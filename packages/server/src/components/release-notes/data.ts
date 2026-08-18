@@ -16,6 +16,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.13.0',
+    date: '2026-08-18',
+    highlights: [
+      'Starting a world is three named types now — Animus, a generated world, or a custom world — instead of “begin an adventure” next to “generate a world.”',
+      'An Animus is a named sci-fi home facility. You pick a first life, play starts there, and you can return to the facility. The homepage lists the Animus, not a hidden second world.',
+      'The play screen matches the world: a quiet sci-fi HUD on the Animus, parchment on historical and fantasy lives.',
+    ],
+  },
+  {
     version: '0.12.0',
     date: '2026-08-18',
     highlights: [

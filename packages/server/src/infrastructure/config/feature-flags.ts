@@ -11,3 +11,9 @@ import 'server-only'
 export function isSimHubEnabled(): boolean {
   return process.env.SIM_HUB === '1'
 }
+
+// Animus (named hub) creation is on unless explicitly disabled. SIM_HUB=0 is
+// the emergency off-switch; any other value (including unset) shows the card.
+export function isAnimusEnabled(): boolean {
+  return process.env.SIM_HUB !== '0'
+}

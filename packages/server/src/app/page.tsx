@@ -7,25 +7,50 @@ import { WhatsNewDialog } from '@/components/release-notes/WhatsNewDialog'
 import { WorldRowMenu } from '@/components/WorldRowMenu'
 import { getContainer } from '@/composition/container'
 import type { WorldSummary } from '@/domain/entities'
+import { resolveActiveWorldId } from '@/domain/services/resolve-active-world'
 import { isWorldListVisible } from '@/domain/services/world-visibility'
 
 export const dynamic = 'force-dynamic'
 
+type HomeCard = {
+  world: WorldSummary
+  href: string
+  eyebrow: string | null
+  locationLine: string | null
+}
+
 export default async function Home() {
-  // Read the world list through the repository port (not lib/worlds directly) so
-  // the homepage reflects the ACTIVE persistence model — under PERSISTENCE=mongo
-  // it lists Mongo worlds, not the SQLite file. (P6: strangle SQL-reading Server
-  // Components onto ports.)
   const { sessions, worlds: worldRepo } = getContainer()
   const allWorlds = await worldRepo.listWorlds()
-  // One entry per playthrough (v0.2.1): the active simulation while the hub is
-  // concealed, the hub once the player has awoken (past simulations move into
-  // the hub's archive). Standalone worlds always show. The pure
-  // isWorldListVisible rule decides; we just resolve each world's session.
   const visibility = await Promise.all(
     allWorlds.map(async (w) => isWorldListVisible(w, await sessions.byWorld(w.id))),
   )
-  const worlds = allWorlds.filter((_, i) => visibility[i])
+  const listed = allWorlds.filter((_, i) => visibility[i])
+  const cards: HomeCard[] = await Promise.all(
+    listed.map(async (world) => {
+      if (world.world_layer !== 'hub') {
+        return {
+          world,
+          href: `/worlds/${world.id}/play`,
+          eyebrow: null,
+          locationLine: null,
+        }
+      }
+      const session = await sessions.byWorld(world.id)
+      const activeId = resolveActiveWorldId(world.id, session)
+      let locationLine = 'At the facility'
+      if (activeId !== world.id) {
+        const active = await worldRepo.getWorld(activeId)
+        if (active?.name) locationLine = `In ${active.name}`
+      }
+      return {
+        world,
+        href: `/worlds/${activeId}/play`,
+        eyebrow: 'Animus',
+        locationLine,
+      }
+    }),
+  )
   const archived = await worldRepo.listArchivedWorlds()
 
   return (
@@ -39,7 +64,7 @@ export default async function Home() {
             <WhatsNewDialog version={pkg.version} />
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            {worlds.length} world{worlds.length === 1 ? '' : 's'}
+            {cards.length} world{cards.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -64,13 +89,13 @@ export default async function Home() {
         </div>
       </header>
 
-      {worlds.length === 0 ? (
+      {cards.length === 0 ? (
         <EmptyState />
       ) : (
         <ul className="space-y-3">
-          {worlds.map((w) => (
-            <li key={w.id}>
-              <WorldRow world={w} menuVariant="archive" />
+          {cards.map((card) => (
+            <li key={card.world.id}>
+              <WorldRow card={card} menuVariant="archive" />
             </li>
           ))}
         </ul>
@@ -97,12 +122,13 @@ function EmptyState() {
 }
 
 function WorldRow({
-  world,
+  card,
   menuVariant,
 }: {
-  world: WorldSummary
+  card: HomeCard
   menuVariant: 'archive' | 'unarchive'
 }) {
+  const { world, href, eyebrow, locationLine } = card
   const muted = menuVariant === 'unarchive'
   return (
     <div
@@ -111,10 +137,15 @@ function WorldRow({
       }`}
     >
       <Link
-        href={`/worlds/${world.id}/play`}
+        href={href}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-[1.5rem] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
       >
         <div className="min-w-0 flex-1">
+          {eyebrow ? (
+            <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
+              {eyebrow}
+            </p>
+          ) : null}
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-lg font-semibold tracking-tight text-neutral-100">
               {world.name}
@@ -133,6 +164,12 @@ function WorldRow({
             <span>
               {world.turn_count} turn{world.turn_count === 1 ? '' : 's'}
             </span>
+            {locationLine ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>{locationLine}</span>
+              </>
+            ) : null}
           </div>
         </div>
       </Link>
@@ -179,8 +216,6 @@ function ClockIcon() {
 }
 
 function formatCreatedAt(raw: string): string {
-  // SQLite returns ISO-like "YYYY-MM-DD HH:MM:SS" in UTC. Render the date only;
-  // exact time doesn't matter in the list.
   const datePart = raw.split(' ')[0] ?? raw
   return datePart
 }

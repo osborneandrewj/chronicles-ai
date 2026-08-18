@@ -9,6 +9,7 @@ import {
   listArchivedWorlds,
   listWorlds,
   setGenreTags,
+  setUiSkin,
   simulationsForHub,
   setSettingRegion,
   setShipClockMinutes,
@@ -137,6 +138,11 @@ export class SqliteWorldRepository implements WorldRepository {
 
   setGenreTags(worldId: number, genreTagsJson: string | null): Promise<void> {
     setGenreTags(worldId, genreTagsJson)
+    return Promise.resolve()
+  }
+
+  setUiSkin(worldId: number, uiSkin: 'signal' | 'relic' | null): Promise<void> {
+    setUiSkin(worldId, uiSkin)
     return Promise.resolve()
   }
 

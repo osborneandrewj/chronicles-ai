@@ -14,8 +14,10 @@ import {
 } from "react";
 
 import { SlashCommandMenu } from "@/components/SlashCommandMenu";
+import { PLAY_SKIN_VARS, type PlaySkin } from "@/components/play/skins";
 import { useNarratorAudio } from "@/components/useNarratorAudio";
 import { WorldInspector } from "@/components/WorldInspector";
+import { returnToAnimusAction } from "@/app/worlds/[worldId]/play/actions";
 import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import {
@@ -33,10 +35,9 @@ import type {
 
 const INSPECTOR_STORAGE_KEY = "chronicles.inspector.open";
 const READER_SIZE_STORAGE_KEY = "chronicles.reader.size";
-const READER_THEME_STORAGE_KEY = "chronicles.reader.theme";
+
 
 type ReaderSize = "default" | "large" | "xlarge";
-type ReaderTheme = "dark" | "light";
 
 const READER_SIZE_OPTIONS: {
   id: ReaderSize;
@@ -47,59 +48,6 @@ const READER_SIZE_OPTIONS: {
   { id: "default", label: "Default", fontSize: "17px", lineHeight: "1.8" },
   { id: "large", label: "Large", fontSize: "19px", lineHeight: "1.85" },
   { id: "xlarge", label: "Extra large", fontSize: "24px", lineHeight: "1.95" },
-];
-
-const READER_THEME_OPTIONS: {
-  id: ReaderTheme;
-  label: string;
-  vars: Record<string, string>;
-}[] = [
-  {
-    id: "dark",
-    label: "Dark",
-    vars: {
-      "--reader-bg": "#0f0f0d",
-      "--reader-bg-muted": "#151513",
-      "--reader-panel": "#20201d",
-      "--reader-panel-strong": "#292824",
-      "--reader-border": "#34322c",
-      "--reader-text": "#eee8dc",
-      "--reader-muted": "#a59c8c",
-      "--reader-faint": "#746d62",
-      "--reader-accent": "#d79a28",
-      "--reader-accent-soft": "rgba(215, 154, 40, 0.18)",
-      "--reader-button-text": "#f2eadc",
-      "--reader-button-hover": "#2d2b26",
-      "--reader-field": "#1f1f1c",
-      "--reader-field-focus": "#25241f",
-      "--reader-shadow": "rgba(0, 0, 0, 0.45)",
-      "--reader-top-fade": "linear-gradient(to bottom, #0f0f0d, rgba(15, 15, 13, 0))",
-      "--reader-bottom-fade": "linear-gradient(to top, #0f0f0d, rgba(15, 15, 13, 0.9), rgba(15, 15, 13, 0))",
-    },
-  },
-  {
-    id: "light",
-    label: "Light",
-    vars: {
-      "--reader-bg": "#f4efe6",
-      "--reader-bg-muted": "#ebe3d6",
-      "--reader-panel": "#fffaf1",
-      "--reader-panel-strong": "#f0e7d9",
-      "--reader-border": "#d5c8b5",
-      "--reader-text": "#252018",
-      "--reader-muted": "#6e6253",
-      "--reader-faint": "#928674",
-      "--reader-accent": "#9b6412",
-      "--reader-accent-soft": "rgba(155, 100, 18, 0.14)",
-      "--reader-button-text": "#2a2116",
-      "--reader-button-hover": "#eadfcc",
-      "--reader-field": "#fffaf1",
-      "--reader-field-focus": "#fff7e9",
-      "--reader-shadow": "rgba(70, 45, 15, 0.16)",
-      "--reader-top-fade": "linear-gradient(to bottom, #f4efe6, rgba(244, 239, 230, 0))",
-      "--reader-bottom-fade": "linear-gradient(to top, #f4efe6, rgba(244, 239, 230, 0.9), rgba(244, 239, 230, 0))",
-    },
-  },
 ];
 
 export type ChroniclesMessage = UIMessage<MessageMetadata>;
@@ -118,6 +66,9 @@ type Props = {
   readOnly?: boolean;
   // Optional in-flow header control (hub Past Simulations). Must not overlay.
   headerEnd?: ReactNode;
+  skin?: PlaySkin;
+  worldLayer?: "hub" | "subworld" | "standalone";
+  canReturnToAnimus?: boolean;
 };
 
 
@@ -130,6 +81,9 @@ export function Chat({
   initialHasOlder,
   readOnly = false,
   headerEnd,
+  skin = "relic",
+  worldLayer = "standalone",
+  canReturnToAnimus = false,
 }: Props) {
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
@@ -170,7 +124,6 @@ export function Chat({
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorRefreshKey, setInspectorRefreshKey] = useState(0);
   const [readerSize, setReaderSize] = useState<ReaderSize>("default");
-  const [readerTheme, setReaderTheme] = useState<ReaderTheme>("dark");
   useEffect(() => {
     if (typeof window === "undefined") return;
     setInspectorOpen(window.localStorage.getItem(INSPECTOR_STORAGE_KEY) === "1");
@@ -181,10 +134,6 @@ export function Chat({
       storedReaderSize === "xlarge"
     ) {
       setReaderSize(storedReaderSize);
-    }
-    const storedReaderTheme = window.localStorage.getItem(READER_THEME_STORAGE_KEY);
-    if (storedReaderTheme === "dark" || storedReaderTheme === "light") {
-      setReaderTheme(storedReaderTheme);
     }
   }, []);
   const toggleInspector = useCallback(() => {
@@ -202,13 +151,6 @@ export function Chat({
       window.localStorage.setItem(READER_SIZE_STORAGE_KEY, next);
     }
   }, []);
-  const updateReaderTheme = useCallback((next: ReaderTheme) => {
-    setReaderTheme(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(READER_THEME_STORAGE_KEY, next);
-    }
-  }, []);
-
   const router = useRouter();
   const prevStatus = useRef(status);
   useEffect(() => {
@@ -314,12 +256,11 @@ export function Chat({
   const sessionTotal = usage.reduce((s, t) => s + t.total, 0);
   const readerOption =
     READER_SIZE_OPTIONS.find((option) => option.id === readerSize) ?? READER_SIZE_OPTIONS[0];
-  const readerThemeOption =
-    READER_THEME_OPTIONS.find((option) => option.id === readerTheme) ?? READER_THEME_OPTIONS[0];
+  const activeSkin = skin;
   const readerStyle = {
     "--reader-font-size": readerOption.fontSize,
     "--reader-line-height": readerOption.lineHeight,
-    ...readerThemeOption.vars,
+    ...PLAY_SKIN_VARS[activeSkin],
   } as React.CSSProperties;
   const latestMessage = messages[messages.length - 1];
   const streamingAssistantId =
@@ -491,7 +432,8 @@ export function Chat({
 
   return (
     <div
-      className="relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden overflow-x-hidden reader-bg"
+      data-skin={activeSkin}
+      className="play-shell relative mx-auto flex h-[100svh] w-full max-w-3xl flex-col overflow-hidden overflow-x-hidden"
       style={readerStyle}
     >
       <WorldInspector
@@ -500,7 +442,7 @@ export function Chat({
         onClose={toggleInspector}
         refreshKey={inspectorRefreshKey}
       />
-      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b reader-border reader-bg-translucent px-2.5 py-1.5 backdrop-blur  sm:px-4">
+      <header className="relative z-10 flex min-h-14 items-center justify-between gap-2 border-b reader-border reader-bg-translucent px-2.5 py-1.5 backdrop-blur sm:px-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <Link
             href="/"
@@ -509,11 +451,28 @@ export function Chat({
           >
             <BackIcon />
           </Link>
-          <span className="truncate text-lg font-semibold tracking-tight reader-text">
-            {worldName}
-          </span>
+          <div className="min-w-0">
+            <p className="skin-display truncate text-[9px] font-medium uppercase tracking-[0.2em] reader-accent">
+              {worldLayer === "hub" ? "Animus" : worldLayer === "subworld" ? "First life" : "Text adventure"}
+            </p>
+            <span className="skin-display block truncate text-base font-semibold tracking-tight reader-text sm:text-lg">
+              {worldName}
+            </span>
+          </div>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5">
+        <div className="flex flex-shrink-0 items-center gap-1">
+          {canReturnToAnimus ? (
+            <form action={returnToAnimusAction.bind(null, worldId)}>
+              <button
+                type="submit"
+                title="Return to Animus"
+                aria-label="Return to Animus"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              >
+                <HomeIcon />
+              </button>
+            </form>
+          ) : null}
           {headerEnd}
           {/* Session total — hidden when there's not enough room next to the
               world name. The per-turn footer carries the cost on every turn,
@@ -523,9 +482,7 @@ export function Chat({
           </div>
           <ReaderSettingsMenu
             size={readerSize}
-            theme={readerTheme}
             onSizeChange={updateReaderSize}
-            onThemeChange={updateReaderTheme}
           />
           <HeaderIconButton
             onClick={toggleInspector}
@@ -599,6 +556,7 @@ export function Chat({
                   <UserTurn text={text} createdAt={createdAt} />
                 ) : (
                   <NarratorTurn
+                    skin={activeSkin}
                     text={text}
                     streaming={isStreamingThis}
                     audioStatus={turnAudioStatus}
@@ -682,7 +640,9 @@ export function Chat({
             the slash-command button on the left and a round Send affordance
             on the right. */}
         <div
-          className="pointer-events-auto group relative mx-auto flex w-full max-w-2xl flex-col gap-1.5 rounded-[1.75rem] border reader-border reader-panel px-4 pt-3 pb-2.5 shadow-2xl backdrop-blur transition reader-field-focus"
+          className={`pointer-events-auto group relative mx-auto flex w-full max-w-2xl items-stretch gap-0 border reader-border reader-panel shadow-2xl backdrop-blur transition reader-field-focus ${
+            activeSkin === "relic" ? "rounded-md" : "rounded-lg"
+          }`}
           style={{ boxShadow: "0 24px 60px var(--reader-shadow)" }}
         >
           {slashOpen && (
@@ -693,19 +653,11 @@ export function Chat({
               onHover={setSlashIndex}
             />
           )}
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={1}
-            placeholder="What do you do?"
-            disabled={busy}
-            // text-base (16px) at every size — prevents iOS Safari from auto-
-            // zooming on focus, and reads more comfortably on desktop too.
-            className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed reader-text reader-placeholder focus:outline-none disabled:opacity-50"
-          />
-          <div className="flex min-h-11 items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-1 flex-col px-3 pt-2.5 pb-2 sm:px-4">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="skin-display text-[10px] font-medium uppercase tracking-[0.16em] reader-accent">
+                {activeSkin === "signal" ? "// Input" : "What do you do?"}
+              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -714,26 +666,35 @@ export function Chat({
                 }}
                 aria-label="Slash command"
                 title="Slash command"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
               >
                 <SlashIcon />
               </button>
             </div>
-            <button
-              type="submit"
-              disabled={busy || !input.trim()}
-              aria-label="Send"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-accent-bg reader-accent-contrast shadow-lg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed reader-disabled-bg reader-disabled-text disabled:shadow-none"
-            >
-              {busy ? <BusyDots /> : <SendIcon />}
-            </button>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              rows={1}
+              placeholder={activeSkin === "signal" ? "What do you do?" : "Type your action…"}
+              disabled={busy}
+              className="max-h-32 min-h-10 w-full resize-none bg-transparent text-base leading-relaxed reader-text reader-placeholder focus:outline-none disabled:opacity-50"
+            />
+            <p className="mt-1 hidden text-[10px] reader-faint sm:block">
+              Enter to send · Shift+Enter for newline
+            </p>
           </div>
+          <button
+            type="submit"
+            disabled={busy || !input.trim()}
+            aria-label="Send"
+            className={`inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center self-stretch px-4 text-xs font-semibold uppercase tracking-[0.14em] reader-accent-contrast reader-accent-bg transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:cursor-not-allowed reader-disabled-bg reader-disabled-text ${
+              activeSkin === "relic" ? "rounded-r-md" : "rounded-r-lg"
+            }`}
+          >
+            {busy ? <BusyDots /> : activeSkin === "relic" ? "Send" : <SendIcon />}
+          </button>
         </div>
-        {/* Keyboard hint — useful for users with a physical keyboard. Hidden
-            below sm where touch input is the norm. */}
-        <p className="mx-auto mt-1.5 hidden max-w-2xl px-1 text-[11px] reader-faint sm:block">
-          Enter to send · Shift+Enter for newline
-        </p>
       </form>
       )}
     </div>
@@ -744,7 +705,7 @@ function UserTurn({ text, createdAt }: { text: string; createdAt: string | undef
   return (
     <div className="flex max-w-full flex-col items-end">
       <div className="flex max-w-[85%] items-baseline gap-2 text-[10px] font-medium uppercase tracking-[0.18em] reader-faint">
-        <span>You</span>
+        <span className="skin-display">You</span>
         {createdAt && (
           <time
             dateTime={dateTimeAttr(createdAt)}
@@ -755,7 +716,7 @@ function UserTurn({ text, createdAt }: { text: string; createdAt: string | undef
           </time>
         )}
       </div>
-      <div className="mt-1.5 max-w-[90%] overflow-hidden whitespace-pre-wrap break-words rounded-3xl rounded-br-lg reader-panel-strong px-4 py-3 text-base leading-relaxed reader-text sm:max-w-[85%]">
+      <div className="skin-player mt-1.5 max-w-[90%] overflow-hidden whitespace-pre-wrap break-words rounded-md border reader-panel-strong px-4 py-3 text-base leading-relaxed reader-text sm:max-w-[85%]">
         {text}
       </div>
     </div>
@@ -797,6 +758,7 @@ function AudioProgressBar({
 }
 
 function NarratorTurn({
+  skin,
   text,
   streaming,
   audioStatus,
@@ -806,6 +768,7 @@ function NarratorTurn({
   replayDisabled,
   onReplay,
 }: {
+  skin: PlaySkin;
   text: string;
   streaming: boolean;
   audioStatus: "idle" | "loading" | "speaking";
@@ -816,9 +779,10 @@ function NarratorTurn({
   onReplay: () => void;
 }) {
   return (
-    <div className="max-w-full border-l-2 reader-accent-border pl-4">
+    <div className="skin-frame skin-bracket max-w-full reader-panel px-4 py-4 sm:px-5">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.18em] reader-accent">
+        <NarratorMark skin={skin} />
+        <span className="skin-display text-[10px] font-medium uppercase tracking-[0.18em] reader-accent">
           Narrator
         </span>
         {audioStatus !== "idle" && (
@@ -874,14 +838,10 @@ function NarratorTurn({
 
 function ReaderSettingsMenu({
   size,
-  theme,
   onSizeChange,
-  onThemeChange,
 }: {
   size: ReaderSize;
-  theme: ReaderTheme;
   onSizeChange: (size: ReaderSize) => void;
-  onThemeChange: (theme: ReaderTheme) => void;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -907,11 +867,11 @@ function ReaderSettingsMenu({
         aria-label="Reader settings"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-pressed={size !== "default" || theme !== "dark"}
+        aria-pressed={size !== "default"}
         title="Reader settings"
         className={
           "inline-flex h-11 w-11 items-center justify-center rounded-full text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60 " +
-          (size !== "default" || theme !== "dark" || open
+          (size !== "default" || open
             ? "reader-accent-soft-bg reader-accent reader-hover"
             : "reader-muted reader-hover")
         }
@@ -947,39 +907,6 @@ function ReaderSettingsMenu({
                 <span className="font-serif reader-muted" style={{ fontSize: option.fontSize }}>
                   A
                 </span>
-              </button>
-            );
-          })}
-          <div className="border-t reader-border px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.1em] reader-faint">
-            Theme
-          </div>
-          {READER_THEME_OPTIONS.map((option) => {
-            const selected = option.id === theme;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={selected}
-                onClick={() => {
-                  onThemeChange(option.id);
-                }}
-                className={
-                  "flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition reader-hover " +
-                  (selected ? "reader-accent" : "reader-button-text")
-                }
-              >
-                <span>{option.label}</span>
-                <span
-                  aria-hidden
-                  className="h-5 w-5 rounded-full border reader-border"
-                  style={{
-                    background:
-                      option.id === "dark"
-                        ? "linear-gradient(135deg, #0f0f0d 50%, #eee8dc 50%)"
-                        : "linear-gradient(135deg, #f4efe6 50%, #252018 50%)",
-                  }}
-                />
               </button>
             );
           })}
@@ -1046,6 +973,31 @@ function SlashIcon() {
       <path d="M11 3L5 13" />
     </svg>
   );
+}
+
+function NarratorMark({ skin }: { skin: PlaySkin }) {
+  if (skin === "signal") {
+    return (
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="reader-accent" aria-hidden>
+        <path d="M2 8h2l1.2-3 1.6 6L8.4 5 10 11l1.2-3H14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="reader-accent" aria-hidden>
+      <path d="M11.5 2.5c1.2 1.6 1.4 3.4.3 4.5L6 12.8 3.2 13l.3-2.8 5.8-5.8c1.1-1.1 2.9-.9 4.5.3Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M8.2 5.2l2.6 2.6" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  )
+}
+
+function HomeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M2.5 7.5 8 2.8l5.5 4.7V13a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V7.5Z" />
+      <path d="M6 14V9h4v5" />
+    </svg>
+  )
 }
 
 function BackIcon() {
