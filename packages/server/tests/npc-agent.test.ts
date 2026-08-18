@@ -5,14 +5,19 @@ import { applyArchivistPatch } from '@/lib/archivist'
 import { parseDailyLoop } from '@/lib/daily-loop'
 import { db, getCharactersForWorld, getPlacesForWorld, insertTurn } from '@/lib/db'
 import { buildNpcStoryContext } from '@/domain/services/closed-dossier'
+import type { Character } from '@/domain/entities'
 import {
   applyNpcAgentPatch,
+  applyNpcUpdatesToCharacters,
   buildNpcAgentUserContent,
+  persistNpcAgentDraft,
+  plansFromDraft,
   NpcAgentPatchSchema,
   repairNpcAgentText,
   sanitizeSpeechHint,
   shouldSkipRoutineTick,
   type NpcAgentDeps,
+  type NpcAgentDraft,
 } from '@/lib/npc-agent'
 import { getReveriesForCharacter } from '@/lib/reveries'
 import { createWorld } from '@/lib/worlds'
@@ -584,5 +589,121 @@ describe('NPC story context (plot lifecycle)', () => {
     })
     expect(content).toContain('PLAYER YIELDED THE FLOOR')
     expect(content).toContain('rest of the current activity')
+  })
+})
+
+function stubCharacter(over: Partial<Character> & Pick<Character, 'id' | 'name'>): Character {
+  return {
+    world_id: 1,
+    description: null,
+    is_player: 0,
+    current_place_id: 1,
+    memorable_facts: null,
+    status: 'active',
+    active_goal: null,
+    current_attitude: null,
+    observations: null,
+    agency_level: 'local',
+    personal_goals: null,
+    current_focus: null,
+    recent_activity: null,
+    private_beliefs: null,
+    reveries: null,
+    relationship_to_player: null,
+    long_term_agenda: null,
+    tool_access: null,
+    appearance_count: 1,
+    last_seen_turn_id: 1,
+    last_agent_tick_turn_id: null,
+    player_notes: null,
+    in_transit_to_place_id: null,
+    arrival_world_time: null,
+    arrival_minutes: null,
+    journey_path_json: null,
+    last_known_situation: null,
+    aliases: null,
+    daily_loop: null,
+    speech_register: null,
+    clearance_level: 'public_crew',
+    created_at: '',
+    updated_at: '',
+    ...over,
+  }
+}
+
+describe('applyNpcUpdatesToCharacters', () => {
+  it('merges situation and transit onto the in-memory roster', () => {
+    const mara = stubCharacter({ id: 7, name: 'Mara', last_known_situation: 'at the bar' })
+    const places = new Map([['the vault', 9]])
+    const next = applyNpcUpdatesToCharacters([mara], places, [
+      {
+        name: 'Mara',
+        last_known_situation: 'in the corridor, moving east',
+        in_transit_to: 'the vault',
+      },
+    ])
+    expect(next[0].last_known_situation).toBe('in the corridor, moving east')
+    expect(next[0].in_transit_to_place_id).toBe(9)
+    expect(mara.last_known_situation).toBe('at the bar')
+  })
+
+  it('ignores the player row', () => {
+    const player = stubCharacter({ id: 1, name: 'Andrew', is_player: 1 })
+    const next = applyNpcUpdatesToCharacters([player], new Map(), [
+      { name: 'Andrew', current_focus: 'should not apply' },
+    ])
+    expect(next[0].current_focus).toBeNull()
+  })
+})
+
+describe('plansFromDraft / persistNpcAgentDraft', () => {
+  const draft: NpcAgentDraft = {
+    patch: {
+      planned_actions: [
+        {
+          npc_name: 'Mara',
+          intent: 'warn the player',
+          planned_action: 'leans in and lowers her voice',
+          intent_type: 'warn',
+        },
+      ],
+    },
+    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    retried: false,
+    tickable: [{ id: 7, name: 'Mara', agency_level: 'local', speech_register: null }],
+    targetCharacterIdByLower: new Map(),
+    targetPlaceIdByLower: new Map(),
+  }
+
+  it('exposes character_id plans without inserting intents', () => {
+    const plans = plansFromDraft(draft)
+    expect(plans).toHaveLength(1)
+    expect(plans[0].character_id).toBe(7)
+    expect(plans[0].intent_id).toBeUndefined()
+  })
+
+  it('persists intents and last-tick after planning', async () => {
+    const ticks: number[] = []
+    const inserted: Array<{ characterId: number; plannedAction: string }> = []
+    const deps = {
+      characters: {
+        setLastAgentTick: async (_turnId: number, id: number) => {
+          ticks.push(id)
+        },
+      },
+      npcIntents: {
+        insert: async (row: { characterId: number; plannedAction: string }) => {
+          inserted.push(row)
+          return 42
+        },
+      },
+    } as unknown as NpcAgentDeps
+
+    const plans = await persistNpcAgentDraft(deps, 1, 3, draft)
+    expect(ticks).toEqual([7])
+    expect(inserted).toEqual([
+      expect.objectContaining({ characterId: 7, plannedAction: 'leans in and lowers her voice' }),
+    ])
+    expect(plans[0].intent_id).toBe(42)
   })
 })

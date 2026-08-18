@@ -26,5 +26,19 @@ export function shouldTickNpcAgent(args: NpcAgentGateArgs): boolean {
   // non-player NPC exists — these are exactly the quiet turns a present NPC
   // should be able to carry. (Previously this required an already-promoted
   // local/nearby NPC, which left newly-met co-located NPCs silent.)
+  return hasLivingPresentNpc(presentCharacters)
+}
+
+/** Cheap pre-gate: start write-free planning before classification returns. */
+export function shouldSpeculateNpcAgent(args: {
+  presentCharacters: Array<{ is_player: number; status: 'active' | 'inactive' | 'dead' }>
+  pendingOpenOrder: boolean
+}): boolean {
+  return args.pendingOpenOrder || hasLivingPresentNpc(args.presentCharacters)
+}
+
+function hasLivingPresentNpc(
+  presentCharacters: Array<{ is_player: number; status: 'active' | 'inactive' | 'dead' }>,
+): boolean {
   return presentCharacters.some((c) => c.is_player !== 1 && c.status !== 'dead')
 }

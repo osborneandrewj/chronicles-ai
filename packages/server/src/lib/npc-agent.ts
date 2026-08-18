@@ -2,7 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic'
 import { generateObject, type LanguageModelUsage } from 'ai'
 import { z } from 'zod'
 
-import type { StoryDossier } from '@/domain/entities'
+import type { Character, Place, StoryDossier } from '@/domain/entities'
 import type {
   CharacterRepository,
   DossierRepository,
@@ -353,8 +353,95 @@ export function shouldSkipRoutineTick(
 export const NPC_AGENT_MODEL = HAIKU_MODEL
 
 export type PlannedActionWithIntent = PlannedAction & {
-  intent_id: number
+  /** Present after persistNpcAgentDraft; omitted on the write-free draft. */
+  intent_id?: number
   character_id: number
+}
+
+export type NpcAgentPreload = {
+  knownPlaces?: Place[]
+  knownCharacters?: Character[]
+  dossier?: StoryDossier
+  worldTime?: string | null
+  settingRegion?: string | null
+}
+
+export type NpcAgentDraft = {
+  patch: NpcAgentPatch
+  usage: LanguageModelUsage
+  retried: boolean
+  tickable: Array<{
+    id: number
+    name: string
+    agency_level: string
+    speech_register: string | null
+  }>
+  targetCharacterIdByLower: Map<string, number>
+  targetPlaceIdByLower: Map<string, number>
+}
+
+/** STATE/render plans from a draft (no intent rows yet). */
+export function plansFromDraft(draft: NpcAgentDraft): PlannedActionWithIntent[] {
+  const agentsByLower = new Map(draft.tickable.map((a) => [a.name.toLowerCase(), a]))
+  const out: PlannedActionWithIntent[] = []
+  for (const plan of draft.patch.planned_actions ?? []) {
+    const agent = agentsByLower.get(plan.npc_name.toLowerCase())
+    if (!agent) continue
+    const staged = finalizeTalkPlan(plan, agent.speech_register)
+    out.push({
+      ...plan,
+      planned_action: staged.planned_action,
+      speech_hint: staged.speech_hint ?? undefined,
+      character_id: agent.id,
+    })
+  }
+  return out
+}
+
+/**
+ * Apply npc_updates onto an in-memory character list so STATE this turn matches
+ * the patch before it is persisted post-stream.
+ */
+export function applyNpcUpdatesToCharacters(
+  characters: Character[],
+  placeIdByLower: Map<string, number>,
+  updates: NonNullable<NpcAgentPatch['npc_updates']>,
+): Character[] {
+  if (updates.length === 0) return characters
+  const nextById = new Map(characters.map((c) => [c.id, c]))
+  let changed = false
+  for (const u of updates) {
+    const existing = characters.find((c) => c.name.toLowerCase() === u.name.toLowerCase())
+    if (!existing || existing.is_player === 1) continue
+    const patched: Character = { ...existing }
+    if (u.current_focus !== undefined) patched.current_focus = u.current_focus
+    if (u.last_known_situation !== undefined) {
+      patched.last_known_situation = u.last_known_situation
+    }
+    if (u.current_place_name !== undefined) {
+      const id = placeIdByLower.get(u.current_place_name.toLowerCase())
+      if (id != null) patched.current_place_id = id
+    }
+    if (u.in_transit_to !== undefined) {
+      if (u.in_transit_to == null) {
+        patched.in_transit_to_place_id = null
+      } else {
+        const id = placeIdByLower.get(u.in_transit_to.toLowerCase())
+        if (id != null) patched.in_transit_to_place_id = id
+      }
+    }
+    if (u.arrival_world_time !== undefined) {
+      patched.arrival_world_time = u.arrival_world_time
+    }
+    if (u.speech_register && !existing.speech_register) {
+      const capped = capSpeechRegister(u.speech_register)
+      if (capped) patched.speech_register = capped
+    }
+    nextById.set(existing.id, patched)
+    changed = true
+  }
+  if (!changed) return characters
+  return characters.map((c) => nextById.get(c.id) ?? c)
 }
 
 // Runs BEFORE the narrator each turn. Reflects on what just happened (the
@@ -396,6 +483,7 @@ export function buildNpcAgentUserContent(parts: {
     return [
       `WORLD TIME: ${parts.worldTime ?? '(unset)'}`,
       `PROTAGONIST IS AT: ${parts.protagonistPlace ?? '(unknown)'}`,
+      parts.openOrderLine,
       parts.privateChannelLine,
       ...storyBlock,
       '',
@@ -457,18 +545,49 @@ export async function runNpcAgentTick(
   openOrder: OpenOrder | null = null,
   privateUtterance: PrivateUtterance | null = null,
   directorCast: DirectorCastHint[] | null = null,
+  preload: NpcAgentPreload = {},
 ): Promise<{
   patch: NpcAgentPatch
   plans: PlannedActionWithIntent[]
   usage: LanguageModelUsage
 } | null> {
+  const draft = await planNpcActions(
+    deps,
+    worldId,
+    tickTurnId,
+    premise,
+    playerInput,
+    recentTurns,
+    openOrder,
+    privateUtterance,
+    directorCast,
+    preload,
+  )
+  if (!draft) return null
+  const plans = await persistNpcAgentDraft(deps, worldId, tickTurnId, draft)
+  return { patch: draft.patch, plans, usage: draft.usage }
+}
+
+/** Write-free NPC planner. Callers must persist via persistNpcAgentDraft. */
+export async function planNpcActions(
+  deps: NpcAgentDeps,
+  worldId: number,
+  tickTurnId: number,
+  premise: string,
+  playerInput: string,
+  recentTurns: Array<{ role: 'user' | 'assistant'; content: string }>,
+  openOrder: OpenOrder | null = null,
+  privateUtterance: PrivateUtterance | null = null,
+  directorCast: DirectorCastHint[] | null = null,
+  preload: NpcAgentPreload = {},
+): Promise<NpcAgentDraft | null> {
   const { characters, dossiers, npcIntents, places, reveries, worlds } = deps
 
-  const knownPlaces = await places.forWorld(worldId)
+  const knownPlaces = preload.knownPlaces ?? (await places.forWorld(worldId))
   const placesByLower = new Map(knownPlaces.map((p) => [p.name.toLowerCase(), p.id]))
   const placeNameById = new Map(knownPlaces.map((p) => [p.id, p.name]))
 
-  const allChars = await characters.forWorld(worldId)
+  const allChars = preload.knownCharacters ?? (await characters.forWorld(worldId))
   const playerChar = allChars.find((c) => c.is_player === 1) ?? null
   const playerPlaceId = playerChar?.current_place_id ?? null
 
@@ -551,9 +670,14 @@ export async function runNpcAgentTick(
     current_place_name: playerPlaceName,
   }
 
-  const cursor = await worlds.cursor(worldId)
-  const worldTime = cursor.world_time
-  const settingRegion = (await worlds.getWorld(worldId))?.setting_region ?? null
+  const worldTime =
+    preload.worldTime !== undefined
+      ? preload.worldTime
+      : (await worlds.cursor(worldId)).world_time
+  const settingRegion =
+    preload.settingRegion !== undefined
+      ? preload.settingRegion
+      : ((await worlds.getWorld(worldId))?.setting_region ?? null)
 
   // Prefer the last diegetic narrator beat — skip OOC policy refusals so agents
   // do not plan against "I will not narrate" as if it were story.
@@ -604,14 +728,14 @@ export async function runNpcAgentTick(
 
   // Reveries now live in their own table (append-only). Batch-load them once so
   // each NPC's charged memories surface as plain text in the agent context.
-  const reveriesByChar = await reveries.forCharacters(tickable.map((a) => a.id))
-
-  // v0.6.9 — recent reconciled intent outcomes, pre-fetched per NPC (the per-row
-  // map below is sync, so the awaited reads happen here). Newest-first, capped.
-  const outcomesByChar = new Map<number, Awaited<ReturnType<typeof npcIntents.recentOutcomesForCharacter>>>()
-  for (const a of tickable) {
-    outcomesByChar.set(a.id, await npcIntents.recentOutcomesForCharacter(a.id, 3))
-  }
+  const tickableIds = tickable.map((a) => a.id)
+  const [reveriesByChar, outcomeRows] = await Promise.all([
+    reveries.forCharacters(tickableIds),
+    Promise.all(
+      tickableIds.map(async (id) => [id, await npcIntents.recentOutcomesForCharacter(id, 3)] as const),
+    ),
+  ])
+  const outcomesByChar = new Map(outcomeRows)
 
   const activePrivate =
     privateUtterance?.status === 'active' ? privateUtterance : null
@@ -686,17 +810,19 @@ export async function runNpcAgentTick(
     ? 'PLAYER YIELDED THE FLOOR this turn (continue / wait / until-done / time jump). Plan the rest of the current activity as one move — complete remaining checks, deliver the finding, finish the exchange. planned_action may be a short two-or-three-clause sequence. Do not plan a single next micro-step that will need another continue.'
     : null
 
-  let storyDossier: StoryDossier = {
+  let storyDossier: StoryDossier = preload.dossier ?? {
     threads: [],
     clues: [],
     objectives: [],
     resources: [],
     timeline: [],
   }
-  try {
-    storyDossier = await dossiers.forWorld(worldId)
-  } catch (err) {
-    console.error('[npc agent dossier load]', err)
+  if (!preload.dossier) {
+    try {
+      storyDossier = await dossiers.forWorld(worldId)
+    } catch (err) {
+      console.error('[npc agent dossier load]', err)
+    }
   }
   const storyContext = buildNpcStoryContext(storyDossier)
   const knownPlacesBlock = knownPlaces.map((p) => `- ${formatKnownPlaceLine(p)}`).join('\n')
@@ -705,44 +831,6 @@ export async function runNpcAgentTick(
       ? `OPEN ORDER (pending ${openOrder.kind}): ${openOrder.targetName} — at least one plan this turn MUST advance this result (arrive / concrete radio status / refuse / obstacle). "Monitors channel" alone is invalid while this order is outstanding.`
       : null
 
-  const userContent = buildNpcAgentUserContent({
-    worldTime,
-    settingRegion,
-    protagonistPlace: player.current_place_name,
-    openOrderLine,
-    privateChannelLine,
-    npcContext,
-    knownPlacesBlock,
-    priorNarration,
-    playerAboutLine,
-    storyContext,
-    yieldFloorLine,
-  })
-
-  const npcAgentSystem = `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`
-  const { object, usage } = await generateObject({
-    model: anthropic(NPC_AGENT_MODEL),
-    schema: NpcAgentPatchSchema,
-    // The NPC tick is best-effort (the route degrades to plan-less narration on
-    // failure), so cap retries to keep a flake from stalling the turn. The
-    // repair below recovers Haiku's common mis-serialization before that.
-    maxRetries: 1,
-    experimental_repairText: async ({ text }) => repairNpcAgentText(text),
-    system: npcAgentSystem,
-    messages: [{ role: 'user', content: userContent }],
-    providerOptions: {
-      anthropic: { cacheControl: { type: 'ephemeral' } },
-    },
-  })
-
-  // Focused planning retry — guarantee a plan for every PRESENT agent NPC. Haiku
-  // routinely omits planned_actions from the combined patch, so any present NPC
-  // the first pass left unplanned only ever reacts. We re-ask with a minimal
-  // REQUIRED schema (min 1) for just the missing names. Bounded to one extra
-  // call, only when actually short; best-effort (its own failure keeps the
-  // first-pass plans). Merge UPSTREAM of the single insert loop so ids allocate
-  // through one code path (SQLite + Mongo parity).
-  let mergedUsage = usage
   // Director CAST initiate/react/arrive (plus open-order) must get plans.
   // Without CAST, every present agent still must plan (legacy engagement floor).
   const directorRoleById = new Map(
@@ -761,6 +849,42 @@ export async function runNpcAgentTick(
       return a.current_place_id !== null && a.current_place_id === playerPlaceId
     })
     .map((a) => a.name)
+  const planningNames =
+    mustPlanNames.length > 0 ? mustPlanNames : tickable.map((a) => a.name)
+
+  const userContent = buildNpcAgentUserContent({
+    worldTime,
+    settingRegion,
+    protagonistPlace: player.current_place_name,
+    openOrderLine,
+    privateChannelLine,
+    npcContext,
+    knownPlacesBlock,
+    priorNarration,
+    playerAboutLine,
+    storyContext,
+    planningOnlyNames: planningNames,
+    yieldFloorLine,
+  })
+
+  const npcAgentSystem = `${loadPrompt('npc-agent-system')}\n\nPREMISE (context, do not extract from):\n${premise}`
+  // Pre-stream is plans-only. Combined npc_updates used to double Haiku time
+  // (big schema + focused retry). Updates stay off this path; the archivist
+  // and the next tick pick them up.
+  const { object, usage } = await generateObject({
+    model: anthropic(NPC_AGENT_MODEL),
+    schema: PlannedActionsOnlySchema,
+    maxRetries: 1,
+    experimental_repairText: async ({ text }) => repairNpcAgentText(text),
+    system: npcAgentSystem,
+    messages: [{ role: 'user', content: userContent }],
+    providerOptions: {
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    },
+  })
+
+  let retried = false
+  let mergedUsage = usage
   const planned = [...(object.planned_actions ?? [])]
   const missing = missingPlannedActions(mustPlanNames, planned)
   if (missing.length > 0) {
@@ -801,6 +925,7 @@ export async function runNpcAgentTick(
         cachedInputTokens: (usage.cachedInputTokens ?? 0) + (retryUsage.cachedInputTokens ?? 0),
       }
       planned.push(...(retry.planned_actions ?? []))
+      retried = true
     } catch (err) {
       console.error('[npc agent planning retry failed]', err)
       // Keep the first-pass plans — the tick must never fail on the retry.
@@ -817,30 +942,44 @@ export async function runNpcAgentTick(
     return true
   })
 
-  await applyNpcAgentPatch(deps, worldId, tickTurnId, object)
-  for (const agent of tickable) {
+  return {
+    patch: object,
+    usage: mergedUsage,
+    retried,
+    tickable: tickable.map((a) => ({
+      id: a.id,
+      name: a.name,
+      agency_level: a.agency_level,
+      speech_register: a.speech_register,
+    })),
+    targetCharacterIdByLower: new Map(allChars.map((c) => [c.name.toLowerCase(), c.id])),
+    targetPlaceIdByLower: placesByLower,
+  }
+}
+
+export async function persistNpcAgentDraft(
+  deps: NpcAgentDeps,
+  worldId: number,
+  tickTurnId: number,
+  draft: NpcAgentDraft,
+): Promise<PlannedActionWithIntent[]> {
+  const { characters, npcIntents } = deps
+  await applyNpcAgentPatch(deps, worldId, tickTurnId, draft.patch)
+  for (const agent of draft.tickable) {
     await characters.setLastAgentTick(tickTurnId, agent.id)
   }
 
-  // Persist each planned action as an npc_intents row. Plans targeting NPCs
-  // outside the agent-tier roster are dropped (the schema needs a real
-  // character_id, and an unrecognized name should never be reified). The
-  // narrator turn id is filled in post-stream by the reconciler.
-  const agentsByLower = new Map(tickable.map((a) => [a.name.toLowerCase(), a]))
-  const charsByLower = new Map(allChars.map((c) => [c.name.toLowerCase(), c.id]))
-
+  const agentsByLower = new Map(draft.tickable.map((a) => [a.name.toLowerCase(), a]))
   const plansOut: PlannedActionWithIntent[] = []
-  for (const plan of object.planned_actions ?? []) {
+  for (const plan of draft.patch.planned_actions ?? []) {
     const agent = agentsByLower.get(plan.npc_name.toLowerCase())
     if (!agent) continue
     const targetCharacterId = plan.target_npc_name
-      ? charsByLower.get(plan.target_npc_name.toLowerCase()) ?? null
+      ? draft.targetCharacterIdByLower.get(plan.target_npc_name.toLowerCase()) ?? null
       : null
     const targetPlaceId = plan.target_place_name
-      ? placesByLower.get(plan.target_place_name.toLowerCase()) ?? null
+      ? draft.targetPlaceIdByLower.get(plan.target_place_name.toLowerCase()) ?? null
       : null
-    // Plans are decisions. Strip leaked lines; fill speech_hint on talk plans.
-    // speech_hint stays off npc_intents (ephemeral; no second migration).
     const staged = finalizeTalkPlan(plan, agent.speech_register)
     const intentId = await npcIntents.insert({
       worldId,
@@ -863,8 +1002,7 @@ export async function runNpcAgentTick(
       character_id: agent.id,
     })
   }
-
-  return { patch: object, plans: plansOut, usage: mergedUsage }
+  return plansOut
 }
 
 // ---- Patch application ------------------------------------------------------

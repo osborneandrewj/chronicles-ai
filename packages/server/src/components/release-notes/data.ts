@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.14.0',
+    date: '2026-08-18',
+    highlights: [
+      'Turns start speaking sooner. The world still plans what nearby people will do, but that work no longer holds the story still before the first sentence.',
+      'Indoor and shipboard scenes no longer pause to look up real-world maps.',
+    ],
+  },
+  {
     version: '0.13.0',
     date: '2026-08-18',
     highlights: [

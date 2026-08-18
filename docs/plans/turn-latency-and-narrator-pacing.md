@@ -1,6 +1,6 @@
 # Turn Latency + Narrator Pacing — Implementation Plan
 
-**Status:** partially shipped as **package v0.4.0** (PR #32 → `main` → `production`, 2026-08-08). A0 residual done on `feat/a0-delete-sqlite-twins`. A6 deferred + Track B still open.
+**Status:** A0–A5 + A6-lite shipped (v0.4.0). C5 write-free planner + C6 speculative plan∥classify on `feat/turn-latency-ttft`. Track B still open.
 **Shipped on:** `feat/voice-ttfa-and-turn-latency` (merged).
 **Scope:** three tracks — (A) cut time-to-first-token on the narrator turn, (B) narrator quality/pacing beyond the already-shipped NPC-initiation work, (C) time-to-first-**audio** (the gap between finished prose and voice).
 
@@ -191,7 +191,7 @@ Behavior: unchanged. Enforced by the A2 characterization test.
 | A3 geocode off path | **done** | `backgroundTasks.register(resolveUnresolvedPlaces…)` |
 | A4 occupancy ∥ npc-agent | **done** | `Promise.all` with independent catch |
 | A5 single recentTurns | **done** | fetch 16 once; `slice(-4)` for agents |
-| A6 speculative npc-agent | **deferred** | Write-safety not proven; gate still serial after classifier |
+| A6 speculative npc-agent | **done** | C5 `planNpcActions` is write-free; C6 overlaps classify; persist post-stream |
 | Reverie port read | **done** | `reveries.forCharacters` (fixes Mongo prod no-flare) |
 | Prompt cache layout | **done** | Premise pinned into system; trailing user is state+action only |
 | Archivist gate tighten | **done** | `hasRichStorySignal` less trigger-happy on ambient time / bare "message" |

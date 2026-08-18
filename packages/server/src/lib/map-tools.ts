@@ -114,6 +114,13 @@ const PlaceLookupInputSchema = z.object({
     ),
 })
 
+/** Bounded interiors never geocode; skip tool prefill and the tool-then-prose step. */
+export function shouldAttachNarratorMapTools(
+  spatialMode: string | null | undefined,
+): boolean {
+  return spatialMode !== 'bounded'
+}
+
 export const narratorMapTools = {
   map_route: tool({
     description:
