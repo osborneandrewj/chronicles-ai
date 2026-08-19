@@ -110,6 +110,8 @@ export type AgentNpcRow = {
   daily_loop: string | null
   /** Sticky voice/idiolect; null until authored once. */
   speech_register: string | null
+  /** JSON string list of will-not lines; null until authored once. */
+  refusals: string | null
 }
 
 // The NPC agent's per-character WRITE surface (applyAgentNpcFields). The use case
@@ -121,7 +123,6 @@ export type AgentNpcFields = {
   current_focus?: string
   recent_activity?: string
   current_place_id?: number
-  personal_goals?: string
   private_beliefs?: string
   relationship_to_player?: string
   long_term_agenda?: string
@@ -239,7 +240,8 @@ export interface CharacterRepository {
    * Apply the NPC agent's per-field character updates (the agent's per-column
    * UPDATE statements). Only the keys present in `fields` are written; each bumps
    * updated_at. The use case owns which fields change and the place-name → id
-   * resolution. daily_loop is excluded (see setDailyLoopIfEmpty).
+   * resolution. daily_loop, personal_goals, speech_register, and refusals are
+   * excluded (see the IfEmpty setters).
    */
   applyAgentNpcFields(characterId: number, fields: AgentNpcFields): Promise<void>
   /**
@@ -248,10 +250,20 @@ export interface CharacterRepository {
    */
   setDailyLoopIfEmpty(characterId: number, dailyLoopJson: string): Promise<void>
   /**
+   * Author personal_goals ONCE (core drive). Writes only when the column is
+   * currently null/blank.
+   */
+  setPersonalGoalsIfEmpty(characterId: number, personalGoals: string): Promise<void>
+  /**
    * Author speech_register ONCE: writes only when the row's speech_register is
    * currently null/blank. Sticky idiolect for dialogue depth (≤200 chars).
    */
   setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void>
+  /**
+   * Author refusals ONCE: JSON string list. Writes only when the column is
+   * currently null/blank. Host files set this; the NPC agent should not.
+   */
+  setRefusalsIfEmpty(characterId: number, refusalsJson: string): Promise<void>
   /** Hub ops: set clearance_level (first-class projected field). */
   setClearanceLevel(characterId: number, clearance: ClearanceLevel): Promise<void>
 }

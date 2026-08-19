@@ -21,6 +21,8 @@ export const REVERIE_FLARE_COOLDOWN_TURN_IDS = 6
 // reveries (rotation + softening). Applied in the repository write path.
 export const REVERIE_FLARE_DECAY = 0.8
 export const REVERIE_INTENSITY_FLOOR = 0.15
+/** Cornerstone memories win close races; still require tag overlap. */
+export const CORNERSTONE_FLARE_BIAS = 1.5
 
 // Pure: the intensity a reverie should carry after flaring once.
 export function decayedIntensity(intensity: number): number {
@@ -86,10 +88,11 @@ export function computeReverieFlares(
       0,
     )
     if (overlap === 0) continue
+    const bias = c.is_cornerstone === 1 ? CORNERSTONE_FLARE_BIAS : 1
     const scored: Scored = {
       id: c.id,
       character_id: c.character_id,
-      score: overlap * c.intensity,
+      score: overlap * c.intensity * bias,
       intensity: c.intensity,
     }
     const prev = winnerByChar.get(c.character_id)

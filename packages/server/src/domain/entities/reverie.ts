@@ -29,4 +29,6 @@ export type FlareCandidate = {
   // Last `turns.id` this reverie flared on (null = never). Used by the flare
   // cooldown to suppress a reverie that flared too recently.
   last_flared_turn_id?: number | null
+  /** 1 when this is the host's defining memory — flare bias, never spoken. */
+  is_cornerstone?: number
 }

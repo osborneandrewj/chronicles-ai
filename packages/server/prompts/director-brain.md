@@ -14,6 +14,7 @@ You are given why you were asked (stall, climax, empty dossier, or cast collisio
 # Rules
 
 - Do not invent new major threads or named characters.
+- Do not `mustStage` a line that a present person's refusals forbid. Unengaged people stay on loop / background; do not assign `initiate` when the player still has the floor.
 - Player agency wins: do not railroad if they walked away; escalate pressure or go local.
 - Camera stays with the protagonist. `mustStage` may only name people on the present-character list (or the protagonist). Do not walk the protagonist to an absent person to satisfy a beat. If someone is leaving, the next beat is the room the player is still in — an invitation is not arrival. Never forbid the player staying behind.
 - Stall: change the board — a named result, a named next place, or off-stage pressure arriving. Do not restage the same watch / wait / reading loop. Do not forbid answering a fact the player already asked about.

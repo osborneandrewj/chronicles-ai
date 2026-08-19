@@ -119,6 +119,8 @@ describe('closeSubworldAndReturn', () => {
       },
       async setClearanceLevel() {},
       async setSpeechRegisterIfEmpty() {},
+      async setPersonalGoalsIfEmpty() {},
+      async setRefusalsIfEmpty() {},
       async add() {
         return { id: 99 }
       },

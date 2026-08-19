@@ -151,7 +151,7 @@ const setPlayersPlaceStmt = db.prepare<[number, number]>(
 const agentNpcsStmt = db.prepare<[number, number, number, number, number]>(`
   SELECT c.id, c.name, c.description, c.personal_goals, c.current_focus, c.recent_activity,
          c.private_beliefs, c.relationship_to_player, c.long_term_agenda, c.tool_access,
-         c.reveries, c.daily_loop, c.speech_register,
+         c.reveries, c.daily_loop, c.speech_register, c.refusals,
          c.active_goal, c.current_attitude, c.current_place_id, c.agency_level,
          c.last_agent_tick_turn_id,
          c.in_transit_to_place_id, c.arrival_world_time, c.arrival_minutes, c.journey_path_json,
@@ -195,8 +195,9 @@ const setActivityStmt = db.prepare<[string | null, number]>(
 const setPlaceStmt = db.prepare<[number, number]>(
   `UPDATE characters SET current_place_id = ?, updated_at = datetime('now') WHERE id = ?`,
 )
-const setPersonalGoalsStmt = db.prepare<[string, number]>(
-  `UPDATE characters SET personal_goals = ?, updated_at = datetime('now') WHERE id = ?`,
+const setPersonalGoalsIfEmptyStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET personal_goals = ?, updated_at = datetime('now')
+     WHERE id = ? AND (personal_goals IS NULL OR trim(personal_goals) = '')`,
 )
 const setPrivateBeliefsStmt = db.prepare<[string, number]>(
   `UPDATE characters SET private_beliefs = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -208,6 +209,10 @@ const setDailyLoopIfEmptyStmt = db.prepare<[string, number]>(
 const setSpeechRegisterIfEmptyStmt = db.prepare<[string, number]>(
   `UPDATE characters SET speech_register = ?, updated_at = datetime('now')
      WHERE id = ? AND (speech_register IS NULL OR trim(speech_register) = '')`,
+)
+const setRefusalsIfEmptyStmt = db.prepare<[string, number]>(
+  `UPDATE characters SET refusals = ?, updated_at = datetime('now')
+     WHERE id = ? AND (refusals IS NULL OR trim(refusals) = '')`,
 )
 const setClearanceLevelStmt = db.prepare<[string, number]>(
   `UPDATE characters SET clearance_level = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -416,9 +421,6 @@ export class SqliteCharacterRepository implements CharacterRepository {
     if (fields.current_place_id !== undefined) {
       setPlaceStmt.run(fields.current_place_id, characterId)
     }
-    if (fields.personal_goals !== undefined) {
-      setPersonalGoalsStmt.run(fields.personal_goals, characterId)
-    }
     if (fields.private_beliefs !== undefined) {
       setPrivateBeliefsStmt.run(fields.private_beliefs, characterId)
     }
@@ -454,8 +456,18 @@ export class SqliteCharacterRepository implements CharacterRepository {
     return Promise.resolve()
   }
 
+  setPersonalGoalsIfEmpty(characterId: number, personalGoals: string): Promise<void> {
+    setPersonalGoalsIfEmptyStmt.run(personalGoals, characterId)
+    return Promise.resolve()
+  }
+
   setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void> {
     setSpeechRegisterIfEmptyStmt.run(speechRegister, characterId)
+    return Promise.resolve()
+  }
+
+  setRefusalsIfEmpty(characterId: number, refusalsJson: string): Promise<void> {
+    setRefusalsIfEmptyStmt.run(refusalsJson, characterId)
     return Promise.resolve()
   }
 

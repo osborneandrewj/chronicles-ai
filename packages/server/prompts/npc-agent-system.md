@@ -17,10 +17,12 @@ Do NOT return broad internal monologue, hidden plotting, or chain-of-thought tra
 - **Off-scene NPCs continue their day.** For an NPC not present with the protagonist, `activity_append` is a single short past-tense sentence describing what they did during the time that just elapsed ("walked to the breakroom, refilled coffee, took a call from David", "stepped out for the 10:30 stand-up"). The narrator will read these later when the NPC re-enters the scene.
 - **Author a daily loop once.** If an NPC has no `daily_loop` yet, write one: a short routine for `morning`, `midday`, `evening`, and `night`, each a one-line `activity` and the `place` it happens in. This is their baseline rhythm when off-scene — keep it concrete and in-world. Once authored, do not rewrite it.
 - **Author speech_register once.** If an NPC's `speech_register` is null/empty, set a compact sticky how-they-talk fingerprint (≤200 chars): register (clipped/florid/bureaucratic/teasing/…), default move (deflect, counter-question, threaten, joke, silence), optional taboo, max clauses. Genre- and era-appropriate. Example: `clipped · formal under stress · default: counter-question · never monologues`. Once set, do not rewrite — stress bends delivery via attitude/focus, not the register.
+- **Author personal_goals once.** If empty, write the durable core drive (not this scene's `active_goal`). Once set, do not rewrite.
+- **Do not write refusals.** Hard will-not lines are authored on the person. Never add, replace, or narrate them.
 - **On-scene NPCs get focus updates, not activity.** The narrator covered what they did in the prior turn — do not duplicate by appending activity. You may update their `current_focus` if their state of mind shifted ("waiting for Andrew to answer", "deciding whether to call HR").
 - **Time matters.** If the world clock barely moved, most NPCs do nothing new — omit them from `npc_updates`.
 - **Movement is optional.** `current_place_name` only to relocate, and only to a place that already exists in `KNOWN PLACES`. Unknown names are silently dropped.
-- **Personal goals are slow.** Only update if the narration revealed something genuinely new about the NPC's longer arc.
+- **Personal goals are author-once.** If they already have `personal_goals`, leave them. Scene-immediate wants go in `active_goal` / `current_focus`.
 - **Private beliefs are personal, not omniscient.** Track what this NPC believes, suspects, misunderstands, fears, or privately knows. Beliefs can be wrong. Do not replace them with objective world truth unless the NPC actually learned it.
 - **Reveries are charged memory — add, never rewrite.** A reverie is a sensory or emotional fragment that recurs inside this NPC: a phrase, a smell, a room layout, a gesture, an old failure, a person they keep seeing in someone else. It is not a fact summary — it is a trigger that flares when a scene rhymes with it. Use `reveries_add` at most ONCE in a long while — only when a genuinely defining, first-time memory lodges. An NPC carries at most 3 reveries total, and most ticks add none; the system enforces a long cooldown between new ones, so don't reach for it. Never restate existing reveries — they persist on their own. Tag each with concrete anchors (`match_tags`: e.g. `["coffee","failure","night"]`) so the scene can echo it.
 - **Relationship anchors are high-signal.** Update `relationship_to_player` only when trust, fear, debt, resentment, leverage, promises, shared secrets, or open tension with the protagonist meaningfully changes. Do not freeze a finished situation (a sealed chamber, a one-time vigil) as the current relationship. If they became lovers, co-conspirators, or enemies, say that — and do not invent a different origin for a shared object (whiskey, a file, a cup) the protagonist already established.
@@ -143,7 +145,7 @@ For `npc_updates[]`:
 - `current_focus` — overwrites
 - `activity_append` — single past-tense sentence, append-only, off-scene NPCs
 - `current_place_name` — relocate, must match a known place
-- `personal_goals` — overwrites (multi-line OK)
+- `personal_goals` — author the core drive ONCE if absent; ignored once set
 - `private_beliefs` — overwrites (multi-line OK; include prior beliefs to keep)
 - `reveries_add` — add NET-NEW reveries only (each: `text` + `match_tags` + optional `intensity` 0–1); never restate existing ones
 - `daily_loop` — author the NPC's time-banded routine ONCE if absent (`morning`/`midday`/`evening`/`night`, each `{activity, place?}`); ignored once set

@@ -491,6 +491,7 @@ export class MongoCharacterRepository implements CharacterRepository {
         last_known_situation: c.last_known_situation,
         daily_loop: c.daily_loop,
         speech_register: c.speech_register,
+        refusals: c.refusals,
       }
     })
   }
@@ -534,7 +535,6 @@ export class MongoCharacterRepository implements CharacterRepository {
     if (fields.current_focus !== undefined) set.currentFocus = fields.current_focus
     if (fields.recent_activity !== undefined) set.recentActivity = fields.recent_activity
     if (fields.current_place_id !== undefined) set.currentPlaceId = fields.current_place_id
-    if (fields.personal_goals !== undefined) set.personalGoals = fields.personal_goals
     if (fields.private_beliefs !== undefined) set.privateBeliefs = fields.private_beliefs
     if (fields.relationship_to_player !== undefined) {
       set.relationshipToPlayer = fields.relationship_to_player
@@ -580,6 +580,23 @@ export class MongoCharacterRepository implements CharacterRepository {
     )
   }
 
+  async setPersonalGoalsIfEmpty(characterId: number, personalGoals: string): Promise<void> {
+    const trimmed = personalGoals.trim()
+    if (!trimmed) return
+    await this.ctx.models.Character.updateOne(
+      {
+        id: characterId,
+        $or: [
+          { personalGoals: null },
+          { personalGoals: { $exists: false } },
+          { personalGoals: '' },
+        ],
+      },
+      { $set: { personalGoals: trimmed, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
   async setSpeechRegisterIfEmpty(characterId: number, speechRegister: string): Promise<void> {
     const trimmed = speechRegister.trim()
     if (!trimmed) return
@@ -593,6 +610,19 @@ export class MongoCharacterRepository implements CharacterRepository {
         ],
       },
       { $set: { speechRegister: trimmed, updatedAt: new Date() } },
+      { session: this.session },
+    )
+  }
+
+  async setRefusalsIfEmpty(characterId: number, refusalsJson: string): Promise<void> {
+    const trimmed = refusalsJson.trim()
+    if (!trimmed) return
+    await this.ctx.models.Character.updateOne(
+      {
+        id: characterId,
+        $or: [{ refusals: null }, { refusals: { $exists: false } }, { refusals: '' }],
+      },
+      { $set: { refusals: trimmed, updatedAt: new Date() } },
       { session: this.session },
     )
   }

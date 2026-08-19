@@ -172,6 +172,8 @@ export type CharacterDoc = {
   dailyLoop: Record<string, unknown> | null
   /** Sticky how-they-talk fingerprint; author-once. */
   speechRegister: string | null
+  /** JSON string list of will-not lines; author-once. */
+  refusals: string | null
   clearanceLevel: string
   appearanceCount: number
   lastSeenTurnId: number | null
@@ -217,6 +219,7 @@ const CharacterSchema = new Schema<CharacterDoc>(
     traits: { type: Schema.Types.Mixed, default: null },
     dailyLoop: { type: Schema.Types.Mixed, default: null },
     speechRegister: { type: String, default: null },
+    refusals: { type: String, default: null },
     clearanceLevel: { type: String, default: 'public_crew' },
     appearanceCount: { type: Number, default: 0 },
     lastSeenTurnId: { type: Number, default: null },

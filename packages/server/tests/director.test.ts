@@ -909,6 +909,70 @@ describe('formatDirectorBlock', () => {
     expect(block).not.toMatch(/Soft structural pressure/)
   })
 
+  it('does not give initiate to an unengaged host when the player has the floor', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 39,
+          title: 'The Official Story',
+          kind: 'mystery',
+          summary: 'Lena sealed the Hale file',
+          source_turn_id: 1460,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1500,
+      playerText: 'I walk to the coffee urn.',
+      presentCast: [
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+      ],
+    })
+    expect(d.cast.find((c) => c.name === 'Jordan Lacy')?.role).not.toBe('initiate')
+    expect(d.cast.find((c) => c.name === 'Lee Ingram')?.role).not.toBe('initiate')
+  })
+
+  it('drops a mustStage that contradicts a present host refusal', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 39,
+          title: 'The Official Story',
+          kind: 'mystery',
+          summary: 'Lena sealed the Hale file',
+          source_turn_id: 1460,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1501,
+      playerText: 'I kiss her face in the dark',
+      presentCast: [
+        {
+          id: 14,
+          name: 'Jordan Lacy',
+          refusals: ['will not brief during intimacy', 'will not restate the Hale folder'],
+        },
+      ],
+      pendingBeat: {
+        beatKind: 'pressure',
+        foregroundThreadId: 39,
+        mustStage: [
+          'Jordan briefs the Hale folder from ops',
+          'Stay with this beat. Do not introduce a new file.',
+        ],
+        mustNot: [],
+        cast: [{ characterId: 14, name: 'Jordan Lacy', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'stall',
+        sourceTurnId: 1490,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/briefs the Hale/i)
+    expect(d.mustStage.join(' ')).toMatch(/stay with this beat/i)
+  })
+
   it('returns empty string when the beat is empty', () => {
     const d = decideDirector({
       threads: [],

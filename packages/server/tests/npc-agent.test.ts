@@ -409,6 +409,43 @@ describe('npc agent reverie authoring (append-only)', () => {
     expect(parseDailyLoop(row.daily_loop)?.morning?.activity).toBe('opens the shop')
   })
 
+  it('authors personal_goals once and does not overwrite them later', async () => {
+    const { worldId, turnId } = seedWorld('personal-goals-author')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
+    promoteToLocal(worldId, 'Tomas')
+
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', personal_goals: 'Keep the shop lights on.' }],
+    })
+    await applyNpcAgentPatch(npcAgentDeps(), worldId, turnId, {
+      npc_updates: [{ name: 'Tomas', personal_goals: 'Sell the shop and leave town.' }],
+    })
+    const row = db
+      .prepare("SELECT personal_goals FROM characters WHERE world_id = ? AND name = 'Tomas'")
+      .get(worldId) as { personal_goals: string | null }
+    expect(row.personal_goals).toBe('Keep the shop lights on.')
+  })
+
+  it('authors refusals once and ignores a later write', async () => {
+    const { worldId } = seedWorld('refusals-author')
+    db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(
+      worldId,
+    )
+    const id = (
+      db
+        .prepare("SELECT id FROM characters WHERE world_id = ? AND name = 'Tomas'")
+        .get(worldId) as { id: number }
+    ).id
+    const characters = npcAgentDeps().characters
+    await characters.setRefusalsIfEmpty(id, JSON.stringify(['will not brief during intimacy']))
+    await characters.setRefusalsIfEmpty(id, JSON.stringify(['will not leave the vault']))
+    const row = db
+      .prepare("SELECT refusals FROM characters WHERE id = ?")
+      .get(id) as { refusals: string | null }
+    expect(row.refusals).toContain('brief')
+    expect(row.refusals).not.toContain('vault')
+  })
+
   it('authors speech_register once and does not overwrite it later', async () => {
     const { worldId, turnId } = seedWorld('speech-register-author')
     db.prepare("INSERT INTO characters (world_id, name, is_player) VALUES (?, 'Tomas', 0)").run(worldId)
@@ -649,6 +686,7 @@ function stubCharacter(over: Partial<Character> & Pick<Character, 'id' | 'name'>
     aliases: null,
     daily_loop: null,
     speech_register: null,
+    refusals: null,
     clearance_level: 'public_crew',
     created_at: '',
     updated_at: '',

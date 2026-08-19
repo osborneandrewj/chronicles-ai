@@ -159,6 +159,7 @@ export function mapCharacter(d: CharacterDoc): Character {
     aliases: d.aliases,
     daily_loop: d.dailyLoop ? JSON.stringify(d.dailyLoop) : null,
     speech_register: d.speechRegister ?? null,
+    refusals: d.refusals ?? null,
     clearance_level: (d.clearanceLevel as Character['clearance_level']) || 'public_crew',
     created_at: toSqliteDatetime(d.createdAt),
     updated_at: toSqliteDatetime(d.updatedAt),

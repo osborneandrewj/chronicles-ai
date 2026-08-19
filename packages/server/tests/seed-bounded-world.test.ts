@@ -207,9 +207,11 @@ function makeDeps(template: WorldArchetype | null): { deps: SeedBoundedWorldDeps
     },
     async applyAgentNpcFields() {},
     async setDailyLoopIfEmpty() {},
+    async setPersonalGoalsIfEmpty() {},
     async setSpeechRegisterIfEmpty(characterId, speechRegister) {
       rec.speechRegisters.push({ characterId, register: speechRegister })
     },
+    async setRefusalsIfEmpty() {},
     async setClearanceLevel() {},
   }
   const relationships: RelationshipRepository = {

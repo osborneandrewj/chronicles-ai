@@ -273,6 +273,7 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
         aliases: null,
         daily_loop: character.daily_loop,
         speech_register: null,
+        refusals: null,
         clearance_level: 'public_crew',
         created_at: '',
         updated_at: '',
@@ -311,7 +312,9 @@ function makeDeps(): { deps: CreateBoundedWorldDeps; store: Store } {
     },
     async applyAgentNpcFields() {},
     async setDailyLoopIfEmpty() {},
+    async setPersonalGoalsIfEmpty() {},
     async setSpeechRegisterIfEmpty() {},
+    async setRefusalsIfEmpty() {},
     async setClearanceLevel() {},
   }
 

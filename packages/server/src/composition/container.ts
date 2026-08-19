@@ -27,6 +27,7 @@ import type {
   TtsCacheRepository,
   TurnRepository,
   UnitOfWork,
+  HostRosterProvider,
   UsageRepository,
   WorldEventRepository,
   WorldRepository,
@@ -65,6 +66,7 @@ import { SqliteWorldRepository } from '@/infrastructure/persistence/sqlite/world
 import { XaiSpeechSynthesizer } from '@/infrastructure/tts/xai-speech-synthesizer'
 import { AuthoredWorldArchetypeProvider } from '@/infrastructure/world-gen/world-archetype-provider'
 import { GrokEnsembleGenerator } from '@/infrastructure/world-gen/grok-crew-generator'
+import { StaticHostRosterProvider } from '@/infrastructure/world-gen/parks/static-host-roster'
 import { GrokOpeningPlotSeeder } from '@/infrastructure/world-gen/grok-opening-plot-seeder'
 import { GrokThreadBootstrapper } from '@/infrastructure/world-gen/grok-thread-bootstrapper'
 import { GrokMetaStoryGenerator } from '@/infrastructure/world-gen/grok-meta-story-generator'
@@ -121,6 +123,7 @@ export type Container = {
   worldEvents: WorldEventRepository
   directorBrain: DirectorDecisionPort
   conductor: ConductorPort
+  hostRosters: HostRosterProvider
 }
 
 // The container is a process-wide singleton, cached on `globalThis` rather than
@@ -185,6 +188,7 @@ function buildSqlite(): Container {
     worldEvents: new SqliteWorldEventRepository(),
     directorBrain: new HaikuDirectorBrain(),
     conductor: new HaikuConductor(),
+    hostRosters: new StaticHostRosterProvider(),
   }
 }
 
@@ -239,6 +243,7 @@ export async function initContainer(): Promise<Container> {
     timePassage: new HaikuTimePassageEstimator(),
     directorBrain: new HaikuDirectorBrain(),
     conductor: new HaikuConductor(),
+    hostRosters: new StaticHostRosterProvider(),
     ...repos,
   })
 }

@@ -18,6 +18,7 @@ import {
   type RankableThread,
   type RankingContext,
 } from '@/domain/services/dossier-ranking'
+import { filterMustStageAgainstRefusals } from '@/domain/services/host-refusals'
 import { isPlayerYieldingFloor } from '@/domain/services/open-order'
 import { isSettledLeftoverThread } from '@/domain/services/settled-findings'
 
@@ -47,6 +48,8 @@ export type DirectorCastCandidate = {
   id: number
   name: string
   isPlayer?: boolean
+  /** Parsed will-not lines; omit when none. */
+  refusals?: string[]
 }
 
 export type DirectorSnapshot = {
@@ -117,7 +120,10 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
   )
 
   if (activeThreads.length === 0 && activeObjectives.length === 0) {
-    return mergePendingBeat(emptyDossierDecision(directed, leftoverIds), directed)
+    return applyHostGuards(
+      mergePendingBeat(emptyDossierDecision(directed, leftoverIds), directed),
+      directed,
+    )
   }
 
   const ctx: RankingContext = { clockMinutes: snapshot.clockMinutes }
@@ -226,22 +232,25 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
     }),
   })
 
-  return mergePendingBeat(
-    {
-      foregroundThreadId,
-      phase,
-      tension,
-      beatKind,
-      mustStage,
-      mustNot,
-      cast,
-      guidanceLines,
-      suggestResolveThreadIds,
-      suggestCompleteObjectiveIds,
-      suggestDormantThreadIds: [...new Set([...suggestDormantThreadIds, ...leftoverIds])],
-      backgroundThreadIds,
-      heavyThreadIds,
-    },
+  return applyHostGuards(
+    mergePendingBeat(
+      {
+        foregroundThreadId,
+        phase,
+        tension,
+        beatKind,
+        mustStage,
+        mustNot,
+        cast,
+        guidanceLines,
+        suggestResolveThreadIds,
+        suggestCompleteObjectiveIds,
+        suggestDormantThreadIds: [...new Set([...suggestDormantThreadIds, ...leftoverIds])],
+        backgroundThreadIds,
+        heavyThreadIds,
+      },
+      directed,
+    ),
     directed,
   )
 }
@@ -785,6 +794,35 @@ function isIdleMove(text: string): boolean {
   return /\b(wait|look around|stare|sit|drink|idle|do nothing|stay|linger)\b/i.test(
     text,
   )
+}
+
+function applyHostGuards(
+  decision: DirectorDecision,
+  snapshot: DirectorSnapshot,
+): DirectorDecision {
+  const present = snapshot.presentCast ?? []
+  return {
+    ...decision,
+    mustStage: filterMustStageAgainstRefusals(decision.mustStage, present),
+    cast: demoteUnengagedInitiate(decision.cast, snapshot),
+  }
+}
+
+function demoteUnengagedInitiate(
+  cast: DirectorCastSlot[],
+  snapshot: DirectorSnapshot,
+): DirectorCastSlot[] {
+  const text = snapshot.playerText ?? ''
+  const playerHasTheFloor = !isPlayerYieldingFloor(text) && !isIdleMove(text)
+  if (!playerHasTheFloor) return cast
+  const addressed = new Set(
+    namedPresent(text, snapshot.presentCast ?? []).map((c) => c.id),
+  )
+  return cast.map((slot) => {
+    if (slot.role !== 'initiate') return slot
+    if (addressed.has(slot.characterId)) return slot
+    return { ...slot, role: 'react' }
+  })
 }
 
 function isRevealMove(text: string): boolean {

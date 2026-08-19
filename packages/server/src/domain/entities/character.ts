@@ -55,6 +55,11 @@ export type Character = {
   /** Sticky how-they-talk fingerprint; author-once, ≤200 chars. Null until set. */
   speech_register: string | null
   /**
+   * JSON string list of hard will-not lines (author-once). Null until a host
+   * file or first write sets them. Empty list is stored as `[]`.
+   */
+  refusals: string | null
+  /**
    * Hub simulation-ops clearance (default public_crew). First-class projected
    * field — not traits JSON. Ignored on subworlds.
    */
