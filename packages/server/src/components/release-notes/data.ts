@@ -16,6 +16,15 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.15.0',
+    date: '2026-08-18',
+    highlights: [
+      'Starting a game is picking a park. Project THRESHOLD is first: give your name and walk in.',
+      'Genre grid and custom creation moved behind Lab.',
+      'Home and play call them parks, not Animus or text adventures. Coming back from a narrative is “Return to” the park’s name.',
+    ],
+  },
+  {
     version: '0.14.2',
     date: '2026-08-19',
     highlights: [

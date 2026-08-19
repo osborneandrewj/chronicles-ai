@@ -38,19 +38,21 @@ export default async function ReviewPage({ params }: { params: Promise<Params> }
     await turnRepo.assistantMetadataSince(worldId, oldestVisibleId)
   ).map(({ id, metadata }) => summarizeTurn(id, metadata))
   const hasOlder = turns.length > 0 ? await turnRepo.hasTurnBefore(worldId, turns[0].id) : false
+  const hub =
+    world.parent_world_id !== null ? await worlds.getWorld(world.parent_world_id) : null
 
   return (
     <div className="relative flex min-h-screen flex-col">
       <div className="flex items-center justify-between border-b border-neutral-900 px-4 py-2.5 sm:px-6">
         <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
-          Past life — read only
+          Past narrative — read only
         </span>
         {world.parent_world_id !== null && (
           <Link
             href={`/worlds/${world.parent_world_id}/play`}
             className="text-sm text-neutral-500 transition hover:text-neutral-300"
           >
-            ← Back to Animus
+            ← Back to {hub?.name ?? 'the park'}
           </Link>
         )}
       </div>
@@ -67,6 +69,7 @@ export default async function ReviewPage({ params }: { params: Promise<Params> }
           world.world_layer,
         )}
         worldLayer="subworld"
+        parkName={hub?.name ?? null}
         readOnly
       />
     </div>

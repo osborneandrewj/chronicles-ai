@@ -13,11 +13,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { SlashCommandMenu } from "@/components/SlashCommandMenu";
+import { returnToParkAction } from "@/app/worlds/[worldId]/play/actions";
+import { playLayerLabel, returnToParkLabel } from "@/components/play/chrome";
 import { PLAY_SKIN_VARS, type PlaySkin } from "@/components/play/skins";
+import { SlashCommandMenu } from "@/components/SlashCommandMenu";
 import { useNarratorAudio } from "@/components/useNarratorAudio";
 import { WorldInspector } from "@/components/WorldInspector";
-import { returnToAnimusAction } from "@/app/worlds/[worldId]/play/actions";
 import { formatUsd } from "@/lib/pricing";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import {
@@ -68,7 +69,8 @@ type Props = {
   headerEnd?: ReactNode;
   skin?: PlaySkin;
   worldLayer?: "hub" | "subworld" | "standalone";
-  canReturnToAnimus?: boolean;
+  parkName?: string | null;
+  canReturnToPark?: boolean;
 };
 
 
@@ -83,8 +85,11 @@ export function Chat({
   headerEnd,
   skin = "relic",
   worldLayer = "standalone",
-  canReturnToAnimus = false,
+  parkName = null,
+  canReturnToPark = false,
 }: Props) {
+  const layerLabel = playLayerLabel(worldLayer);
+  const returnLabel = returnToParkLabel(parkName);
   const [input, setInput] = useState("");
   const [usage, setUsage] = useState<TurnCost[]>(initialUsage);
   const [oldestId, setOldestId] = useState<number | null>(initialOldestId);
@@ -446,27 +451,29 @@ export function Chat({
         <div className="flex min-w-0 items-center gap-1.5">
           <Link
             href="/"
-            aria-label="Back to worlds"
+            aria-label="Back to parks"
             className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
           >
             <BackIcon />
           </Link>
           <div className="min-w-0">
-            <p className="skin-display truncate text-[9px] font-medium uppercase tracking-[0.2em] reader-accent">
-              {worldLayer === "hub" ? "Animus" : worldLayer === "subworld" ? "First life" : "Text adventure"}
-            </p>
+            {layerLabel ? (
+              <p className="skin-display truncate text-[9px] font-medium uppercase tracking-[0.2em] reader-accent">
+                {layerLabel}
+              </p>
+            ) : null}
             <span className="skin-display block truncate text-base font-semibold tracking-tight reader-text sm:text-lg">
               {worldName}
             </span>
           </div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-1">
-          {canReturnToAnimus ? (
-            <form action={returnToAnimusAction.bind(null, worldId)}>
+          {canReturnToPark ? (
+            <form action={returnToParkAction.bind(null, worldId)}>
               <button
                 type="submit"
-                title="Return to Animus"
-                aria-label="Return to Animus"
+                title={returnLabel}
+                aria-label={returnLabel}
                 className="inline-flex h-11 w-11 items-center justify-center rounded-full reader-muted transition reader-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
               >
                 <HomeIcon />
@@ -487,7 +494,7 @@ export function Chat({
           <HeaderIconButton
             onClick={toggleInspector}
             pressed={inspectorOpen}
-            label={inspectorOpen ? "Close world inspector" : "Open world inspector"}
+            label={inspectorOpen ? "Close inspector" : "Open inspector"}
             tone={inspectorOpen ? "amber" : "neutral"}
           >
             <InspectorIcon />

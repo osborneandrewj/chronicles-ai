@@ -6,7 +6,7 @@ You are given:
 - The ROOM MANIFEST: each room's `key`, current name, and a baseline description. Use the `key` values exactly when you reference rooms.
 - The ENSEMBLE SLOTS: 3–5 role anchors, each tied to a real room `key` (`homeRoomKey`). Fill one ensemble member per slot, in the same order.
 - **CANDIDATE NAMES**: a pre-sampled list of given + surname pairs suited to the premise era and culture. Draw on these or names of the same era/culture — do NOT default to the same generic surnames every story (e.g. do not reuse "Voss", "Kane", "Drake").
-- **RECENTLY USED** (avoid-list): surnames that have appeared in recent worlds. Do not use any surname on this list, even if it fits the era.
+- **RECENTLY USED** (avoid-list): surnames that have appeared in recent parks. Do not use any surname on this list, even if it fits the era.
 
 Return a single JSON object matching the schema. No prose outside the JSON.
 

@@ -7,25 +7,25 @@ export function PathChooser({ animusEnabled }: { animusEnabled: boolean }) {
         <li>
           <PathCard
             href="/worlds/new?path=animus"
-            eyebrow="World type"
-            title="Animus"
-            body="A sci-fi home facility you return to. Enter a first life from it; later lives launch from the same Animus."
+            eyebrow="Lab"
+            title="Facility + narrative"
+            body="A home facility you return to. Enter a first narrative from it; later narratives launch from the same facility."
           />
         </li>
       ) : null}
       <li>
         <PathCard
           href="/worlds/new?path=generated"
-          eyebrow="World type"
-          title="Generated world"
-          body="Pick a genre. We invent a unique standalone world — name, place, opening — and you play there. No home facility."
+          eyebrow="Lab"
+          title="Generated park"
+          body="Pick a genre. We invent a unique standalone park — name, place, opening — and you play there. No home facility."
         />
       </li>
       <li>
         <PathCard
           href="/worlds/new?path=custom"
-          eyebrow="World type"
-          title="Custom world"
+          eyebrow="Lab"
+          title="Custom park"
           body="You write the name, premise, and opening yourself."
         />
       </li>

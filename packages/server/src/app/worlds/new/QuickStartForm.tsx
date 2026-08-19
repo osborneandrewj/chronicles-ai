@@ -65,7 +65,7 @@ export function QuickStartForm() {
             disabled={pending || genre === ''}
             className="min-h-12 w-full rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 sm:w-auto"
           >
-            {pending ? 'Generating…' : 'Generate world'}
+            {pending ? 'Generating…' : 'Generate park'}
           </button>
         </div>
       </div>

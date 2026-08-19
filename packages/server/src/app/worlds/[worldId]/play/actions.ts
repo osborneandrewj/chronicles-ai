@@ -6,7 +6,7 @@ import { closeSubworldAndReturn } from '@/application/use-cases/close-subworld-a
 import { getContainer } from '@/composition/container'
 import { generateOpeningTurn } from '@/lib/opening-turn'
 
-export async function returnToAnimusAction(worldId: number): Promise<void> {
+export async function returnToParkAction(worldId: number): Promise<void> {
   const container = getContainer()
   const { characters, decks, dossiers, occupancy, places, scenes, sessions, simRuns, worlds, turns } =
     container
@@ -48,7 +48,7 @@ export async function returnToAnimusAction(worldId: number): Promise<void> {
       { characters, dossiers, occupancy, places, scenes, turns, worlds },
       hubWorldId,
       premise,
-    ).catch((err) => console.error('[animus return opening]', err))
+    ).catch((err) => console.error('[park return opening]', err))
   }
   redirect(`/worlds/${hubWorldId}/play`)
 }

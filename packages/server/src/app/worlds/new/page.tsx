@@ -1,71 +1,66 @@
 import Link from 'next/link'
 
 import { isAnimusEnabled, listGenrePresets } from '@/composition/onboarding'
+import { getPark, PARK_CATALOG } from '@/domain/services/park-catalog'
 import { resolveUiSkin } from '@/domain/services/ui-skin'
 import { GENRES } from '@/lib/genres'
 
 import { AnimusWizard } from './AnimusWizard'
 import { CreateWorldForm } from './CreateWorldForm'
+import { ParkCatalog } from './ParkCatalog'
+import { ParkEnterForm } from './ParkEnterForm'
 import { PathChooser } from './PathChooser'
 import { QuickStartForm } from './QuickStartForm'
 import { StarshipLaunch } from './StarshipLaunch'
 
 export const dynamic = 'force-dynamic'
 
-type Search = { path?: string }
+type Search = { path?: string; park?: string }
 
 export default async function NewWorldPage({
   searchParams,
 }: {
   searchParams: Promise<Search>
 }) {
-  const { path } = await searchParams
+  const { path, park: parkId } = await searchParams
+  const park = parkId ? getPark(parkId) : undefined
   const animusEnabled = isAnimusEnabled()
   const signalGenres = GENRES.filter((g) => resolveUiSkin({ genreTags: [g] }) === 'signal')
-
-  const title =
-    path === 'animus'
-      ? 'Forge an Animus'
-      : path === 'generated'
-        ? 'Generate a world'
-        : path === 'custom'
-          ? 'Write a custom world'
-          : 'New world'
-
-  const blurb =
-    path === 'animus'
-      ? 'A sci-fi home facility you return to. Pick the first life you will enter.'
-      : path === 'generated'
-        ? 'Pick a genre. We invent a standalone world. It is not an Animus — there is no home facility to return to.'
-        : path === 'custom'
-          ? 'You write the name, premise, and opening. One standalone world.'
-          : 'Choose what kind of world you are making. Each type plays differently.'
+  const inLabChild = path === 'animus' || path === 'generated' || path === 'custom'
+  const chrome = pageChrome(path, park, parkId)
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col px-5 py-10">
       <header className="mb-8 flex items-baseline justify-between">
         <Link
-          href={path ? '/worlds/new' : '/'}
+          href={inLabChild ? '/worlds/new?path=lab' : path || parkId ? '/worlds/new' : '/'}
           className="text-sm text-neutral-500 transition hover:text-neutral-300"
         >
-          {path ? '← World types' : '← Worlds'}
+          {inLabChild ? '← Lab' : '← Parks'}
         </Link>
         <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-amber-500/80">
-          {path === 'animus' ? 'Animus' : path === 'generated' ? 'Generated' : path === 'custom' ? 'Custom' : 'New'}
+          {chrome.eyebrow}
         </span>
       </header>
 
-      <h1 className="mb-1 text-xl font-semibold tracking-tight text-neutral-100">{title}</h1>
-      <p className="mb-8 max-w-prose font-serif text-sm leading-relaxed text-neutral-400">{blurb}</p>
+      <h1 className="mb-1 text-xl font-semibold tracking-tight text-neutral-100">{chrome.title}</h1>
+      <p className="mb-8 max-w-prose font-serif text-sm leading-relaxed text-neutral-400">
+        {chrome.blurb}
+      </p>
 
-      {!path ? <PathChooser animusEnabled={animusEnabled} /> : null}
-      {path === 'animus' && animusEnabled ? (
+      {!path && !parkId ? <ParkCatalog parks={PARK_CATALOG} /> : null}
+      {parkId && !park ? (
+        <p className="text-sm text-neutral-400">That park is not in the catalog.</p>
+      ) : null}
+      {park ? <ParkEnterForm parkId={park.id} parkName={park.name} /> : null}
+      {path === 'lab' && !parkId ? <PathChooser animusEnabled={animusEnabled} /> : null}
+      {path === 'animus' && animusEnabled && !parkId ? (
         <AnimusWizard presets={listGenrePresets()} signalGenres={signalGenres} />
       ) : null}
-      {path === 'animus' && !animusEnabled ? (
-        <p className="text-sm text-neutral-400">Animus creation is turned off.</p>
+      {path === 'animus' && !animusEnabled && !parkId ? (
+        <p className="text-sm text-neutral-400">Facility creation is turned off.</p>
       ) : null}
-      {path === 'generated' ? (
+      {path === 'generated' && !parkId ? (
         <div className="space-y-8">
           <QuickStartForm />
           <div className="relative">
@@ -81,7 +76,57 @@ export default async function NewWorldPage({
           <StarshipLaunch />
         </div>
       ) : null}
-      {path === 'custom' ? <CreateWorldForm /> : null}
+      {path === 'custom' && !parkId ? <CreateWorldForm /> : null}
     </main>
   )
+}
+
+function pageChrome(
+  path: string | undefined,
+  park: ReturnType<typeof getPark>,
+  parkId: string | undefined,
+): { title: string; blurb: string; eyebrow: string } {
+  if (park) {
+    return { title: `Enter ${park.name}`, blurb: park.promise, eyebrow: 'Park' }
+  }
+  if (parkId) {
+    return {
+      title: 'Park not found',
+      blurb: 'That park is not in the catalog.',
+      eyebrow: 'Catalog',
+    }
+  }
+  if (path === 'lab') {
+    return {
+      title: 'Lab',
+      blurb: 'Sandbox paths. Catalog parks are the front door; this is for generated and custom play.',
+      eyebrow: 'Sandbox',
+    }
+  }
+  if (path === 'animus') {
+    return {
+      title: 'Forge a facility',
+      blurb: 'A home facility you return to. Pick the first narrative you will enter.',
+      eyebrow: 'Lab',
+    }
+  }
+  if (path === 'generated') {
+    return {
+      title: 'Generate a park',
+      blurb: 'Pick a genre. We invent a standalone park. There is no home facility to return to.',
+      eyebrow: 'Lab',
+    }
+  }
+  if (path === 'custom') {
+    return {
+      title: 'Write a custom park',
+      blurb: 'You write the name, premise, and opening. One standalone park.',
+      eyebrow: 'Lab',
+    }
+  }
+  return {
+    title: 'Parks',
+    blurb: 'Enter a park. Live among its people. Leave with a chronicle.',
+    eyebrow: 'Catalog',
+  }
 }
