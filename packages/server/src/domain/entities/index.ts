@@ -67,6 +67,7 @@ export type {
   HostFile,
   HostKind,
   HostLoopBand,
+  HostOpeningThread,
   HostRoster,
   HostWebEdge,
 } from './host'

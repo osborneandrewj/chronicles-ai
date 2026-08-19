@@ -78,6 +78,8 @@ export class MongoCharacterRepository implements CharacterRepository {
           currentFocus: character.role,
           activeGoal: character.active_goal,
           dailyLoop,
+          status: character.status ?? 'active',
+          agencyLevel: character.agency_level ?? 'npc',
           createdAt: now,
           updatedAt: now,
         },

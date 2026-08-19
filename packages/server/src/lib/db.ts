@@ -472,12 +472,23 @@ export function insertBoundedPlace(input: {
 // the crew role is stored in `current_focus` (an existing field) per the P1 spec.
 // daily_loop is JSON text written to the characters.daily_loop column (v24).
 const insertBoundedCharacterStmt = db.prepare<
-  [number, string, string | null, number, number | null, string | null, string | null, string | null]
+  [
+    number,
+    string,
+    string | null,
+    number,
+    number | null,
+    string | null,
+    string | null,
+    string | null,
+    string,
+    string,
+  ]
 >(
   `INSERT INTO characters
      (world_id, name, description, is_player, current_place_id,
-      current_focus, active_goal, daily_loop)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      current_focus, active_goal, daily_loop, status, agency_level)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
 )
 
 export function insertBoundedCharacter(input: {
@@ -489,6 +500,8 @@ export function insertBoundedCharacter(input: {
   role: string | null
   active_goal: string | null
   daily_loop: string | null
+  status?: Character['status']
+  agency_level?: Character['agency_level']
 }): { id: number } {
   const row = insertBoundedCharacterStmt.get(
     input.world_id,
@@ -499,6 +512,8 @@ export function insertBoundedCharacter(input: {
     input.role,
     input.active_goal,
     input.daily_loop,
+    input.status ?? 'active',
+    input.agency_level ?? 'npc',
   ) as { id: number }
   return { id: row.id }
 }

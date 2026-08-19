@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.17.0',
+    date: '2026-08-19',
+    highlights: [
+      'Project THRESHOLD now opens with its own people already in place — not a generated crew. Fern has a seat in the mess. Lena is in operations from the first day.',
+      'Walk-ons have names. There is no blank technician at the door.',
+    ],
+  },
+  {
     version: '0.16.0',
     date: '2026-08-19',
     highlights: [

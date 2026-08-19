@@ -1,6 +1,6 @@
 // Player-facing park catalog (v0.15). Persistence stays worlds / world_id.
 // Catalog parks are authored entries; sandbox generation lives behind Lab.
-// Host files and an authored THRESHOLD roster are later milestones.
+// THRESHOLD seeds from the authored host roster, not Grok ensemble dressing.
 
 export type ParkCatalogEntry = {
   id: string

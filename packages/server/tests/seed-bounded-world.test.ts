@@ -21,8 +21,10 @@ import type {
 import type { CharacterInput } from '@/domain/ports/character-repository'
 import type { PlaceInput } from '@/domain/ports/place-repository'
 import type { CreateBoundedWorldInput } from '@/domain/ports/world-repository'
+import { BUNKER } from '@/infrastructure/world-gen/archetypes/bunker'
 import { StubEnsembleGenerator } from '@/infrastructure/world-gen/stub-crew-generator'
 import { StubOpeningPlotSeeder } from '@/infrastructure/world-gen/stub-opening-plot-seeder'
+import { THRESHOLD_ROSTER } from '@/infrastructure/world-gen/parks/threshold/roster'
 
 // Unit test for SeedBoundedWorld (starship P1). Pure orchestration exercised with
 // in-memory fake ports that record their calls — no DB, no LLM (the deterministic
@@ -384,5 +386,59 @@ describe('seedBoundedWorld', () => {
         deps,
       ),
     ).rejects.toBeInstanceOf(DisconnectedTopologyError)
+  })
+})
+
+describe('seedBoundedWorld with an authored roster', () => {
+  it('seeds THRESHOLD people without calling the ensemble generator', async () => {
+    const { deps, rec } = makeDeps(BUNKER)
+    let ensembleCalls = 0
+    deps.crew = {
+      async generate() {
+        ensembleCalls += 1
+        throw new Error('catalog parks must not dress with Grok')
+      },
+    }
+    const result = await seedBoundedWorld(
+      {
+        templateId: 'bunker',
+        name: 'Project THRESHOLD',
+        premise: 'A sealed bunker still on watch.',
+        roster: THRESHOLD_ROSTER,
+      },
+      deps,
+    )
+    expect(ensembleCalls).toBe(0)
+    const names = rec.charactersAdded.map((c) => c.name)
+    expect(names).toContain('Fern Finch')
+    expect(names).toContain('Jordan Lacy')
+    expect(names).toContain('Lee Ingram')
+    expect(names).toContain('Lena Korr')
+    expect(names).toContain('Marcus Hale')
+    expect(names).toContain('Reyes')
+    expect(names.length).toBeGreaterThanOrEqual(8)
+    expect(names.length).toBeLessThanOrEqual(12)
+    expect(result.characterIds).toHaveLength(THRESHOLD_ROSTER.hosts.length)
+
+    const fern = rec.charactersAdded.find((c) => c.name === 'Fern Finch')
+    const fernLoop = JSON.parse(fern?.daily_loop ?? '{}') as Record<
+      string,
+      { activity: string; place_id: number }
+    >
+    const fernPlaces = new Set(Object.values(fernLoop).map((band) => band.place_id))
+    expect(fernPlaces.size).toBeGreaterThan(1)
+    expect(fern?.agency_level).toBe('local')
+
+    const hale = rec.charactersAdded.find((c) => c.name === 'Marcus Hale')
+    expect(hale?.status).toBe('inactive')
+    expect(hale?.current_place_id).toBeNull()
+
+    const lena = rec.charactersAdded.find((c) => c.name === 'Lena Korr')
+    expect(lena?.agency_level).toBe('local')
+
+    expect(rec.threadsInserted.map((t) => t.title)).toEqual(
+      THRESHOLD_ROSTER.openingThreads.map((t) => t.title),
+    )
+    expect(rec.threadsInserted.some((t) => /monitor/i.test(t.title))).toBe(false)
   })
 })

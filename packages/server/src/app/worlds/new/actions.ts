@@ -487,22 +487,31 @@ export async function createParkAction(
   const seed = (hashString(park.id) ^ Date.now()) >>> 0
   let worldId: number
   try {
-    const arcEngine = pickArcEngine(seed)
+    const roster = await c.hostRosters.forPark(park.id)
     let bible: Awaited<ReturnType<typeof c.metaStoryGenerator.generate>> | undefined
-    try {
-      bible = await c.metaStoryGenerator.generate({
-        hubName: park.name,
-        hubPremise: park.premise,
-        arcEngine,
-        genreLabels: park.narrativeLabels,
-        seed,
-      })
-    } catch (err) {
-      console.error('[park meta-story generation]', err)
+    if (!roster) {
+      const arcEngine = pickArcEngine(seed)
+      try {
+        bible = await c.metaStoryGenerator.generate({
+          hubName: park.name,
+          hubPremise: park.premise,
+          arcEngine,
+          genreLabels: park.narrativeLabels,
+          seed,
+        })
+      } catch (err) {
+        console.error('[park meta-story generation]', err)
+      }
     }
 
     const hubResult = await createBoundedWorld(
-      { templateId: park.templateId, name: park.name, premise: park.premise, playerName },
+      {
+        templateId: park.templateId,
+        name: park.name,
+        premise: park.premise,
+        playerName,
+        roster: roster ?? undefined,
+      },
       { ...c, crew: c.ensembleGenerator },
     )
     worldId = hubResult.worldId

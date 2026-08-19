@@ -19,6 +19,7 @@ export type ReverieInput = {
   text: string
   match_tags?: string[]
   intensity?: number
+  is_cornerstone?: number
 }
 
 export type FlareCandidate = {

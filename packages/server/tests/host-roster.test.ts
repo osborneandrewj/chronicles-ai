@@ -31,6 +31,7 @@ const FIXTURE: HostRoster = {
       kind: 'principal',
     },
   ],
+  openingThreads: [],
 }
 
 describe('host roster loader', () => {
@@ -42,8 +43,10 @@ describe('host roster loader', () => {
     expect(await rosters.forPark('missing')).toBeNull()
   })
 
-  it('defaults to no authored roster', async () => {
-    const empty = new StaticHostRosterProvider()
-    expect(await empty.forPark('threshold')).toBeNull()
+  it('loads Project THRESHOLD by default', async () => {
+    const provider = new StaticHostRosterProvider()
+    const hit = await provider.forPark('threshold')
+    expect(hit?.hosts.some((h) => h.name === 'Jordan Lacy')).toBe(true)
+    expect(await provider.forPark('missing')).toBeNull()
   })
 })

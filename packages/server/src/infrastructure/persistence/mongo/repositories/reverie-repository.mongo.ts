@@ -92,7 +92,7 @@ export class MongoReverieRepository implements ReverieRepository {
             text,
             matchTagsJson: JSON.stringify(tags),
             intensity,
-            isCornerstone: false,
+            isCornerstone: input.is_cornerstone === 1,
             createdTurnId,
             lastFlaredTurnId: null,
             createdAt: new Date(),

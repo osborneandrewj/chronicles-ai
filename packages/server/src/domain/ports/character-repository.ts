@@ -1,4 +1,4 @@
-import type { Character, ClearanceLevel } from '@/domain/entities'
+import type { Character, CharacterAgencyLevel, ClearanceLevel } from '@/domain/entities'
 
 // Result of the appearance-bump / auto-promotion pass (spec §3.4-P3). `promoted`
 // is the names of NPCs that crossed the auto-promote threshold on this call;
@@ -22,6 +22,8 @@ export type CharacterInput = {
   role: string | null
   active_goal: string | null
   daily_loop: string | null
+  status?: Character['status']
+  agency_level?: CharacterAgencyLevel
 }
 
 // The archivist's character INSERT (insertCharacterStmt): the columns the patch
