@@ -28,7 +28,8 @@ export function repeatedStagedPlanCue(outcomes: PlanOutcomeForLoop[]): string | 
 
   return (
     'PLAN LOOP: your last plans already landed. Do not restage presence, palm-on-glass, watching, or "I\'m here". ' +
-    'Pick a different move — new information, a choice, talk to another NPC, leave, or act on your own goal.'
+    'Pick a different move — new information, a choice, talk to another NPC, leave, or act on your own goal. ' +
+    'Answer the player\'s action this turn. Do not replace their beat with a finding or a choice they did not ask for.'
   )
 }
 

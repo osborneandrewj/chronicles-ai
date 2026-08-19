@@ -20,11 +20,14 @@ describe('narrator prompt — reverie ban promoted to non-negotiable', () => {
 })
 
 describe('narrator prompt — limited POV (no omniscient off-scene narration)', () => {
-  it('confines narration to the protagonist perception and frames off-scene as their awareness', () => {
+  it('confines narration to what the protagonist can perceive and keeps off-scene off the page', () => {
     const p = loadPrompt('narrator-system')
     expect(p).toMatch(/inside the protagonist'?s perception/i)
-    expect(p).toMatch(/outside their view|off-scene/i)
+    expect(p).toMatch(/off-scene/i)
     expect(p).toMatch(/never as omniscient fact/i)
+    expect(p).toMatch(/Do not write another mind's thoughts/i)
+    expect(p).toMatch(/stay off the page/i)
+    expect(p).not.toMatch(/may surface ONLY as the protagonist's own thought/i)
   })
 })
 
@@ -76,6 +79,9 @@ describe('director-brain prompt', () => {
     expect(p).toMatch(/player agency/i)
     expect(p).toMatch(/change the board/i)
     expect(p).toMatch(/do not restage/i)
+    expect(p).toMatch(/Camera stays with the protagonist/i)
+    expect(p).toMatch(/mustStage.*present-character/i)
+    expect(p).toMatch(/invitation is not arrival/i)
   })
 })
 
@@ -94,8 +100,11 @@ describe('npc-agent prompt — staged presence loops', () => {
     const p = loadPrompt('npc-agent-system')
     expect(p).toMatch(/plan_loop_warning/)
     expect(p).toMatch(/Staged repeats are also a loop/i)
+    expect(p).toMatch(/Answer what they just did|do not replace their beat/i)
     expect(p).toMatch(/I'm here/)
     expect(p).toMatch(/do not freeze a finished situation/i)
+    expect(p).toMatch(/Leave means they go/i)
+    expect(p).toMatch(/leave the protagonist behind/i)
   })
 })
 
@@ -122,12 +131,15 @@ describe('narrator prompt — director beat is binding', () => {
     expect(p).toMatch(/fold the player into the prose/i)
     expect(p).toMatch(/predicates/i)
     expect(p).toMatch(/world'?s voice/i)
-    expect(p).toMatch(/load-bearing quoted speech/i)
+    expect(p).toMatch(/paraphrase is allowed/i)
+    expect(p).toMatch(/do not paste the typed line/i)
     expect(p).toMatch(/cannot act/i)
     expect(p).toMatch(/agency returns/i)
     expect(p).toMatch(/I'm here/)
     expect(p).toMatch(/palm-on-glass/i)
-    expect(p).toMatch(/Follow means arrive/i)
+    expect(p).toMatch(/Camera stays with the protagonist/i)
+    expect(p).toMatch(/If they followed, they arrive now/i)
+    expect(p).toMatch(/do not arrive beside them/i)
   })
 })
 

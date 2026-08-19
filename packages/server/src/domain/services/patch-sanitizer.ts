@@ -199,6 +199,78 @@ export function mergeDeterministicTravel(
 }
 
 /**
+ * When the player authored a trip and the narrator confirmed arrival, land
+ * the protagonist on the destination the archivist already resolved for the
+ * companions. Do not parse bunk/room/rack synonyms — the place name comes
+ * from the LLM patch. Inverse of camera-follow: we only move if the player
+ * said they were going.
+ */
+export function mergeSharedRelocation(
+  llmPatch: ArchivistPatch,
+  prior: NarratorWorldState,
+  playerText: string,
+  narratorText: string,
+): ArchivistPatch {
+  if (!playerAuthoredRelocation(playerText)) return llmPatch
+  const already = llmPatch.characters?.find((c) => c.is_player === true && c.current_place_name)
+  if (already?.current_place_name) return llmPatch
+
+  const dest = destinationFromCompanionMove(llmPatch, prior, playerText)
+  if (!dest) return llmPatch
+  if (normalize(dest) === normalize(prior.currentPlace?.name ?? '')) return llmPatch
+  if (!relocationConfirmed(dest, narratorText)) return llmPatch
+
+  const player = prior.presentCharacters.find((c) => c.is_player === 1)
+    ?? prior.knownCharacters.find((c) => c.is_player === 1)
+  if (!player) return llmPatch
+
+  return mergeDeterministicTravel(llmPatch, {
+    places: [{ name: dest }],
+    characters: [{ name: player.name, is_player: true, current_place_name: dest }],
+    scene: { action: 'open', title: `At ${dest}`, place_name: dest },
+  })
+}
+
+function playerAuthoredRelocation(text: string): boolean {
+  const n = normalize(text)
+  return (
+    /\b(?:i|we)\s+(?:go|walk|run|head|leave|follow|enter|return)\b/.test(n) ||
+    /\b(?:i|we)\s+make\s+(?:my|our)\s+way\b/.test(n) ||
+    /\blet'?s\s+go\b/.test(n)
+  )
+}
+
+function destinationFromCompanionMove(
+  patch: ArchivistPatch,
+  prior: NarratorWorldState,
+  playerText: string,
+): string | null {
+  if (patch.scene?.action === 'open' && patch.scene.place_name) {
+    return knownPlaceName(prior, patch.scene.place_name) ?? patch.scene.place_name
+  }
+  const moves = (patch.characters ?? []).filter(
+    (c) => c.is_player !== true && Boolean(c.current_place_name),
+  )
+  if (moves.length === 0) return null
+  const present = new Set(
+    prior.presentCharacters
+      .filter((c) => c.is_player !== 1)
+      .map((c) => normalize(c.name)),
+  )
+  const companion = moves.find((c) => present.has(normalize(c.name)))
+  const chosen = companion ?? (/\bwe\b/.test(normalize(playerText)) ? moves[0] : null)
+  if (!chosen?.current_place_name) return null
+  return knownPlaceName(prior, chosen.current_place_name) ?? chosen.current_place_name
+}
+
+function relocationConfirmed(destination: string, narratorText: string): boolean {
+  return (
+    narratorAcceptsDestination(destination, narratorText) ||
+    (hasActualMotion(normalize(narratorText)) && narratorMentionsPlace(narratorText, destination))
+  )
+}
+
+/**
  * When the protagonist cannot act, drop player travel unless it is the
  * depicted wake place. NPC moves stay.
  */

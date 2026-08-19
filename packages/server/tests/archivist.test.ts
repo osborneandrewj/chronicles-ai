@@ -8,6 +8,7 @@ import {
   extractDeterministicPatch,
   extractWakePlace,
   mergeDeterministicTravel,
+  mergeSharedRelocation,
   normalizeTransitPlaceName,
   PLACE_KIND_DIRECTIVE,
   sanitizeArchivistPatch,
@@ -1402,6 +1403,67 @@ describe('extractDeterministicPatch', () => {
       true,
     )
     expect(merged.scene?.action).toBe('open')
+  })
+
+  it('lands the player on the companion destination the archivist already named', () => {
+    const prior = {
+      worldTime: null,
+      currentScene: null,
+      currentPlace: { id: 39, name: 'Medical' },
+      presentCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 39 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 39 },
+      ],
+      knownCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 39 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 39 },
+      ],
+      knownPlaces: [
+        { id: 39, name: 'Medical' },
+        { id: 18, name: 'Bunk Area' },
+      ],
+      dossier: { threads: [], clues: [], objectives: [], resources: [], timeline: [] },
+      occupancy: null,
+    } as never
+    const merged = mergeSharedRelocation(
+      { characters: [{ name: 'Jordan Lacy', current_place_name: 'Bunk Area' }] },
+      prior,
+      'We make our way to my bunk',
+      'You step out of Medical. Your bunk door slides open. Jordan follows you in and sets the folder on the desk.',
+    )
+    expect(merged.characters?.find((c) => c.is_player)?.current_place_name).toBe('Bunk Area')
+    expect(merged.scene?.action).toBe('open')
+    expect(merged.scene?.place_name).toBe('Bunk Area')
+  })
+
+  it('does not follow a leaving NPC when the player refused the trip', () => {
+    const prior = {
+      worldTime: null,
+      currentScene: null,
+      currentPlace: { id: 38, name: 'Corridor' },
+      presentCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 38 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 38 },
+      ],
+      knownCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 38 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 38 },
+      ],
+      knownPlaces: [
+        { id: 38, name: 'Corridor' },
+        { id: 39, name: 'Medical' },
+      ],
+      dossier: { threads: [], clues: [], objectives: [], resources: [], timeline: [] },
+      occupancy: null,
+    } as never
+    const merged = mergeSharedRelocation(
+      { characters: [{ name: 'Jordan Lacy', current_place_name: 'Medical' }] },
+      prior,
+      'No, we need another plan. I could use that drink.',
+      'She turns toward Medical and keeps her pace even so you stay beside her. You reach the alcove.',
+    )
+    expect(merged.characters?.some((c) => c.is_player)).toBe(false)
+    expect(merged.scene).toBeUndefined()
   })
 
   it('does not extract a destination the narrator did not confirm', async () => {

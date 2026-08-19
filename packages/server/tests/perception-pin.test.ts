@@ -48,6 +48,8 @@ describe('formatPerceptionPin', () => {
     expect(block).toContain('### PERCEPTION (authoritative)')
     expect(block).toContain('HERE (can hear/see/speak here): Ellis Shaw')
     expect(block).toContain('Jordan Lacy — Mess Hall')
+    expect(block).toMatch(/not on camera/i)
+    expect(block).toMatch(/do not describe them or their room/i)
     expect(block).toMatch(/no voice from a doorway/i)
     expect(block).toMatch(/do not share a plot file/i)
   })

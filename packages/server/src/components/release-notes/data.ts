@@ -16,6 +16,16 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.14.1',
+    date: '2026-08-18',
+    highlights: [
+      'The camera stays with you. If someone walks out and you did not follow, the next beat is still this room — they do not drag you to the next place.',
+      'When you do go with someone, your place in the world catches up so the book and the map agree.',
+      'Saying “continue” finishes what is already happening. It does not invent a new file, alarm, or destination to keep the plot moving.',
+      'Naming a person in the room is not treated as taking up their story thread. Nearby people answer what you just did instead of restaging last turn’s pressure.',
+    ],
+  },
+  {
     version: '0.14.0',
     date: '2026-08-18',
     highlights: [

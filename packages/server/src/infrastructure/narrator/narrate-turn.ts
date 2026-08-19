@@ -116,6 +116,7 @@ import {
   extractPatch,
   extractWakePlace,
   mergeDeterministicTravel,
+  mergeSharedRelocation,
 } from '@/lib/archivist'
 import { classifyAction } from '@/lib/classifier'
 import { reconcileNpcIntentsForTurn, RECONCILER_MODEL } from '@/lib/intent-reconciler'
@@ -448,6 +449,11 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     enRouteCast: postPromotionState.knownCharacters
       .filter((c) => c.in_transit_to_place_id != null)
       .map((c) => ({ id: c.id, name: c.name })),
+    knownCast: postPromotionState.knownCharacters.map((c) => ({
+      id: c.id,
+      name: c.name,
+      isPlayer: c.is_player === 1,
+    })),
     pendingBeat: directorState.pending,
     lastBeatKind: directorState.lastBeatKind,
     lastForegroundThreadId: directorState.lastForegroundThreadId,
@@ -886,6 +892,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     activeThreatTitles,
     primaryPressureTitle:
       primaryQuest?.title ?? activeObjectiveTitles[0] ?? activeThreatTitles[0] ?? null,
+    currentPlaceName: narratorState.currentPlace?.name ?? null,
   })
 
   // Reality-bending cue (Phase D) — subworlds only. Surface the lucidity stage
@@ -1538,6 +1545,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       )
         .then(async ({ patch, usage: archivistUsage }) => {
           let merged = mergeDeterministicTravel(patch, deterministicPatch)
+          merged = mergeSharedRelocation(merged, priorState, playerText, trimmed)
           if (skipPlayerTravel) {
             merged = constrainPlayerTravel(merged, wakePlace)
           }

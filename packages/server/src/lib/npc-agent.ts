@@ -813,7 +813,7 @@ export async function planNpcActions(
     : `PLAYER IS ABOUT TO (this turn): ${playerInput}`
 
   const yieldFloorLine = isPlayerYieldingFloor(playerInput)
-    ? 'PLAYER YIELDED THE FLOOR this turn (continue / wait / until-done / time jump). Plan the rest of the current activity as one move — complete remaining checks, deliver the finding, finish the exchange. planned_action may be a short two-or-three-clause sequence. Do not plan a single next micro-step that will need another continue.'
+    ? 'PLAYER YIELDED THE FLOOR this turn (continue / wait / until-done / time jump). Finish what is already in frame as one move. Do not plan a new finding, place, alarm, or choice they did not ask for. Do not plan a single next micro-step that will need another continue.'
     : null
 
   let storyDossier: StoryDossier = preload.dossier ?? {

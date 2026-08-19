@@ -25,6 +25,18 @@ Single-player interactive novel engine: a bounded living world, multi-agent narr
 - **Treat LLM output as untrusted.** Sanitize player text and model output at the adapter→domain edge, then trust inward.
 - **Archive plans when they ship.** `git mv` a landed plan from `docs/plans/` into `docs/plans/archive/` (never delete). Roadmaps and `_template-milestone.md` stay put; versioned milestone docs go in `docs/plans/milestones/`.
 
+## Beat and state
+
+These apply in every world and situation. Do not add genre- or mood-specific matchers (romance, bunk, rite, procedure). The cue is whatever the player just did.
+
+- **Bind to the signal you already have.** Do not grow synonym lists. Destination is the place the archivist already named. Thread engagement is player text matching that thread's tokens *this turn*. Presence is `current_place_id ===` the player's. If the fix is another regex of phrasings, the concern has leaked — find the structured signal.
+- **The player's action this turn is the beat.** NPCs roll with that cue. Structure may not force a different beat. Do not walk them with someone they refused to follow. Do not MUST STAGE a finding, file, or named next place they did not name. `continue` finishes what is already in frame; it does not mint a new incident to "land a board."
+- **Hard rules need an inverse.** "Follow means arrive" only if they followed. A presence loop is not a license to replace the player's beat. "Yield lands a result" does not invent a new alarm, place, or log. If the player acted, NPCs react; they initiate only when the player yielded the floor or addressed them.
+- **Do not stack binding obligations.** MUST STAGE + planned moves + yield-write-through + "break the loop with a choice" will make every companion dump plot. One structural must per concern. Soft notes for the rest. Giving the narrator "full control" is the wrong inverse — they already have craft; what they lack is permission to ignore a stack of musts.
+- **Keep structured place and presence.** The camera is who shares the player's `current_place_id`. Off-scene STATE is a writer's aid, not a camera feed. Do not leave the protagonist row behind when the player authored a trip and the prose arrived. Prose is the book; state follows the book on player-authored facts.
+- **Last turn's structure is not this turn's duty.** Do not sticky-engage a thread because it was foreground last turn. Drop a pending MUST STAGE whose cast has left the room. Naming a present person is not engagement with the plot.
+- **Prompts are craft; domain services decide.** If a prompt rule and a sanitizer/director predicate disagree, the predicate wins. A prompt-only fix for a state miss is incomplete.
+
 ## Architecture
 
 Hexagonal (ports & adapters). Paths below are relative to `packages/server/src/`.

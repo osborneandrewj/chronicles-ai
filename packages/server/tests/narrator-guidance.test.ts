@@ -393,6 +393,8 @@ describe('sparse guidance matrix (Phase B)', () => {
     expect(out).toMatch(/you speak/i)
     expect(out).toMatch(/predicates/i)
     expect(out).toMatch(/world'?s voice/i)
+    expect(out).toMatch(/paraphrase/i)
+    expect(out).toMatch(/do not paste the typed line/i)
   })
 
   it('wake-advance cue does not wait for the protagonist', () => {
@@ -516,7 +518,7 @@ describe('tier-1 engagement cue (P5 + S1)', () => {
       ctx({ playerText: 'continue', recentTurns: oneIdle, presentNpcCount: 2, plannedActionCount: 0 }),
     )
     expect(out!.toLowerCase()).toContain('yielded the floor')
-    expect(out!.toLowerCase()).toContain('write through')
+    expect(out!.toLowerCase()).toContain('already in frame')
     expect(out!.toLowerCase()).not.toContain('take the initiative')
   })
 
@@ -735,6 +737,42 @@ describe('genre / media / dialogue cues (risk-gated)', () => {
     })
     expect(guidance).toContain('ambient closer')
     expect(guidance).toContain('wheat')
+  })
+
+  it('snaps the camera back when last prose walked the player to a place STATE did not', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I stay here.',
+        currentPlaceName: 'Corridor',
+        recentTurns: [
+          { role: 'user', content: 'No, we need another plan.' },
+          {
+            role: 'assistant',
+            content:
+              'She turns toward the Medical door and keeps her pace even so you stay beside her. You reach the alcove.',
+          },
+        ],
+      }),
+    )
+    expect(out).toMatch(/Camera stays at Corridor/)
+    expect(out).toMatch(/they are gone/i)
+  })
+
+  it('does not snap the camera when STATE place matches the arrival', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        playerText: 'I look at Lee.',
+        currentPlaceName: 'Medical - Alcove',
+        recentTurns: [
+          { role: 'user', content: 'I follow her to Medical.' },
+          {
+            role: 'assistant',
+            content: 'You follow Jordan into Medical. You reach the alcove.',
+          },
+        ],
+      }),
+    )
+    expect(out ?? '').not.toMatch(/Camera stays at/)
   })
 
   it('cues movement beats to breathe', () => {

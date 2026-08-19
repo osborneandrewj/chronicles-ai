@@ -223,7 +223,7 @@ export function formatStateBlock(
           const beliefs = c.private_beliefs.split('\n').filter((s) => s.trim().length > 0)
           if (beliefs.length > 0) {
             lines.push(
-              `  - private read (known only to ${c.name}; never let another NPC act on it): ${limit(beliefs[0], 170)}`,
+              `  - private read (known only to ${c.name}; never state on the page; never let another NPC act on it): ${limit(beliefs[0], 170)}`,
             )
           }
         }
@@ -353,10 +353,10 @@ export function formatStateBlock(
   }
 
   // Off-scene NPCs the narrator might reference this turn (phone calls,
-  // messages, recollections, sudden arrivals). The NPC agent ticks them in
-  // the background and writes last_known_situation + journey state. The
-  // narrator must ground any off-scene NPC line in these facts and must
-  // not teleport an NPC ahead of arrival_world_time.
+  // messages, recollections, sudden arrivals). Writer's aid only — not a
+  // camera feed. The NPC agent ticks them in the background and writes
+  // last_known_situation + journey state. Do not narrate them unless the
+  // protagonist can perceive them; do not teleport ahead of arrival_world_time.
   // Open-order targets are always included even if plain `npc` / no situation.
   const presentIds = new Set(state.presentCharacters.map((c) => c.id))
   const openOrderTargetName = openOrderCtx?.targetName?.toLowerCase() ?? null
@@ -383,7 +383,10 @@ export function formatStateBlock(
     .slice(0, 5)
   if (offScene.length > 0) {
     const placeNameById = new Map(state.knownPlaces.map((p) => [p.id, p.name]))
-    lines.push('', '### OFF-SCENE NPCs (tracked — do not contradict)')
+    lines.push('', '### OFF-SCENE NPCs (writer\'s aid — not on camera)')
+    lines.push(
+      'Do not narrate these people or rooms unless the protagonist can perceive them this turn (HERE, a live channel in this room, or they walk in).',
+    )
     for (const c of offScene) {
       const where = c.current_place_id ? placeNameById.get(c.current_place_id) ?? null : null
       const dest = c.in_transit_to_place_id
@@ -597,7 +600,7 @@ export function formatDirectorBlock(
   const byId = new Map(threads.map((t) => [t.id, t]))
   const lines: string[] = [
     '## DIRECTOR',
-    'Structural beat — MUST realize every MUST STAGE line this turn (same force as PLANNED MOVES). Craft is free on how. Do not invent mechanics or list as menu options.',
+    'Structural beat — MUST realize every MUST STAGE line this turn (same force as PLANNED MOVES). Craft is free on how. Do not invent mechanics or list as menu options. Camera stays with the protagonist — do not walk them to satisfy a beat.',
   ]
   const fg =
     decision.foregroundThreadId != null
@@ -668,7 +671,7 @@ export function formatPerceptionPin(pin: PerceptionPin): string {
   ]
   if (pin.elsewhere.length > 0) {
     lines.push(
-      "ELSEWHERE (cannot speak into this room; do not give them this scene's facts):",
+      'ELSEWHERE (not on camera; cannot speak into this room; do not describe them or their room):',
     )
     for (const row of pin.elsewhere.slice(0, 8)) {
       lines.push(`- ${row.name}${row.place ? ` — ${row.place}` : ''}`)
