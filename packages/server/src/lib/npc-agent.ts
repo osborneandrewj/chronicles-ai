@@ -31,6 +31,7 @@ import {
   type PrivateUtterance,
 } from '@/domain/services/private-utterance'
 import { isOocPolicyRefusal } from '@/domain/services/ooc-refusal'
+import { repeatedStagedPlanCue } from '@/domain/services/repeated-npc-beat'
 import {
   capSpeechRegister,
   finalizeTalkPlan,
@@ -743,56 +744,61 @@ export async function planNpcActions(
   // Shape the per-NPC context. recent_activity is truncated to the last 3 lines
   // so the prompt stays bounded as activity logs grow over a long session.
   // player_action_this_turn is audience-scoped when a private channel is active.
-  const npcContext = tickable.map((a) => ({
-    name: a.name,
-    description: a.description,
-    personal_goals: a.personal_goals,
-    private_beliefs: lastNLines(stripFactProvenance(a.private_beliefs), 4),
-    reveries: (reveriesByChar.get(a.id) ?? []).map((r) => r.text),
-    daily_loop: a.daily_loop ? JSON.parse(a.daily_loop) : null,
-    world_time_band: worldTimeBand(worldTime),
-    relationship_to_player: a.relationship_to_player,
-    long_term_agenda: lastNLines(stripFactProvenance(a.long_term_agenda), 4),
-    tool_access: a.tool_access,
-    agency_level: a.agency_level,
-    tick_rate:
-      a.agency_level === 'local' || a.agency_level === 'agent'
-        ? 'every turn'
-        : a.agency_level === 'nearby'
-          ? 'every 2 turns'
-          : 'every 5 turns',
-    current_focus: a.current_focus,
-    active_goal: a.active_goal,
-    current_attitude: a.current_attitude,
-    // Sticky voice fingerprint — null means agent should author once this tick.
-    speech_register: a.speech_register,
-    current_place: a.current_place_name,
-    present_with_protagonist:
-      a.current_place_id !== null && a.current_place_id === player.current_place_id,
-    recent_activity: lastNLines(stripFactProvenance(a.recent_activity), 3),
-    // Journey state: where they're heading (if anywhere), when they should
-    // arrive, and a short present-tense snapshot of physical state right now.
-    // The agent advances last_known_situation each turn the NPC is in transit
-    // and only flips current_place when the world clock catches up to ETA.
-    in_transit_to: a.in_transit_to_name,
-    arrival_world_time: a.arrival_world_time,
-    last_known_situation: a.last_known_situation,
-    // v0.6.9 — recent intent outcomes. The post-narrator reconciler labels
-    // each plan staged/modified/ignored/contradicted. Surfacing the last
-    // three lets the agent react to friction with the narrator (e.g. stop
-    // planning a move the narrator keeps overriding) rather than pretending
-    // every plan landed cleanly.
-    recent_plan_outcomes: (outcomesByChar.get(a.id) ?? []).map((row) => ({
-      planned_action: row.planned_action,
-      narrator_disposition: row.narrator_disposition,
-      narrator_interpretation: row.narrator_interpretation,
-    })),
-    // Audience-scoped player action for this turn (structure-first privacy).
-    player_action_this_turn: playerTextForNpc(playerInput, a.id, activePrivate),
-    hears_private_this_turn: activePrivate ? isAudience(a.id, activePrivate) : null,
-    director_slot:
-      directorCast?.find((s) => s.characterId === a.id)?.role ?? null,
-  }))
+  const npcContext = tickable.map((a) => {
+    const outcomes = outcomesByChar.get(a.id) ?? []
+    const planLoopWarning = repeatedStagedPlanCue(outcomes)
+    return {
+      name: a.name,
+      description: a.description,
+      personal_goals: a.personal_goals,
+      private_beliefs: lastNLines(stripFactProvenance(a.private_beliefs), 4),
+      reveries: (reveriesByChar.get(a.id) ?? []).map((r) => r.text),
+      daily_loop: a.daily_loop ? JSON.parse(a.daily_loop) : null,
+      world_time_band: worldTimeBand(worldTime),
+      relationship_to_player: a.relationship_to_player,
+      long_term_agenda: lastNLines(stripFactProvenance(a.long_term_agenda), 4),
+      tool_access: a.tool_access,
+      agency_level: a.agency_level,
+      tick_rate:
+        a.agency_level === 'local' || a.agency_level === 'agent'
+          ? 'every turn'
+          : a.agency_level === 'nearby'
+            ? 'every 2 turns'
+            : 'every 5 turns',
+      current_focus: a.current_focus,
+      active_goal: a.active_goal,
+      current_attitude: a.current_attitude,
+      // Sticky voice fingerprint — null means agent should author once this tick.
+      speech_register: a.speech_register,
+      current_place: a.current_place_name,
+      present_with_protagonist:
+        a.current_place_id !== null && a.current_place_id === player.current_place_id,
+      recent_activity: lastNLines(stripFactProvenance(a.recent_activity), 3),
+      // Journey state: where they're heading (if anywhere), when they should
+      // arrive, and a short present-tense snapshot of physical state right now.
+      // The agent advances last_known_situation each turn the NPC is in transit
+      // and only flips current_place when the world clock catches up to ETA.
+      in_transit_to: a.in_transit_to_name,
+      arrival_world_time: a.arrival_world_time,
+      last_known_situation: a.last_known_situation,
+      // v0.6.9 — recent intent outcomes. The post-narrator reconciler labels
+      // each plan staged/modified/ignored/contradicted. Surfacing the last
+      // three lets the agent react to friction with the narrator (e.g. stop
+      // planning a move the narrator keeps overriding) rather than pretending
+      // every plan landed cleanly.
+      recent_plan_outcomes: outcomes.map((row) => ({
+        planned_action: row.planned_action,
+        narrator_disposition: row.narrator_disposition,
+        narrator_interpretation: row.narrator_interpretation,
+      })),
+      ...(planLoopWarning ? { plan_loop_warning: planLoopWarning } : {}),
+      // Audience-scoped player action for this turn (structure-first privacy).
+      player_action_this_turn: playerTextForNpc(playerInput, a.id, activePrivate),
+      hears_private_this_turn: activePrivate ? isAudience(a.id, activePrivate) : null,
+      director_slot:
+        directorCast?.find((s) => s.characterId === a.id)?.role ?? null,
+    }
+  })
 
   const privateChannelLine =
     activePrivate && activePrivate.audienceNames.length > 0

@@ -470,7 +470,7 @@ export function formatStateBlock(
 // the check is unsure it does not fire, and even a missed-but-correct
 // suppression is harmless because the narrator can still read place from prose.
 const TRAVEL_VERB =
-  /\b(?:arrive|arrives|arrived|arriving|enter|enters|entered|entering|walk(?:s|ed)? into|step(?:s|ped)? into|reach(?:es|ed)?|pull(?:s|ed)? into|drive(?:s)? to|drove to|head(?:s|ed)? to|made (?:your|their|his|her) way to|cross(?:es|ed)? into)\b/
+  /\b(?:arrive|arrives|arrived|arriving|enter|enters|entered|entering|walk(?:s|ed)? into|step(?:s|ped)? into|reach(?:es|ed)?|pull(?:s|ed)? into|drive(?:s)? to|drove to|head(?:s|ed)? to|head(?:s|ed)? off|made (?:your|their|his|her) way to|cross(?:es|ed)? into|leave(?:s|ing)?|left behind|the two of you leave)\b/
 function recentProseDepictsTravelElsewhere(
   recentNarratorProse: string[],
   currentPlace: Place,

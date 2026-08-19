@@ -590,6 +590,31 @@ describe('NPC story context (plot lifecycle)', () => {
     expect(content).toContain('PLAYER YIELDED THE FLOOR')
     expect(content).toContain('rest of the current activity')
   })
+
+  it('surfaces a plan_loop_warning on the NPC context', () => {
+    const content = buildNpcAgentUserContent({
+      worldTime: 'Midday',
+      settingRegion: null,
+      protagonistPlace: 'Isolation Chamber',
+      openOrderLine: null,
+      privateChannelLine: null,
+      npcContext: [
+        {
+          name: 'Jordan Lacy',
+          director_slot: 'react',
+          plan_loop_warning:
+            'PLAN LOOP: your last plans already landed. Do not restage presence, palm-on-glass, watching, or "I\'m here".',
+        },
+      ],
+      knownPlacesBlock: '- Isolation Chamber',
+      priorNarration: 'Jordan holds the glass.',
+      playerAboutLine: 'PLAYER IS ABOUT TO (this turn): Thanks, Jordan.',
+      storyContext: null,
+    })
+    expect(content).toContain('plan_loop_warning')
+    expect(content).toContain('PLAN LOOP')
+    expect(content).toContain("I'm here")
+  })
 })
 
 function stubCharacter(over: Partial<Character> & Pick<Character, 'id' | 'name'>): Character {

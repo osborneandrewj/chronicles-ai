@@ -89,6 +89,16 @@ describe('npc-agent prompt — director CAST slots', () => {
   })
 })
 
+describe('npc-agent prompt — staged presence loops', () => {
+  it('treats a cleanly staged repeat as a loop, not a success', () => {
+    const p = loadPrompt('npc-agent-system')
+    expect(p).toMatch(/plan_loop_warning/)
+    expect(p).toMatch(/Staged repeats are also a loop/i)
+    expect(p).toMatch(/I'm here/)
+    expect(p).toMatch(/do not freeze a finished situation/i)
+  })
+})
+
 describe('npc-agent prompt — perception / place', () => {
   it('forbids off-scene speech and other-room logs', () => {
     const p = loadPrompt('npc-agent-system')
@@ -115,6 +125,9 @@ describe('narrator prompt — director beat is binding', () => {
     expect(p).toMatch(/load-bearing quoted speech/i)
     expect(p).toMatch(/cannot act/i)
     expect(p).toMatch(/agency returns/i)
+    expect(p).toMatch(/I'm here/)
+    expect(p).toMatch(/palm-on-glass/i)
+    expect(p).toMatch(/Follow means arrive/i)
   })
 })
 

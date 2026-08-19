@@ -38,16 +38,27 @@ export function extractDeterministicPatch(
     ? opts.wakePlace
     : opts.skipPlayerTravel
       ? null
-      : extractDestination(playerText)
+      : extractDestination(playerText, prior, narratorText)
   if (destination) {
     const destinationKey = normalize(destination)
     const player = prior.presentCharacters.find((c) => c.is_player === 1)
+    const followedPlace = placeNameForFollowedPerson(playerText, prior)
+    const followingThemThere =
+      (followedPlace != null && normalize(followedPlace) === destinationKey) ||
+      destinationIsNamedPersonsPlace(playerText, prior, destination)
     if (
       destinationKey &&
       destinationKey !== normalize(prior.currentPlace?.name ?? '') &&
       player &&
       (opts.wakePlace != null ||
-        narratorAcceptsDestination(destination, narratorText))
+        narratorAcceptsDestination(destination, narratorText) ||
+        (followingThemThere && !travelBlocked(narratorText)) ||
+        (playerNamedPlaceWithMotion(playerText, destination) &&
+          hasActualMotion(normalize(narratorText)) &&
+          !travelBlocked(narratorText)) ||
+        (playerLeftCurrentPlace(playerText, prior) &&
+          !travelBlocked(narratorText) &&
+          narratorMentionsPlace(narratorText, destination)))
     ) {
       patch.places = [{ name: destination }]
       patch.characters = [{ name: player.name, is_player: true, current_place_name: destination }]
@@ -309,11 +320,16 @@ export function sanitizeArchivistPatch(
   return filterArchivistKnowledgeForAudience(sanitized, privateUtterance, knownForAudience)
 }
 
-function extractDestination(text: string): string | null {
+function extractDestination(
+  text: string,
+  prior: NarratorWorldState,
+  narratorText = '',
+): string | null {
   const patterns = [
     /\b(?:i\s+)?(?:go|walk|run|drive|head|travel)\s+(?:back\s+)?to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
     /\b(?:i\s+)?(?:return)\s+to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
     /\b(?:i\s+)?(?:enter|walk into|go into)\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
+    /\b(?:i\s+)?make my way to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
     // "I groan and follow him to medical" — follow is the travel verb.
     /\bfollow(?:s|ed|ing)?\s+(?:[\w'.]+\s+){0,5}to\s+(?:the\s+)?([^.!?\n,;]{3,80})/i,
   ]
@@ -321,9 +337,176 @@ function extractDestination(text: string): string | null {
     const match = text.match(pattern)
     if (!match?.[1]) continue
     const destination = cleanDestination(match[1])
-    if (destination) return destination
+    if (!destination) continue
+    const asPerson = placeNameForCharacter(prior, destination)
+    if (asPerson) return asPerson
+    const known = knownPlaceName(prior, destination)
+    return known ?? destination
+  }
+  const followedPlace = placeNameForFollowedPerson(text, prior)
+  if (followedPlace) return followedPlace
+  const leftFor = extractLeaveTravel(text, narratorText, prior)
+  if (leftFor) return leftFor
+  return extractPlaceWithMotion(text, prior)
+}
+
+function extractFollowedPerson(text: string): string | null {
+  const match = text.match(
+    /\bfollow(?:s|ed|ing)?\s+(?:the\s+)?(?!to\b)([A-Za-z][\w'.-]*)(?:\s+([A-Z][\w'.-]*))?/,
+  )
+  if (!match?.[1]) return null
+  if (/^(him|her|them|it|this|that|me|us|you)$/i.test(match[1])) return null
+  return match[2] ? `${match[1]} ${match[2]}` : match[1]
+}
+
+function placeNameForFollowedPerson(
+  text: string,
+  prior: NarratorWorldState,
+): string | null {
+  const name = extractFollowedPerson(text)
+  return name ? placeNameForCharacter(prior, name) : null
+}
+
+function placeNameForCharacter(
+  prior: NarratorWorldState,
+  rawName: string,
+): string | null {
+  const key = normalize(rawName)
+  if (key.length < 3) return null
+  const chars = [...prior.knownCharacters, ...prior.presentCharacters]
+  const hit = chars.find((c) => {
+    if (c.is_player === 1) return false
+    const n = normalize(c.name)
+    return n === key || n.startsWith(`${key} `) || n.split(' ')[0] === key
+  })
+  if (!hit?.current_place_id) return null
+  return prior.knownPlaces.find((p) => p.id === hit.current_place_id)?.name ?? null
+}
+
+function knownPlaceName(prior: NarratorWorldState, raw: string): string | null {
+  const key = canonicalPlaceKey(raw)
+  const hit = prior.knownPlaces.find((p) => canonicalPlaceKey(p.name) === key)
+  if (hit) return hit.name
+  return (
+    prior.knownPlaces.find((p) => canonicalPlaceKey(p.name).includes(key) && key.length >= 4)
+      ?.name ?? null
+  )
+}
+
+function extractPlaceWithMotion(
+  text: string,
+  prior: NarratorWorldState,
+): string | null {
+  if (
+    !/\b(go|walk|run|head|enter|follow|find a table|get food|sit|arrive|meet|lead the way|make my way)\b/i.test(
+      text,
+    )
+  ) {
+    return null
+  }
+  const leaving = playerLeftCurrentPlace(text, prior)
+  const currentKey = prior.currentPlace ? canonicalPlaceKey(prior.currentPlace.name) : ''
+  const ranked = [...prior.knownPlaces].sort((a, b) => b.name.length - a.name.length)
+  const n = normalize(text)
+  for (const p of ranked) {
+    if (p.name.trim().length < 3) continue
+    if (!containsAsPhrase(n, normalize(p.name)) && !mentionsPlaceAlias(n, p.name)) continue
+    if (leaving && canonicalPlaceKey(p.name) === currentKey) continue
+    return p.name
   }
   return null
+}
+
+function extractLeaveTravel(
+  playerText: string,
+  narratorText: string,
+  prior: NarratorWorldState,
+): string | null {
+  if (!playerLeftCurrentPlace(playerText, prior)) return null
+  const currentId = prior.currentPlace?.id ?? null
+  const narrator = normalize(narratorText)
+  const hits: Array<{ name: string; idx: number }> = []
+  for (const p of prior.knownPlaces) {
+    if (p.id === currentId || p.name.trim().length < 4) continue
+    const key = normalize(p.name)
+    let idx = narrator.indexOf(key)
+    if (idx < 0) {
+      const alias = key.split(' ').filter((w) => w.length >= 4)[0]
+      idx = alias ? narrator.indexOf(alias) : -1
+    }
+    if (idx < 0) continue
+    hits.push({ name: p.name, idx })
+  }
+  hits.sort((a, b) => a.idx - b.idx)
+  for (const hit of hits) {
+    const around = windowAroundPhrase(narrator, normalize(hit.name), 14)
+    if (/\b(glanc(?:e|ing)|look(?:s|ing)? (?:at|toward))\b/.test(around)) continue
+    const futureOnly =
+      /\b(will|we'll|we will|need to|in search of|pull what)\b/.test(around) &&
+      !hasActualMotion(around)
+    if (futureOnly) continue
+    return hit.name
+  }
+  return null
+}
+
+function playerLeftCurrentPlace(
+  playerText: string,
+  prior: NarratorWorldState,
+): boolean {
+  const n = normalize(playerText)
+  if (!/\b(leave|leaving|head(?:s|ing)? off|let's go|lets go)\b/.test(n)) return false
+  const current = prior.currentPlace?.name
+  if (!current) return true
+  return mentionsPlaceAlias(n, current) || /\b(head(?:s|ing)? off|let's go|lets go)\b/.test(n)
+}
+
+function mentionsPlaceAlias(haystack: string, placeName: string): boolean {
+  const key = normalize(placeName)
+  if (containsAsPhrase(haystack, key)) return true
+  return key
+    .split(' ')
+    .filter((w) => w.length >= 4)
+    .some((w) => containsAsPhrase(haystack, w))
+}
+
+function narratorMentionsPlace(narratorText: string, placeName: string): boolean {
+  return mentionsPlaceAlias(normalize(narratorText), placeName)
+}
+
+function playerNamedPlaceWithMotion(playerText: string, destination: string): boolean {
+  if (
+    !/\b(go|walk|run|head|enter|follow|find a table|get food|sit|arrive|meet|lead the way|make my way)\b/i.test(
+      playerText,
+    )
+  ) {
+    return false
+  }
+  return containsAsPhrase(normalize(playerText), normalize(destination))
+}
+
+function destinationIsNamedPersonsPlace(
+  playerText: string,
+  prior: NarratorWorldState,
+  destination: string,
+): boolean {
+  const match = playerText.match(
+    /\b(?:to|toward)\s+(?:the\s+)?([A-Za-z][\w'.-]*)(?:\s+([A-Z][\w'.-]*))?/,
+  )
+  if (!match?.[1]) return false
+  if (/^(the|a|an|my|his|her|their)$/i.test(match[1])) return false
+  const name = match[2] ? `${match[1]} ${match[2]}` : match[1]
+  const place = placeNameForCharacter(prior, name)
+  return place != null && normalize(place) === normalize(destination)
+}
+
+function travelBlocked(narratorText: string): boolean {
+  const n = normalize(narratorText)
+  return (
+    /\b(blocks? you|blocked the (?:road|way|door)|cannot (?:pass|enter|leave)|floodwater)\b/.test(
+      n,
+    ) && !/\b(arrive|follow|fall in step|beside you|leads you)\b/.test(n)
+  )
 }
 
 function narratorAcceptsDestination(destination: string, narratorText: string): boolean {
@@ -465,6 +648,8 @@ function hasActualMotion(value: string): boolean {
   return (
     /\byou (?:go|goes|walk|walks|run|runs|drive|drives|head|heads|travel|travels|return|returns|enter|enters|arrive|arrives|follow|follows|leave|leaves|step|steps|cross|crosses|climb|climbs|move|moves|land|lands|wake|wakes|park|parks|pull|pulls)\b/.test(value) ||
     /\byou make your way\b/.test(value) ||
+    /\bmake (?:your|my) way\b/.test(value) ||
+    /\byou and \w+ (?:reach|walk|go|head|arrive|enter|sit|take)\b/.test(value) ||
     /\byou (?:are|re) (?:led|taken|carried|brought|ushered|escorted|shown)\b/.test(value) ||
     /\b(?:leads|takes|carries|brings|ushers|escorts|shows) you\b/.test(value) ||
     /\bfall(?:s)? in step\b/.test(value) ||
@@ -472,7 +657,9 @@ function hasActualMotion(value: string): boolean {
     /\bdoorway opens\b/.test(value) ||
     /\bopens ahead\b/.test(value) ||
     /\b(?:when|by the time) you arrive\b/.test(value) ||
-    /\bscene (?:cuts|shifts)\b/.test(value)
+    /\bscene (?:cuts|shifts)\b/.test(value) ||
+    /\bthe two of you leave\b/.test(value) ||
+    /\bleave(?:s|ing)? the .{0,40} behind\b/.test(value)
   )
 }
 

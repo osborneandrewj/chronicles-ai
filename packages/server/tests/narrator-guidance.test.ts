@@ -624,6 +624,29 @@ describe('dialogue beat cue (dialogue-depth Phase 1)', () => {
     expect(out!.toLowerCase()).toContain('talk to each other')
   })
 
+  it('flags a reused I\'m here comfort line', () => {
+    const out = formatNarratorTurnGuidance(
+      ctx({
+        stance: 'say',
+        playerText: 'Thanks, Jordan. I wouldn\'t want to do this alone.',
+        presentNpcCount: 2,
+        recentTurns: [
+          {
+            role: 'assistant',
+            content: 'Jordan’s palm rises. “I’m here,” she says, voice low.',
+          },
+          { role: 'user', content: 'I wait until the protocol is over.' },
+          {
+            role: 'assistant',
+            content: 'Jordan glances at Ellis. “I’m still right here.”',
+          },
+        ],
+      }),
+    )
+    expect(out!.toLowerCase()).toMatch(/do not reuse/)
+    expect(out!.toLowerCase()).toMatch(/here/)
+  })
+
   it('does not fire on observe/travel without speech and without present NPCs', () => {
     const out = formatNarratorTurnGuidance(
       ctx({

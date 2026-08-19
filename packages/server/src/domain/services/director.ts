@@ -115,15 +115,7 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
   )
 
   if (activeThreads.length === 0 && activeObjectives.length === 0) {
-    return mergePendingBeat(
-      {
-        ...emptyDirectorBeat(),
-        suggestDormantThreadIds: [...leftoverIds],
-        backgroundThreadIds: [],
-        heavyThreadIds: [],
-      },
-      directed,
-    )
+    return mergePendingBeat(emptyDossierDecision(directed, leftoverIds), directed)
   }
 
   const ctx: RankingContext = { clockMinutes: snapshot.clockMinutes }
@@ -263,6 +255,7 @@ export function mergePendingBeat(
   if (playerOverridesPending(snapshot, pending)) return decision
   if (snapshot.wakeAdvance || snapshot.stayUnder) return decision
   if (shouldDropStallPending(snapshot, pending)) return decision
+  if (shouldDropProcedurePending(snapshot, pending)) return decision
   return {
     ...decision,
     beatKind: pending.beatKind,
@@ -296,6 +289,49 @@ function shouldDropStallPending(
       : null
   if (thread) return isPlayerEngagedWithThread(snapshot, thread)
   return !isIdleMove(snapshot.playerText)
+}
+
+/** Empty-dossier local pendings restage the same procedure forever unless dropped. */
+function shouldDropProcedurePending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  if (pending.beatKind !== 'local') return false
+  if (isRepeatEmptyLocal(snapshot)) return true
+  if (pending.foregroundThreadId == null && !isIdleMove(snapshot.playerText)) return true
+  return false
+}
+
+function isRepeatEmptyLocal(snapshot: DirectorSnapshot): boolean {
+  const last = snapshot.lastBeatKind
+  return last === 'local' || last === 'yield'
+}
+
+function emptyDossierDecision(
+  snapshot: DirectorSnapshot,
+  leftoverIds: Set<number>,
+): DirectorDecision {
+  const empty: DirectorDecision = {
+    ...emptyDirectorBeat(),
+    suggestDormantThreadIds: [...leftoverIds],
+    backgroundThreadIds: [],
+    heavyThreadIds: [],
+  }
+  if (!isRepeatEmptyLocal(snapshot)) return empty
+  return {
+    ...empty,
+    beatKind: 'yield',
+    mustStage: [
+      'End the current procedure. Land a named next place or a named result this turn.',
+    ],
+    mustNot: [
+      'Do not restage the same watch / wait / reading / monitoring loop.',
+      'Do not start another interval, timer, or baseline pass.',
+    ],
+    guidanceLines: [
+      'No active foreground arc. The last beat was already local. Change the board.',
+    ],
+  }
 }
 
 function uniqueLines(lines: string[]): string[] {

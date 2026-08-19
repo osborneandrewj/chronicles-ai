@@ -340,6 +340,76 @@ describe('decideDirector', () => {
     expect(d.beatKind).not.toBe('stall_escalate')
   })
 
+  it('drops an empty-dossier local pending when the player asks to leave the procedure', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1354,
+      playerText: "Ok I'm ready to be done with testing. When's dinner?",
+      lastBeatKind: 'local',
+      pendingBeat: {
+        beatKind: 'local',
+        foregroundThreadId: null,
+        mustStage: ['Andrew experiences the protocol under way'],
+        mustNot: ['Do not interrupt protocols once the timer begins'],
+        cast: [{ characterId: 12, name: 'Ellis Shaw', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'empty_dossier',
+        sourceTurnId: 1352,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/protocol under way/i)
+    expect(d.mustStage.join(' ')).toMatch(/named next place/i)
+    expect(d.mustNot.join(' ')).toMatch(/monitoring/i)
+    expect(d.beatKind).toBe('yield')
+  })
+
+  it('keeps a yield pending that ends the procedure even after a local beat', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 17,
+          title: 'What the Sessions Are For',
+          kind: 'mystery',
+          summary: 'The isolation runs send Andrew into other lives',
+          source_turn_id: 1200,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1355,
+      playerText: "When's dinner?",
+      lastBeatKind: 'local',
+      pendingBeat: {
+        beatKind: 'yield',
+        foregroundThreadId: 17,
+        mustStage: ['Ellis ends the isolation cycle and unseals the chamber.'],
+        mustNot: ['Do not start another monitoring interval, timer, or deep session.'],
+        cast: [{ characterId: 12, name: 'Ellis Shaw', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'empty_dossier',
+        sourceTurnId: 1354,
+      },
+    })
+    expect(d.mustStage.join(' ')).toMatch(/unseals the chamber/i)
+    expect(d.beatKind).toBe('yield')
+  })
+
+  it('repeat empty-dossier local must change the board', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1352,
+      playerText: 'I wait until the protocol is over',
+      lastBeatKind: 'local',
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/named next place/i)
+    expect(d.mustNot.join(' ')).toMatch(/interval/i)
+  })
+
   it('repeat stall_escalate must change the board', () => {
     const d = decideDirector({
       threads: [

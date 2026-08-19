@@ -18,6 +18,7 @@ import {
 } from '@/domain/services/open-order'
 import type { PrivateUtterance } from '@/domain/services/private-utterance'
 import { historyHasOocRefusal } from '@/domain/services/ooc-refusal'
+import { repeatedSpokenLineCue } from '@/domain/services/repeated-npc-beat'
 
 // Consecutive low-agency player moves before the narrator should make the world
 // act on its own (escalating momentum). Tunable.
@@ -119,6 +120,9 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
   // sparse-away — this is the medical-loop / sanctum-loop class.
   const circling = pickCirclingBeatCue(ctx)
   if (circling) lines.push(circling)
+
+  const spokenLoop = pickRepeatedSpokenLineCue(ctx)
+  if (spokenLoop) lines.push(spokenLoop)
 
   // Dialogue-heavy beats: interactional craft (never sparse-away on stance=say
   // with present NPCs). Replaces the weak "summarized speech only" branch in
@@ -363,6 +367,12 @@ function pickClearHandleCue(ctx: GuidanceContext): string | null {
  * Dialogue-beat craft cue (dialogue-depth Phase 1). Fires on talk-shaped turns
  * with present NPCs so interactional depth is not left to chance.
  */
+function pickRepeatedSpokenLineCue(ctx: GuidanceContext): string | null {
+  if (ctx.presentNpcCount < 1) return null
+  const recent = ctx.recentTurns.filter((t) => t.role === 'assistant').map((t) => t.content)
+  return repeatedSpokenLineCue(recent)
+}
+
 function pickCirclingBeatCue(ctx: GuidanceContext): string | null {
   const recent = ctx.recentTurns.filter((t) => t.role === 'assistant').slice(-2)
   if (recent.length < 2) return null
