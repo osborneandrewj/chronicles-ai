@@ -28,9 +28,11 @@ export {
 
 // ---- DB access -------------------------------------------------------------
 
-const insertReverieStmt = db.prepare<[number, number, string, string, number, number | null]>(
-  `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity, created_turn_id)
-   VALUES (?, ?, ?, ?, ?, ?)`,
+const insertReverieStmt = db.prepare<
+  [number, number, string, string, number, number, number | null]
+>(
+  `INSERT INTO npc_reveries (world_id, character_id, text, match_tags, intensity, is_cornerstone, created_turn_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?)`,
 )
 const reveriesForCharacterStmt = db.prepare<[number]>(
   'SELECT * FROM npc_reveries WHERE character_id = ? ORDER BY id ASC',
@@ -149,7 +151,16 @@ export function addReveriesForCharacter(
       seen.add(norm)
       const tags = (input.match_tags ?? []).map(normalizeReverieTag).filter((t) => t.length > 0)
       const intensity = clampIntensity(input.intensity)
-      insertReverieStmt.run(worldId, characterId, text, tags.join(','), intensity, createdTurnId)
+      const cornerstone = input.is_cornerstone === 1 ? 1 : 0
+      insertReverieStmt.run(
+        worldId,
+        characterId,
+        text,
+        tags.join(','),
+        intensity,
+        cornerstone,
+        createdTurnId,
+      )
     }
     pruneReveriesForCharacter(characterId)
   })

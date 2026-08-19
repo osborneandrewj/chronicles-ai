@@ -1,8 +1,9 @@
-import type { PlaceConnection } from '@/domain/entities'
+import type { HostRoster, PlaceConnection } from '@/domain/entities'
 import type {
   CharacterRepository,
   Clock,
   DossierWriter,
+  ReverieRepository,
   WorldArchetypeProvider,
   WorldArchetype,
   PlaceConnectionInput,
@@ -14,11 +15,11 @@ import type {
 } from '@/domain/ports'
 import type { OpeningPlotSeeder } from '@/domain/ports/opening-plot-seeder'
 import type {
-  CompanionDailyLoopEntry,
   EnsembleGenerator,
   GeneratedEnsemble,
 } from '@/domain/ports/ensemble-generator'
 import { buildDeckGraph, isConnected, orphanRooms } from '@/domain/services/deck-graph'
+import { serializeRefusals } from '@/domain/services/host-refusals'
 import { ensureSeedTension } from '@/domain/services/seed-tension'
 import { capSpeechRegister } from '@/domain/services/speech-staging'
 
@@ -55,6 +56,7 @@ export type SeedBoundedWorldInput = {
   name: string
   premise: string
   playerName?: string
+  roster?: HostRoster
 }
 
 export type SeedBoundedWorldResult = {
@@ -75,6 +77,8 @@ export type SeedBoundedWorldDeps = {
   /** When set, seed 2–3 Booker-shaped opening threads after the ensemble. */
   dossierWriter?: DossierWriter
   openingPlotSeeder?: OpeningPlotSeeder
+  /** Cornerstone writes for authored hosts. */
+  reveries?: ReverieRepository
 }
 
 // Resolve a crew member's daily-loop place reference (a template room key OR its
@@ -82,7 +86,7 @@ export type SeedBoundedWorldDeps = {
 // that fails to resolve falls back to the crew member's home room so the loop
 // always points at a real room rather than free text (the seed-time invariant).
 function resolveDailyLoop(
-  dailyLoop: Record<string, CompanionDailyLoopEntry>,
+  dailyLoop: Record<string, { activity: string; place?: string }>,
   template: WorldArchetype,
   placeIdByRoomKey: Map<string, number>,
   homePlaceId: number,
@@ -101,7 +105,7 @@ function resolveDailyLoop(
 }
 
 export async function seedBoundedWorld(
-  { templateId, name, premise, playerName }: SeedBoundedWorldInput,
+  { templateId, name, premise, playerName, roster }: SeedBoundedWorldInput,
   deps: SeedBoundedWorldDeps,
 ): Promise<SeedBoundedWorldResult> {
   const { decks, crew, worlds, places, placeConnections, characters, relationships } = deps
@@ -109,7 +113,9 @@ export async function seedBoundedWorld(
   const template = await decks.getTemplate(templateId)
   if (!template) throw new TemplateNotFoundError(templateId)
 
-  const dressing: GeneratedEnsemble = await crew.generate({ template, premise, playerName })
+  const dressing: GeneratedEnsemble = roster
+    ? dressingFromRoster(roster, template, name, premise)
+    : await crew.generate({ template, premise, playerName })
   const dressingByRoomKey = new Map(dressing.roomDressing.map((d) => [d.key, d.description]))
 
   const { id: worldId } = await worlds.createBounded({
@@ -146,61 +152,62 @@ export async function seedBoundedWorld(
 
   // Crew → characters (home room → current_place_id; resolved daily loop JSON).
   const characterIdByRole = new Map<string, number>()
-  for (const member of dressing.crew) {
-    const homePlaceId = placeIdByRoomKey.get(member.homeRoomKey) ?? null
-    const dailyLoop = resolveDailyLoop(
-      member.dailyLoop,
+  const characterIdByName = new Map<string, number>()
+  if (roster) {
+    await seedAuthoredHosts(roster, {
+      worldId,
       template,
       placeIdByRoomKey,
-      homePlaceId ?? placeIds[0],
-    )
-    const { id } = await characters.add({
-      world_id: worldId,
-      name: member.name,
-      description: member.persona,
-      is_player: 0,
-      current_place_id: homePlaceId,
-      role: member.role,
-      active_goal: member.goal,
-      daily_loop: JSON.stringify(dailyLoop),
+      placeIds,
+      characters,
+      reveries: deps.reveries,
+      characterIdByRole,
+      characterIdByName,
     })
-    const register = capSpeechRegister(member.speechRegister)
-    if (register) await characters.setSpeechRegisterIfEmpty(id, register)
-    characterIdByRole.set(member.role, id)
+  } else {
+    for (const member of dressing.crew) {
+      const homePlaceId = placeIdByRoomKey.get(member.homeRoomKey) ?? null
+      const dailyLoop = resolveDailyLoop(
+        member.dailyLoop,
+        template,
+        placeIdByRoomKey,
+        homePlaceId ?? placeIds[0],
+      )
+      const { id } = await characters.add({
+        world_id: worldId,
+        name: member.name,
+        description: member.persona,
+        is_player: 0,
+        current_place_id: homePlaceId,
+        role: member.role,
+        active_goal: member.goal,
+        daily_loop: JSON.stringify(dailyLoop),
+      })
+      const register = capSpeechRegister(member.speechRegister)
+      if (register) await characters.setSpeechRegisterIfEmpty(id, register)
+      characterIdByRole.set(member.role, id)
+      characterIdByName.set(member.name.toLowerCase(), id)
+    }
   }
 
-  // Relationships → character_relationships (role → character id). Edges whose
-  // endpoints didn't resolve to generated crew are dropped (the adapter already
-  // enforced the role-reference invariant; this is belt-and-suspenders).
-  // Guarantee at least one edge clears the off-screen beat threshold so a fresh,
-  // near-neutral crew can ever produce living-sim drama (P6). No-op when the
-  // generator already produced real tension.
-  const seededRelationships = ensureSeedTension(dressing.relationships)
-  const relationshipEdges: RelationshipInput[] = []
-  for (const rel of seededRelationships) {
-    const fromId = characterIdByRole.get(rel.fromRole)
-    const toId = characterIdByRole.get(rel.toRole)
-    if (fromId === undefined || toId === undefined) continue
-    relationshipEdges.push({
-      world_id: worldId,
-      from_character_id: fromId,
-      to_character_id: toId,
-      kind: rel.kind,
-      valence: rel.valence,
-      note: null,
-    })
-  }
+  const relationshipEdges: RelationshipInput[] = roster
+    ? relationshipsFromRoster(worldId, roster, characterIdByName)
+    : relationshipsFromDressing(worldId, dressing, characterIdByRole)
   if (relationshipEdges.length > 0) await relationships.upsert(relationshipEdges)
 
-  await seedOpeningPlots(worldId, {
-    premise: dressing.premise || premise,
-    worldName: dressing.worldName || name,
-    crew: dressing.crew,
-    relationships: dressing.relationships,
-    seed: hashSeed(`${templateId}\0${premise}`),
-    dossierWriter: deps.dossierWriter,
-    openingPlotSeeder: deps.openingPlotSeeder,
-  })
+  if (roster) {
+    await seedAuthoredOpeningThreads(worldId, roster, deps.dossierWriter)
+  } else {
+    await seedOpeningPlots(worldId, {
+      premise: dressing.premise || premise,
+      worldName: dressing.worldName || name,
+      crew: dressing.crew,
+      relationships: dressing.relationships,
+      seed: hashSeed(`${templateId}\0${premise}`),
+      dossierWriter: deps.dossierWriter,
+      openingPlotSeeder: deps.openingPlotSeeder,
+    })
+  }
 
   // Validate the seeded topology forms a single connected component.
   const connections: PlaceConnection[] = edges.map((edge, index) => ({
@@ -217,7 +224,12 @@ export async function seedBoundedWorld(
     throw new DisconnectedTopologyError(worldId, orphanRooms(graph, placeIds))
   }
 
-  return { worldId, placeIds, characterIds: dressing.crew.map((m) => characterIdByRole.get(m.role) as number) }
+  const characterIds = roster
+    ? roster.hosts
+        .map((host) => characterIdByName.get(host.name.toLowerCase()))
+        .filter((id): id is number => id !== undefined)
+    : dressing.crew.map((m) => characterIdByRole.get(m.role) as number)
+  return { worldId, placeIds, characterIds }
 }
 
 async function seedOpeningPlots(
@@ -263,6 +275,192 @@ async function seedOpeningPlots(
     }
   } catch (err) {
     console.error('[opening plots seed]', err)
+  }
+}
+
+function dressingFromRoster(
+  roster: HostRoster,
+  template: WorldArchetype,
+  name: string,
+  premise: string,
+): GeneratedEnsemble {
+  return {
+    worldName: name,
+    premise,
+    roomDressing: template.rooms.map((room) => ({
+      key: room.key,
+      description: room.description,
+    })),
+    crew: roster.hosts.map((host) => ({
+      role: host.publicRole,
+      name: host.name,
+      persona: `${host.appearance} ${host.coreDrive}`,
+      goal: host.coreDrive,
+      homeRoomKey: host.homeRoomKey,
+      dailyLoop: {
+        morning: {
+          activity: host.dailyLoop.morning.activity,
+          place: host.dailyLoop.morning.place ?? host.homeRoomKey,
+        },
+        midday: {
+          activity: host.dailyLoop.midday.activity,
+          place: host.dailyLoop.midday.place ?? host.homeRoomKey,
+        },
+        evening: {
+          activity: host.dailyLoop.evening.activity,
+          place: host.dailyLoop.evening.place ?? host.homeRoomKey,
+        },
+        night: {
+          activity: host.dailyLoop.night.activity,
+          place: host.dailyLoop.night.place ?? host.homeRoomKey,
+        },
+      },
+      speechRegister: host.speechRegister,
+    })),
+    relationships: roster.hosts.flatMap((host) =>
+      host.web.map((edge) => ({
+        fromRole: host.publicRole,
+        toRole: edge.toName,
+        kind: edge.kind,
+        valence: edge.valence,
+      })),
+    ),
+  }
+}
+
+async function seedAuthoredHosts(
+  roster: HostRoster,
+  args: {
+    worldId: number
+    template: WorldArchetype
+    placeIdByRoomKey: Map<string, number>
+    placeIds: number[]
+    characters: CharacterRepository
+    reveries?: ReverieRepository
+    characterIdByRole: Map<string, number>
+    characterIdByName: Map<string, number>
+  },
+): Promise<void> {
+  for (const host of roster.hosts) {
+    const offStage = host.kind === 'off-stage'
+    const homePlaceId = offStage ? null : (args.placeIdByRoomKey.get(host.homeRoomKey) ?? null)
+    const dailyLoop = resolveDailyLoop(
+      host.dailyLoop,
+      args.template,
+      args.placeIdByRoomKey,
+      homePlaceId ?? args.placeIds[0],
+    )
+    const { id } = await args.characters.add({
+      world_id: args.worldId,
+      name: host.name,
+      description: `${host.appearance} ${host.coreDrive}`,
+      is_player: 0,
+      current_place_id: homePlaceId,
+      role: host.publicRole,
+      active_goal: null,
+      daily_loop: JSON.stringify(dailyLoop),
+      status: offStage ? 'inactive' : 'active',
+      agency_level: offStage ? 'dormant' : host.kind === 'principal' ? 'local' : 'npc',
+    })
+    const register = capSpeechRegister(host.speechRegister)
+    if (register) await args.characters.setSpeechRegisterIfEmpty(id, register)
+    if (host.coreDrive.trim()) {
+      await args.characters.setPersonalGoalsIfEmpty(id, host.coreDrive.trim())
+    }
+    if (host.refusals.length > 0) {
+      await args.characters.setRefusalsIfEmpty(id, serializeRefusals(host.refusals))
+    }
+    if (host.publicRole === 'program lead') {
+      await args.characters.setClearanceLevel(id, 'antagonist')
+    }
+    if (args.reveries && host.cornerstone.text.trim()) {
+      await args.reveries.add(
+        args.worldId,
+        id,
+        [
+          {
+            text: host.cornerstone.text,
+            match_tags: host.cornerstone.matchTags,
+            intensity: host.cornerstone.intensity ?? 0.8,
+            is_cornerstone: 1,
+          },
+        ],
+        null,
+      )
+    }
+    args.characterIdByRole.set(host.publicRole, id)
+    args.characterIdByName.set(host.name.toLowerCase(), id)
+  }
+}
+
+function relationshipsFromRoster(
+  worldId: number,
+  roster: HostRoster,
+  characterIdByName: Map<string, number>,
+): RelationshipInput[] {
+  const edges: RelationshipInput[] = []
+  for (const host of roster.hosts) {
+    const fromId = characterIdByName.get(host.name.toLowerCase())
+    if (fromId === undefined) continue
+    for (const edge of host.web) {
+      const toId = characterIdByName.get(edge.toName.toLowerCase())
+      if (toId === undefined) continue
+      edges.push({
+        world_id: worldId,
+        from_character_id: fromId,
+        to_character_id: toId,
+        kind: edge.kind,
+        valence: edge.valence,
+        note: edge.note ?? null,
+      })
+    }
+  }
+  return edges
+}
+
+function relationshipsFromDressing(
+  worldId: number,
+  dressing: GeneratedEnsemble,
+  characterIdByRole: Map<string, number>,
+): RelationshipInput[] {
+  const seededRelationships = ensureSeedTension(dressing.relationships)
+  const relationshipEdges: RelationshipInput[] = []
+  for (const rel of seededRelationships) {
+    const fromId = characterIdByRole.get(rel.fromRole)
+    const toId = characterIdByRole.get(rel.toRole)
+    if (fromId === undefined || toId === undefined) continue
+    relationshipEdges.push({
+      world_id: worldId,
+      from_character_id: fromId,
+      to_character_id: toId,
+      kind: rel.kind,
+      valence: rel.valence,
+      note: null,
+    })
+  }
+  return relationshipEdges
+}
+
+async function seedAuthoredOpeningThreads(
+  worldId: number,
+  roster: HostRoster,
+  dossierWriter?: DossierWriter,
+): Promise<void> {
+  if (!dossierWriter) return
+  for (const t of roster.openingThreads) {
+    await dossierWriter.insertThread({
+      world_id: worldId,
+      title: t.title,
+      kind: t.kind,
+      status: 'active',
+      summary: t.summary,
+      stakes: t.stakes,
+      rewards: null,
+      consequences: null,
+      hidden: null,
+      relevance_tags_json: JSON.stringify(t.relevanceTags),
+      source_turn_id: null,
+    })
   }
 }
 

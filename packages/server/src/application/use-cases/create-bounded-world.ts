@@ -2,6 +2,7 @@ import { seedBoundedWorld } from '@/application/use-cases/seed-bounded-world'
 import type { SeedBoundedWorldDeps } from '@/application/use-cases/seed-bounded-world'
 import { simulateWorldForward } from '@/application/use-cases/simulate-world-forward'
 import type { SimulateWorldForwardDeps } from '@/application/use-cases/simulate-world-forward'
+import type { HostRoster } from '@/domain/entities'
 import type { SceneRepository } from '@/domain/ports'
 import { worldTimeToMinutes } from '@/domain/services/narrative-clock'
 
@@ -25,6 +26,7 @@ export type CreateBoundedWorldInput = {
   premise: string
   playerName?: string
   ticks?: number
+  roster?: HostRoster
 }
 
 export type CreateBoundedWorldResult = {
@@ -39,14 +41,17 @@ export type CreateBoundedWorldDeps = SeedBoundedWorldDeps &
   }
 
 export async function createBoundedWorld(
-  { templateId, name, premise, playerName, ticks }: CreateBoundedWorldInput,
+  { templateId, name, premise, playerName, ticks, roster }: CreateBoundedWorldInput,
   deps: CreateBoundedWorldDeps,
 ): Promise<CreateBoundedWorldResult> {
   const { characters, decks, scenes, worlds } = deps
 
   const archetype = await decks.getTemplate(templateId)
 
-  const seeded = await seedBoundedWorld({ templateId, name, premise, playerName }, deps)
+  const seeded = await seedBoundedWorld(
+    { templateId, name, premise, playerName, roster },
+    deps,
+  )
   await simulateWorldForward({ worldId: seeded.worldId, ticks: ticks ?? SIM_TICKS }, deps)
 
   // Seed the prose-driven narrative clock from the pre-play sim's final

@@ -43,7 +43,16 @@ export type HostFile = {
   kind: HostKind
 }
 
+export type HostOpeningThread = {
+  title: string
+  kind: 'quest' | 'mystery' | 'threat' | 'relationship'
+  summary: string
+  stakes: string
+  relevanceTags: string[]
+}
+
 export type HostRoster = {
   parkId: string
   hosts: HostFile[]
+  openingThreads: HostOpeningThread[]
 }
