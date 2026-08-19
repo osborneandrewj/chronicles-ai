@@ -42,7 +42,7 @@ export function WorldRowMenu({ worldId, variant }: WorldRowMenuProps) {
     <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
-        aria-label={`${label} world`}
+        aria-label={`${label} park`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={pending}

@@ -17,9 +17,9 @@ import type { FullWorldState } from "@/lib/world-state";
 type InspectorTab = "now" | "story" | "wiki" | "archivist";
 
 const TABS: { id: InspectorTab; label: string; description: string }[] = [
-  { id: "now", label: "Now", description: "Current scene, place, present characters" },
+  { id: "now", label: "Now", description: "Current scene, place, present people" },
   { id: "story", label: "Story", description: "Quests, threads, objectives, clues, resources" },
-  { id: "wiki", label: "Wiki", description: "All characters, places, scenes" },
+  { id: "wiki", label: "Wiki", description: "All people, places, scenes" },
   { id: "archivist", label: "Archivist", description: "Talk to the archivist — corrections and player canon" },
 ];
 
@@ -90,7 +90,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
         }
       />
       <aside
-        aria-label="World inspector"
+        aria-label="Inspector"
         aria-hidden={!open}
         className={
           "fixed z-30 transform border-neutral-900 bg-neutral-950/95 transition-transform duration-200 ease-out " +
@@ -110,7 +110,7 @@ export function WorldInspector({ worldId, open, onClose, refreshKey }: WorldInsp
         <div className="border-b border-neutral-900">
           <div className="flex min-h-14 items-center justify-between px-4 py-2">
             <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-400">
-              World inspector
+              Inspector
             </h2>
             <button
               type="button"
@@ -422,7 +422,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
                   : "border-neutral-900 bg-neutral-950 text-neutral-500 hover:border-neutral-800 hover:text-neutral-300")
               }
             >
-              {s} ({count})
+              {(s === "characters" ? "people" : s)} ({count})
             </button>
           );
         })}
@@ -432,7 +432,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
         <>
           {state.potentialDuplicates.length > 0 && (
             <div className="mb-3 rounded border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200">
-              <p className="font-medium">Potential duplicate characters</p>
+              <p className="font-medium">Potential duplicate people</p>
               <ul className="mt-1 space-y-1">
                 {state.potentialDuplicates.map((d) => (
                   <li key={`${d.aId}-${d.bId}`}>
@@ -446,7 +446,7 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
             </div>
           )}
           {state.characters.length === 0 ? (
-            <p className="text-neutral-500">No characters yet.</p>
+            <p className="text-neutral-500">No people yet.</p>
           ) : (
             <ul className="space-y-1">
               {state.characters.map((c) => {

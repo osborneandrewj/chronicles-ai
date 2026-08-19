@@ -11,6 +11,7 @@ import { getGenrePreset } from '@/composition/onboarding'
 import { pickArcEngine } from '@/domain/services/arc-engines'
 import { generateCodename } from '@/domain/services/codename'
 import { usesSimulationFrame } from '@/domain/services/meta-frame'
+import { getPark } from '@/domain/services/park-catalog'
 import { filterHubsByAesthetic, filterHubsByGenre, pickHubArchetype } from '@/domain/services/pick-hub-archetype'
 import { isUiSkin, resolveUiSkin } from '@/domain/services/ui-skin'
 import { isGenre } from '@/lib/genres'
@@ -64,6 +65,11 @@ const AnimusSchema = z.object({
   playerName: z.string().trim().max(120).optional(),
   firstLifeKind: z.enum(['preset', 'genre']),
   firstLifeId: z.string().trim().min(1),
+})
+
+const ParkEnterSchema = z.object({
+  parkId: z.string().trim().min(1),
+  playerName: z.string().trim().max(120).optional(),
 })
 
 // Fixed dressing for the scout starship — the player picks neither name nor
@@ -344,7 +350,7 @@ export async function createAnimusAction(
     firstLifeId: formData.get('firstLifeId'),
   })
   if (!parsed.success) {
-    return { error: 'Choose a first life.' }
+    return { error: 'Choose a first narrative.' }
   }
   const { playerName, firstLifeKind, firstLifeId } = parsed.data
 
@@ -357,14 +363,14 @@ export async function createAnimusAction(
 
   if (firstLifeKind === 'preset') {
     const preset = getGenrePreset(firstLifeId)
-    if (!preset) return { error: 'Pick a first life from the list.' }
+    if (!preset) return { error: 'Pick a first narrative from the list.' }
     const seed = (hashString(firstLifeId) ^ Date.now()) >>> 0
     firstName = generateCodename(seed)
     firstPremise = preset.hiddenPremise
     firstLocation = preset.label
     firstTags = [...preset.eraTags, ...preset.toneTags]
   } else {
-    if (!isGenre(firstLifeId)) return { error: 'Pick a first life from the list.' }
+    if (!isGenre(firstLifeId)) return { error: 'Pick a first narrative from the list.' }
     try {
       const generated = await generateWorldFromGenre(firstLifeId, playerName ?? null)
       firstName = generated.name
@@ -375,7 +381,7 @@ export async function createAnimusAction(
       firstTags = [firstLifeId]
     } catch (err) {
       console.error('[animus first-life generator failed]', err)
-      return { error: "Couldn't invent that life — try another, or a prepared setting." }
+      return { error: "Couldn't invent that narrative — try another, or a prepared setting." }
     }
   }
 
@@ -454,10 +460,81 @@ export async function createAnimusAction(
     await generateOpeningTurn(openingTurnDeps(c), subworldId, firstPremise)
   } catch (err) {
     console.error('[animus creation failed]', err)
-    return { error: "Couldn't forge the Animus — try again." }
+    return { error: "Couldn't forge the facility — try again." }
   }
 
   redirect(`/worlds/${subworldId}/play`)
+}
+
+export async function createParkAction(
+  _prev: CreateWorldFormState,
+  formData: FormData,
+): Promise<CreateWorldFormState> {
+  const parsed = ParkEnterSchema.safeParse({
+    parkId: formData.get('parkId'),
+    playerName: formData.get('playerName') || undefined,
+  })
+  if (!parsed.success) {
+    return { error: 'Pick a park from the catalog.' }
+  }
+  const park = getPark(parsed.data.parkId)
+  if (!park) {
+    return { error: 'Pick a park from the catalog.' }
+  }
+  const { playerName } = parsed.data
+
+  const c = getContainer()
+  const seed = (hashString(park.id) ^ Date.now()) >>> 0
+  let worldId: number
+  try {
+    const arcEngine = pickArcEngine(seed)
+    let bible: Awaited<ReturnType<typeof c.metaStoryGenerator.generate>> | undefined
+    try {
+      bible = await c.metaStoryGenerator.generate({
+        hubName: park.name,
+        hubPremise: park.premise,
+        arcEngine,
+        genreLabels: park.narrativeLabels,
+        seed,
+      })
+    } catch (err) {
+      console.error('[park meta-story generation]', err)
+    }
+
+    const hubResult = await createBoundedWorld(
+      { templateId: park.templateId, name: park.name, premise: park.premise, playerName },
+      { ...c, crew: c.ensembleGenerator },
+    )
+    worldId = hubResult.worldId
+    await c.worlds.setLayer(worldId, 'hub', null)
+    await persistWorldSkin(c.worlds, worldId, ['sci-fi', 'modern'], 'signal')
+    if (bible) {
+      await c.worlds.setMetaStory(worldId, JSON.stringify(bible))
+    }
+    try {
+      const { ensureHubAntagonist } = await import(
+        '@/application/use-cases/ensure-hub-antagonist'
+      )
+      await ensureHubAntagonist(worldId, {
+        worlds: c.worlds,
+        characters: c.characters,
+        places: c.places,
+      })
+    } catch (err) {
+      console.error('[hub antagonist link]', err)
+    }
+
+    await c.sessions.create({
+      hub_world_id: worldId,
+      player_identity: playerName?.trim() || 'the newcomer',
+    })
+    await generateOpeningTurn(openingTurnDeps(c), worldId, park.premise)
+  } catch (err) {
+    console.error('[park creation failed]', err)
+    return { error: "Couldn't open the park — try again." }
+  }
+
+  redirect(`/worlds/${worldId}/play`)
 }
 
 // Bounded "living world" mode: seed the authored scout ship (real Grok crew),

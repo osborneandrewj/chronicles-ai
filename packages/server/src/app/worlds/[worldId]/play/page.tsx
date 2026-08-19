@@ -129,6 +129,12 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
     parseGenreTags(world.genre_tags),
     world.world_layer,
   )
+  const parkName =
+    world.world_layer === 'hub'
+      ? world.name
+      : hubId != null
+        ? ((await worlds.getWorld(hubId))?.name ?? null)
+        : null
 
   return (
     <Chat
@@ -140,7 +146,8 @@ export default async function PlayPage({ params }: { params: Promise<Params> }) 
       initialHasOlder={hasOlder}
       skin={skin}
       worldLayer={world.world_layer}
-      canReturnToAnimus={world.world_layer === 'subworld'}
+      parkName={parkName}
+      canReturnToPark={world.world_layer === 'subworld'}
       headerEnd={
         hubId != null ? (
           <HubSimulationsMenu simulations={pastSimulations} />

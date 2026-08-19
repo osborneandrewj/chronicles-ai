@@ -46,10 +46,10 @@ export function AnimusWizard({ presets, signalGenres }: AnimusWizardProps) {
 
       <section>
         <h2 className="text-xs font-medium uppercase tracking-[0.14em] text-neutral-400">
-          First life <span className="ml-1 text-amber-500/80">*</span>
+          First narrative <span className="ml-1 text-amber-500/80">*</span>
         </h2>
         <p className="mt-1 text-sm text-neutral-500">
-          The first life you enter from this Animus. Play starts there.
+          The first narrative you enter from this facility. Play starts there.
         </p>
 
         <p className="mt-4 mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-500">
@@ -73,7 +73,7 @@ export function AnimusWizard({ presets, signalGenres }: AnimusWizardProps) {
         {signalGenres.length > 0 ? (
           <>
             <p className="mt-5 mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-500">
-              Modern / sci-fi lives
+              Modern / sci-fi narratives
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {signalGenres.map((g) => {
@@ -106,7 +106,7 @@ export function AnimusWizard({ presets, signalGenres }: AnimusWizardProps) {
             disabled={pending || !canSubmit}
             className="min-h-12 w-full rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 sm:w-auto"
           >
-            {pending ? 'Forging…' : 'Enter the first life'}
+            {pending ? 'Forging…' : 'Enter the first narrative'}
           </button>
         </div>
       </div>

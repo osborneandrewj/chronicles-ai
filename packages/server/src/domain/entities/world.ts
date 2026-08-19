@@ -8,9 +8,9 @@ export type SpatialMode = 'open' | 'bounded'
 // open/bounded worlds (the default, unchanged).
 export type WorldLayer = 'hub' | 'subworld' | 'standalone'
 
-// Play-chrome identity. Persisted on the world so a sci-fi Animus and a Roman
-// first life can look different. Null on legacy rows — resolve at read time
-// from genre_tags (domain/services/ui-skin.ts).
+// Play-chrome identity. Persisted on the world so a sci-fi hub park and a
+// historical narrative can look different. Null on legacy rows — resolve at
+// read time from genre_tags (domain/services/ui-skin.ts).
 export type UiSkin = 'signal' | 'relic'
 
 export type World = {

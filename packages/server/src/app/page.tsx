@@ -46,7 +46,7 @@ export default async function Home() {
       return {
         world,
         href: `/worlds/${activeId}/play`,
-        eyebrow: 'Animus',
+        eyebrow: 'Park',
         locationLine,
       }
     }),
@@ -64,7 +64,7 @@ export default async function Home() {
             <WhatsNewDialog version={pkg.version} />
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            {cards.length} world{cards.length === 1 ? '' : 's'}
+            {cards.length} park{cards.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -80,7 +80,7 @@ export default async function Home() {
           ) : null}
           <Link
             href="/worlds/new"
-            aria-label="Create new world"
+            aria-label="Create new park"
             className="inline-flex h-12 shrink-0 items-center gap-2 rounded-full bg-amber-500 px-4 text-sm font-semibold text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
           >
             <PlusIcon />
@@ -109,13 +109,13 @@ export default async function Home() {
 function EmptyState() {
   return (
     <div className="flex min-h-[55svh] flex-col items-center justify-center rounded-[2rem] border border-dashed border-neutral-800 bg-[#1b1c1f]/70 px-6 py-12 text-center">
-      <p className="font-serif text-lg italic leading-relaxed text-neutral-300">No worlds yet.</p>
+      <p className="font-serif text-lg italic leading-relaxed text-neutral-300">No parks yet.</p>
       <Link
         href="/worlds/new"
         className="mt-5 inline-flex h-12 items-center gap-2 rounded-full bg-amber-500 px-5 text-sm font-semibold text-neutral-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
       >
         <PlusIcon />
-        <span>New world</span>
+        <span>New park</span>
       </Link>
     </div>
   )

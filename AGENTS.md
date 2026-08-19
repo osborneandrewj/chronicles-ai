@@ -2,6 +2,12 @@
 
 Single-player interactive novel engine: a bounded living world, multi-agent narrator, persistent structured state.
 
+Player-facing noun is **park**. Persistence and routes stay `worlds` / `world_id` / `/worlds`. Cast in UI is **people**. Engine roles (narrator, director, archivist) and schema names stay. Do not ship HBO marks (`Westworld`, Delos, “these violent delights”) in UI or fiction.
+
+Player sentence: *Enter a park. Live among its people. Leave with a chronicle.*
+
+The front door is a park catalog (Project THRESHOLD first). Generated and custom creation live behind Lab.
+
 ## Working autonomy
 
 - **Default to the recommended option** when you offer a choice. Only stop to ask when the options have materially different blast radius (destructive vs. reversible) or when the right answer depends on something only I know. Don't ask me to choose between "snapshot type A vs B" if A is clearly better — do A and say what you did.
