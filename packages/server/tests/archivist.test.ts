@@ -8,6 +8,7 @@ import {
   extractDeterministicPatch,
   extractWakePlace,
   mergeDeterministicTravel,
+  mergeSharedRelocation,
   normalizeTransitPlaceName,
   PLACE_KIND_DIRECTIVE,
   sanitizeArchivistPatch,
@@ -1266,6 +1267,81 @@ describe('extractDeterministicPatch', () => {
     })
   })
 
+  it('follows a named NPC to their current place without "to <room>"', async () => {
+    const { worldId, turnId } = seedWorld(`FollowPerson-${Math.random()}`)
+    await applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Corridor' }, { name: 'Mess Hall' }],
+      scene: { action: 'open', title: 'At Corridor', place_name: 'Corridor' },
+      characters: [
+        { name: 'Edith', is_player: true, current_place_name: 'Corridor' },
+        { name: 'Jordan Lacy', current_place_name: 'Mess Hall' },
+      ],
+    })
+    const prior = await loadNarratorState(worldId)
+    const patch = extractDeterministicPatch(
+      prior,
+      'I leave Lee and follow Jordan.',
+      'You stand alone in the dim corridor. The next page sits out of reach with Jordan in the mess hall.',
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Mess Hall')
+    expect(patch?.scene?.place_name).toBe('Mess Hall')
+  })
+
+  it('moves when the player sits down at a named known place', async () => {
+    const { worldId, turnId } = seedWorld(`WeEat-${Math.random()}`)
+    await applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Corridor' }, { name: 'Mess Hall' }],
+      scene: { action: 'open', title: 'At Corridor', place_name: 'Corridor' },
+      characters: [{ name: 'Edith', is_player: true, current_place_name: 'Corridor' }],
+    })
+    const prior = await loadNarratorState(worldId)
+    const patch = extractDeterministicPatch(
+      prior,
+      'We get food and find a table in the mess hall.',
+      'You and Jordan reach the serving counter together and settle at a corner table.',
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Mess Hall')
+  })
+
+  it('commits leave-the-current-place travel from narrator arrival', async () => {
+    const { worldId, turnId } = seedWorld(`LeaveMess-${Math.random()}`)
+    await applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Mess Hall' }, { name: 'Corridor' }, { name: 'Archive Vault' }],
+      scene: { action: 'open', title: 'At Mess Hall', place_name: 'Mess Hall' },
+      characters: [
+        { name: 'Edith', is_player: true, current_place_name: 'Mess Hall' },
+        { name: 'Jordan Lacy', current_place_name: 'Mess Hall' },
+      ],
+    })
+    const prior = await loadNarratorState(worldId)
+    const patch = extractDeterministicPatch(
+      prior,
+      '"Well let\'s get those deeper scans!" We leave the mess and head off in search of the scan material.',
+      'Jordan rises and starts walking. The two of you leave the mess behind. The corridor lights have dimmed to night-cycle amber. She glances once at the sealed blast doors. "We\'ll pull what the archive still holds."',
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Corridor')
+    expect(patch?.scene?.place_name).toBe('Corridor')
+  })
+
+  it('treats "make my way to <person>" as their current place', async () => {
+    const { worldId, turnId } = seedWorld(`WayTo-${Math.random()}`)
+    await applyArchivistPatch(worldId, turnId, {
+      places: [{ name: 'Corridor' }, { name: 'Archive Vault' }],
+      scene: { action: 'open', title: 'At Corridor', place_name: 'Corridor' },
+      characters: [
+        { name: 'Edith', is_player: true, current_place_name: 'Corridor' },
+        { name: 'Jordan Lacy', current_place_name: 'Archive Vault' },
+      ],
+    })
+    const prior = await loadNarratorState(worldId)
+    const patch = extractDeterministicPatch(
+      prior,
+      'Hey, I gotta run. I turn and make my way to Jordan.',
+      'You turn and make your way along the corridor toward the vault where Jordan stands.',
+    )
+    expect(patch?.characters?.[0]?.current_place_name).toBe('Archive Vault')
+  })
+
   it('ignores typed travel when skipPlayerTravel is set', async () => {
     const { worldId } = seedWorld(`SkipTravel-${Math.random()}`)
     const prior = await loadNarratorState(worldId)
@@ -1327,6 +1403,67 @@ describe('extractDeterministicPatch', () => {
       true,
     )
     expect(merged.scene?.action).toBe('open')
+  })
+
+  it('lands the player on the companion destination the archivist already named', () => {
+    const prior = {
+      worldTime: null,
+      currentScene: null,
+      currentPlace: { id: 39, name: 'Medical' },
+      presentCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 39 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 39 },
+      ],
+      knownCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 39 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 39 },
+      ],
+      knownPlaces: [
+        { id: 39, name: 'Medical' },
+        { id: 18, name: 'Bunk Area' },
+      ],
+      dossier: { threads: [], clues: [], objectives: [], resources: [], timeline: [] },
+      occupancy: null,
+    } as never
+    const merged = mergeSharedRelocation(
+      { characters: [{ name: 'Jordan Lacy', current_place_name: 'Bunk Area' }] },
+      prior,
+      'We make our way to my bunk',
+      'You step out of Medical. Your bunk door slides open. Jordan follows you in and sets the folder on the desk.',
+    )
+    expect(merged.characters?.find((c) => c.is_player)?.current_place_name).toBe('Bunk Area')
+    expect(merged.scene?.action).toBe('open')
+    expect(merged.scene?.place_name).toBe('Bunk Area')
+  })
+
+  it('does not follow a leaving NPC when the player refused the trip', () => {
+    const prior = {
+      worldTime: null,
+      currentScene: null,
+      currentPlace: { id: 38, name: 'Corridor' },
+      presentCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 38 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 38 },
+      ],
+      knownCharacters: [
+        { id: 16, name: 'Andrew Osborne', is_player: 1, current_place_id: 38 },
+        { id: 14, name: 'Jordan Lacy', is_player: 0, current_place_id: 38 },
+      ],
+      knownPlaces: [
+        { id: 38, name: 'Corridor' },
+        { id: 39, name: 'Medical' },
+      ],
+      dossier: { threads: [], clues: [], objectives: [], resources: [], timeline: [] },
+      occupancy: null,
+    } as never
+    const merged = mergeSharedRelocation(
+      { characters: [{ name: 'Jordan Lacy', current_place_name: 'Medical' }] },
+      prior,
+      'No, we need another plan. I could use that drink.',
+      'She turns toward Medical and keeps her pace even so you stay beside her. You reach the alcove.',
+    )
+    expect(merged.characters?.some((c) => c.is_player)).toBe(false)
+    expect(merged.scene).toBeUndefined()
   })
 
   it('does not extract a destination the narrator did not confirm', async () => {

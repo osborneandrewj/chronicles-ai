@@ -260,6 +260,7 @@ export {
   extractDeterministicPatch,
   extractWakePlace,
   mergeDeterministicTravel,
+  mergeSharedRelocation,
   normalizeTransitPlaceName,
 } from '@/domain/services/patch-sanitizer'
 

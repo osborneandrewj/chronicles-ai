@@ -18,6 +18,7 @@ import {
 } from '@/domain/services/open-order'
 import type { PrivateUtterance } from '@/domain/services/private-utterance'
 import { historyHasOocRefusal } from '@/domain/services/ooc-refusal'
+import { repeatedSpokenLineCue } from '@/domain/services/repeated-npc-beat'
 
 // Consecutive low-agency player moves before the narrator should make the world
 // act on its own (escalating momentum). Tunable.
@@ -53,6 +54,8 @@ export type GuidanceContext = {
   collapsingThisTurn?: boolean
   /** Player asked to remain unable to act. */
   stayUnder?: boolean
+  /** Authoritative STATE place — used to snap the camera back after a follow miss. */
+  currentPlaceName?: string | null
 }
 
 /**
@@ -119,6 +122,12 @@ export function formatNarratorTurnGuidance(ctx: GuidanceContext): string | null 
   // sparse-away — this is the medical-loop / sanctum-loop class.
   const circling = pickCirclingBeatCue(ctx)
   if (circling) lines.push(circling)
+
+  const spokenLoop = pickRepeatedSpokenLineCue(ctx)
+  if (spokenLoop) lines.push(spokenLoop)
+
+  const cameraStay = pickCameraStayCue(ctx)
+  if (cameraStay) lines.push(cameraStay)
 
   // Dialogue-heavy beats: interactional craft (never sparse-away on stance=say
   // with present NPCs). Replaces the weak "summarized speech only" branch in
@@ -209,11 +218,9 @@ function pickYieldCompleteCue(ctx: GuidanceContext): string | null {
   if (ctx.wakeAdvance || ctx.stayUnder || ctx.collapsingThisTurn) return null
   if (!isPlayerYieldingFloor(ctx.playerText)) return null
   return (
-    'The protagonist yielded the floor. Write through the current procedure or exchange this turn — ' +
-    'complete remaining checks, deliver the finding, finish the conversation. ' +
-    'Land one changed board (named result, next place, logged incident, or new presence). ' +
-    'Do not stop after one micro-step or end on a question whose only useful answer is continue. ' +
-    'More scene, not a restatement of the last paragraph.'
+    'The protagonist yielded the floor. Finish what is already in frame. ' +
+    'Do not mint a new file, place, alarm, or finding to satisfy the continue. ' +
+    'Do not stop after one micro-step. More scene, not a restatement of the last paragraph.'
   )
 }
 
@@ -363,6 +370,43 @@ function pickClearHandleCue(ctx: GuidanceContext): string | null {
  * Dialogue-beat craft cue (dialogue-depth Phase 1). Fires on talk-shaped turns
  * with present NPCs so interactional depth is not left to chance.
  */
+function pickRepeatedSpokenLineCue(ctx: GuidanceContext): string | null {
+  if (ctx.presentNpcCount < 1) return null
+  const recent = ctx.recentTurns.filter((t) => t.role === 'assistant').map((t) => t.content)
+  return repeatedSpokenLineCue(recent)
+}
+
+/** Last prose walked the protagonist with a leaving NPC; STATE place did not move. */
+function pickCameraStayCue(ctx: GuidanceContext): string | null {
+  const place = ctx.currentPlaceName?.trim()
+  if (!place) return null
+  const last = [...ctx.recentTurns].reverse().find((t) => t.role === 'assistant')
+  if (!last) return null
+  const n = last.content.toLowerCase()
+  if (
+    !/\b(?:you (?:reach|arrive)|stay beside (?:her|him|them)|keeps? (?:her|his|their) pace even so you|the two of you (?:reach|arrive|walk))\b/.test(
+      n,
+    )
+  ) {
+    return null
+  }
+  if (placeMentionedIn(n, place)) return null
+  return (
+    `Camera stays at ${place}. The last turn walked with someone who left — they are gone. ` +
+    'Do not continue from their destination. Stay with the protagonist here.'
+  )
+}
+
+function placeMentionedIn(haystack: string, placeName: string): boolean {
+  const n = haystack.toLowerCase()
+  const key = placeName.toLowerCase()
+  if (n.includes(key)) return true
+  return key
+    .split(/[\s/-]+/)
+    .filter((w) => w.length >= 4)
+    .some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(n))
+}
+
 function pickCirclingBeatCue(ctx: GuidanceContext): string | null {
   const recent = ctx.recentTurns.filter((t) => t.role === 'assistant').slice(-2)
   if (recent.length < 2) return null
@@ -405,10 +449,10 @@ function pickDialogueBeatCue(ctx: GuidanceContext): string | null {
 
   const foldIn = yielding
     ? ''
-    : 'Fold-in: stage the protagonist\'s speech as audible dialogue this turn. Keep the predicates ' +
-      '(ask, offer, confess, joke). Render in this world\'s voice unless they marked a language/register, ' +
-      'the world already matches their vernacular, or the line is load-bearing quoted speech. ' +
-      'Do not write "You speak" / "the words settle" / "a compliment" and skip the line. '
+    : 'Fold-in: stage the protagonist\'s speech as audible this turn. Keep the predicates ' +
+      '(ask, offer, confess, joke) in this world\'s voice — paraphrase; do not paste the typed line. ' +
+      'Keep exact wording only if they marked a language/register. ' +
+      'Do not write "You speak" / "the words settle" / "a compliment" and skip the meaning. '
 
   return (
     foldIn +

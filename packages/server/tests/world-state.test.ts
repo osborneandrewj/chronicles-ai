@@ -169,6 +169,8 @@ describe('off-scene loop continuity', () => {
     )
     expect(worldTimeBand('Day 1, 9am')).toBe('morning')
     expect(block).toContain('routine: opens the shop')
+    expect(block).toContain("### OFF-SCENE NPCs (writer's aid — not on camera)")
+    expect(block).toMatch(/Do not narrate these people or rooms/i)
   })
 })
 

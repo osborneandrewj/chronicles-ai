@@ -260,6 +260,77 @@ describe('decideDirector', () => {
     expect(d.mustStage.join(' ')).toMatch(/lena korr initiates/i)
   })
 
+  it('does not force a new plot finding on an intimate beat', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 39,
+          title: 'The Official Story',
+          kind: 'mystery',
+          summary: 'Lena sealed the Hale file',
+          source_turn_id: 1460,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1481,
+      playerText: 'I kiss her face in the dark',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 39,
+    })
+    expect(d.beatKind).toBe('local')
+    expect(d.mustStage.join(' ')).toMatch(/stay with this beat/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/new consequence|Official Story/i)
+  })
+
+  it('does not advance a thread the player did not name this turn', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 39,
+          title: 'The Official Story',
+          kind: 'mystery',
+          summary: 'Lena sealed the Hale file',
+          source_turn_id: 1460,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1487,
+      playerText: 'Jordan, can we just leave the logs and Marcus be for tonight? I want to enjoy this moment.',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 39,
+    })
+    expect(d.mustStage.join(' ')).toMatch(/stay with this beat/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/new consequence|Official Story/i)
+  })
+
+  it('does not mint a new finding when they continue off-thread', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 39,
+          title: 'The Official Story',
+          kind: 'mystery',
+          summary: 'Lena sealed the Hale file',
+          source_turn_id: 1460,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1483,
+      playerText: 'continue',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+      lastBeatKind: 'pressure',
+      lastForegroundThreadId: 39,
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/already in frame/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/new consequence|named next place|Official Story/i)
+  })
+
   it('does not stall when the player is talking to someone on stage', () => {
     const d = decideDirector({
       threads: [
@@ -340,6 +411,150 @@ describe('decideDirector', () => {
     expect(d.beatKind).not.toBe('stall_escalate')
   })
 
+  it('drops an empty-dossier local pending when the player asks to leave the procedure', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1354,
+      playerText: "Ok I'm ready to be done with testing. When's dinner?",
+      lastBeatKind: 'local',
+      pendingBeat: {
+        beatKind: 'local',
+        foregroundThreadId: null,
+        mustStage: ['Andrew experiences the protocol under way'],
+        mustNot: ['Do not interrupt protocols once the timer begins'],
+        cast: [{ characterId: 12, name: 'Ellis Shaw', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'empty_dossier',
+        sourceTurnId: 1352,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/protocol under way/i)
+    expect(d.mustStage.join(' ')).toMatch(/named next place/i)
+    expect(d.mustNot.join(' ')).toMatch(/monitoring/i)
+    expect(d.beatKind).toBe('yield')
+  })
+
+  it('drops a yield pending when the player has moved on to a new beat', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 17,
+          title: 'What the Sessions Are For',
+          kind: 'mystery',
+          summary: 'The isolation runs send Andrew into other lives',
+          source_turn_id: 1200,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1355,
+      playerText: "When's dinner?",
+      lastBeatKind: 'local',
+      pendingBeat: {
+        beatKind: 'yield',
+        foregroundThreadId: 17,
+        mustStage: ['Ellis ends the isolation cycle and unseals the chamber.'],
+        mustNot: ['Do not start another monitoring interval, timer, or deep session.'],
+        cast: [{ characterId: 12, name: 'Ellis Shaw', role: 'initiate' }],
+        guidanceLines: [],
+        reason: 'empty_dossier',
+        sourceTurnId: 1354,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/unseals the chamber/i)
+    expect(d.beatKind).not.toBe('yield')
+  })
+
+  it('drops a pending beat when its whole CAST has left the room', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 12446,
+      currentTurnId: 1447,
+      playerText: 'I stay in the corridor and think.',
+      presentCast: [],
+      knownCast: [
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+        { id: 16, name: 'Andrew Osborne', isPlayer: true },
+      ],
+      lastBeatKind: 'reveal',
+      pendingBeat: {
+        beatKind: 'reveal',
+        foregroundThreadId: null,
+        mustStage: [
+          'Lee hands you the medical log sheet',
+          "Jordan Lacy's read on what Lee's candor means",
+        ],
+        mustNot: ['Do not let the player leave this scene without a clear next commit point'],
+        cast: [{ characterId: 14, name: 'Jordan Lacy', role: 'react' }],
+        guidanceLines: ["Jordan has the folder and the sheet"],
+        reason: 'empty_dossier',
+        sourceTurnId: 1446,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/Lee hands you/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/Jordan Lacy's read/i)
+    expect(d.cast).toHaveLength(0)
+    expect(d.beatKind).toBeNull()
+  })
+
+  it('keeps a present CAST member but strips must-stage that names someone who left', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 33,
+          title: 'The Sealed File',
+          kind: 'mystery',
+          summary: 'Hale medical folder',
+          source_turn_id: 1400,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 12400,
+      currentTurnId: 1446,
+      playerText: 'No, we need another plan. I could use that drink.',
+      presentCast: [{ id: 14, name: 'Jordan Lacy' }],
+      knownCast: [
+        { id: 14, name: 'Jordan Lacy' },
+        { id: 15, name: 'Lee Ingram' },
+        { id: 16, name: 'Andrew Osborne', isPlayer: true },
+      ],
+      pendingBeat: {
+        beatKind: 'local',
+        foregroundThreadId: 33,
+        mustStage: [
+          "Lee's response to a direct question about Ingram's tremor entries",
+          'The next specific location or action the player must commit to',
+        ],
+        mustNot: ['Do not withhold information about what Lee knows'],
+        cast: [{ characterId: 14, name: 'Jordan Lacy', role: 'react' }],
+        guidanceLines: [],
+        reason: 'empty_dossier',
+        sourceTurnId: 1444,
+      },
+    })
+    expect(d.mustStage.join(' ')).not.toMatch(/Lee's response/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/next specific location/i)
+    expect(d.mustNot.join(' ')).not.toMatch(/what Lee knows/i)
+  })
+
+  it('repeat empty-dossier local must change the board', () => {
+    const d = decideDirector({
+      threads: [],
+      objectives: [],
+      clockMinutes: 10752,
+      currentTurnId: 1352,
+      playerText: 'I wait until the protocol is over',
+      lastBeatKind: 'local',
+    })
+    expect(d.beatKind).toBe('yield')
+    expect(d.mustStage.join(' ')).toMatch(/named next place/i)
+    expect(d.mustNot.join(' ')).toMatch(/interval/i)
+  })
+
   it('repeat stall_escalate must change the board', () => {
     const d = decideDirector({
       threads: [
@@ -386,9 +601,8 @@ describe('decideDirector', () => {
     })
     expect(d.beatKind).toBe('yield')
     expect(d.mustStage.join(' ')).toMatch(/yielded the floor/i)
-    expect(d.mustStage.join(' ')).toMatch(/write through/i)
-    expect(d.mustStage.join(' ')).toMatch(/another continue/i)
-    expect(d.mustStage.join(' ')).toMatch(/ellis shaw initiates/i)
+    expect(d.mustStage.join(' ')).toMatch(/already in frame/i)
+    expect(d.mustStage.join(' ')).not.toMatch(/write through|named next place|new consequence/i)
   })
 
   it('prefers a live mystery over a somatic clawing-arm threat', () => {
@@ -433,7 +647,7 @@ describe('decideDirector', () => {
       objectives: [],
       clockMinutes: 5400,
       currentTurnId: 1262,
-      playerText: '"Oh I\'m still here. I\'m starved. Talk to me."',
+      playerText: 'The clawing in my arm is worse. What does it mean?',
       presentCast: [
         { id: 12, name: 'Ellis Shaw' },
         { id: 14, name: 'Jordan Lacy' },
@@ -466,7 +680,7 @@ describe('decideDirector', () => {
       lastForegroundThreadId: 12,
     })
     expect(d.beatKind).toBe('yield')
-    expect(d.mustStage.join(' ')).toMatch(/write through/i)
+    expect(d.mustStage.join(' ')).toMatch(/already in frame|write through/i)
   })
 
   it('does not press a leftover tremor thread after the baseline resolved', () => {
@@ -621,13 +835,13 @@ describe('decideDirector', () => {
         { id: 5, name: 'A door guard' },
       ],
     })
-    expect(d.cast.filter((c) => c.role === 'initiate')).toEqual([
-      { characterId: 2, name: 'Setnakht', role: 'initiate' },
-    ])
-    expect(d.cast.filter((c) => c.role === 'react')).toHaveLength(2)
+    expect(d.cast.filter((c) => c.role === 'initiate')).toHaveLength(0)
+    expect(d.cast.filter((c) => c.role === 'react').map((c) => c.name)).toContain(
+      'Setnakht',
+    )
     expect(d.cast.some((c) => c.role === 'background')).toBe(true)
     expect(d.cast.every((c) => c.name !== 'Joseph')).toBe(true)
-    expect(d.mustStage.some((l) => /Setnakht initiates/i.test(l))).toBe(true)
+    expect(d.mustStage.some((l) => /Setnakht initiates/i.test(l))).toBe(false)
     expect(d.mustStage.some((l) => /Sealed Papyrus/i.test(l))).toBe(true)
   })
 
@@ -690,7 +904,7 @@ describe('formatDirectorBlock', () => {
     expect(block).toContain('## DIRECTOR')
     expect(block).toContain('MUST STAGE')
     expect(block).toContain('CAST')
-    expect(block).toMatch(/initiate: Lira/)
+    expect(block).toMatch(/react: Lira/)
     expect(block).toContain('same force as PLANNED MOVES')
     expect(block).not.toMatch(/Soft structural pressure/)
   })

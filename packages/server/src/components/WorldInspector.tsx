@@ -199,17 +199,19 @@ function InspectorBody({
 
 function NowView({ state }: { state: FullWorldState }) {
   const activeScene = state.scenes.find((s) => s.id === state.currentSceneId) ?? null;
+  const playerPlaceId =
+    state.characters.find((c) => c.is_player === 1)?.current_place_id ?? null;
   const presentCharacters = useMemo(() => {
-    if (!activeScene) return state.characters.filter((c) => c.is_player === 1);
-    const here = activeScene.place_id;
+    if (playerPlaceId == null) return state.characters.filter((c) => c.is_player === 1);
     return state.characters.filter(
-      (c) => c.is_player === 1 || (here != null && c.current_place_id === here),
+      (c) => c.is_player === 1 || c.current_place_id === playerPlaceId,
     );
-  }, [activeScene, state.characters]);
-  const currentPlace = activeScene
-    ? state.places.find((p) => p.id === activeScene.place_id) ?? null
-    : null;
-  const currentPlaceId = activeScene ? activeScene.place_id : null;
+  }, [playerPlaceId, state.characters]);
+  const currentPlace =
+    playerPlaceId != null
+      ? state.places.find((p) => p.id === playerPlaceId) ?? null
+      : null;
+  const currentPlaceId = playerPlaceId;
   const { openId, toggle } = useAccordion();
 
   return (
@@ -390,8 +392,8 @@ function WikiView({ state, worldId }: { state: FullWorldState; worldId: number }
   // each refetch (via an effect) would yank a row the user has opened/closed.
   const sceneAccordion = useAccordion(activeSceneId ? `scene-${activeSceneId}` : null);
   const currentPlaceId = useMemo(
-    () => state.scenes.find((s) => s.id === state.currentSceneId)?.place_id ?? null,
-    [state.scenes, state.currentSceneId],
+    () => state.characters.find((c) => c.is_player === 1)?.current_place_id ?? null,
+    [state.characters],
   );
   const charAccordion = useAccordion();
   const placeAccordion = useAccordion();

@@ -65,6 +65,8 @@ export type DirectorSnapshot = {
   presentCast?: DirectorCastCandidate[]
   /** En-route characters with ids (arrive slots). */
   enRouteCast?: DirectorCastCandidate[]
+  /** Known cast for stripping must-stage lines that name people who are not here. */
+  knownCast?: DirectorCastCandidate[]
   /** Unused pending beat from last turn's gated brain. */
   pendingBeat?: PendingDirectorBeat | null
   /** Prior turn's consumed beat — in-scene play and stall-repeat. */
@@ -115,15 +117,7 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
   )
 
   if (activeThreads.length === 0 && activeObjectives.length === 0) {
-    return mergePendingBeat(
-      {
-        ...emptyDirectorBeat(),
-        suggestDormantThreadIds: [...leftoverIds],
-        backgroundThreadIds: [],
-        heavyThreadIds: [],
-      },
-      directed,
-    )
+    return mergePendingBeat(emptyDossierDecision(directed, leftoverIds), directed)
   }
 
   const ctx: RankingContext = { clockMinutes: snapshot.clockMinutes }
@@ -145,10 +139,10 @@ export function decideDirector(snapshot: DirectorSnapshot): DirectorDecision {
         })
 
   const foreground = ordered[0] ?? null
+  const engaged = foreground ? isPlayerEngagedWithThread(snapshot, foreground) : false
   const foregroundThreadId = foreground?.id ?? null
 
   const phase = derivePhase(foreground, activeObjectives, snapshot)
-  const engaged = foreground ? isPlayerEngagedWithThread(snapshot, foreground) : false
   const stallTurns = foreground
     ? turnsSince(foreground, snapshot.currentTurnId)
     : 0
@@ -263,14 +257,18 @@ export function mergePendingBeat(
   if (playerOverridesPending(snapshot, pending)) return decision
   if (snapshot.wakeAdvance || snapshot.stayUnder) return decision
   if (shouldDropStallPending(snapshot, pending)) return decision
+  if (shouldDropProcedurePending(snapshot, pending)) return decision
+  if (shouldDropAbsentCastPending(snapshot, pending)) return decision
+  if (shouldDropUnengagedPending(snapshot, pending)) return decision
+  const scoped = constrainPendingToPresence(pending, snapshot)
   return {
     ...decision,
-    beatKind: pending.beatKind,
-    foregroundThreadId: pending.foregroundThreadId ?? decision.foregroundThreadId,
-    mustStage: pending.mustStage.length > 0 ? pending.mustStage : decision.mustStage,
-    mustNot: uniqueLines([...decision.mustNot, ...pending.mustNot]),
-    cast: pending.cast.length > 0 ? pending.cast : decision.cast,
-    guidanceLines: uniqueLines([...pending.guidanceLines, ...decision.guidanceLines]),
+    beatKind: scoped.beatKind,
+    foregroundThreadId: scoped.foregroundThreadId ?? decision.foregroundThreadId,
+    mustStage: scoped.mustStage.length > 0 ? scoped.mustStage : decision.mustStage,
+    mustNot: uniqueLines([...decision.mustNot, ...scoped.mustNot]),
+    cast: scoped.cast.length > 0 ? scoped.cast : decision.cast,
+    guidanceLines: uniqueLines([...scoped.guidanceLines, ...decision.guidanceLines]),
   }
 }
 
@@ -296,6 +294,128 @@ function shouldDropStallPending(
       : null
   if (thread) return isPlayerEngagedWithThread(snapshot, thread)
   return !isIdleMove(snapshot.playerText)
+}
+
+/** Empty-dossier local pendings restage the same procedure forever unless dropped. */
+function shouldDropProcedurePending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  if (pending.beatKind !== 'local') return false
+  if (isRepeatEmptyLocal(snapshot)) return true
+  if (pending.foregroundThreadId == null && !isIdleMove(snapshot.playerText)) return true
+  return false
+}
+
+function isRepeatEmptyLocal(snapshot: DirectorSnapshot): boolean {
+  const last = snapshot.lastBeatKind
+  return last === 'local' || last === 'yield'
+}
+
+/** A pending whose whole CAST has left the room must not drag the camera with them. */
+/** Last turn's pending is not this turn's duty unless they are on that thread. */
+function shouldDropUnengagedPending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  const waiting =
+    isPlayerYieldingFloor(snapshot.playerText) || isIdleMove(snapshot.playerText)
+  if (pending.foregroundThreadId == null) return !waiting
+  const thread = snapshot.threads.find((t) => t.id === pending.foregroundThreadId)
+  if (!thread) return true
+  return !playerEngages(snapshot.playerText, thread, snapshot.objectives)
+}
+
+function shouldDropAbsentCastPending(
+  snapshot: DirectorSnapshot,
+  pending: PendingDirectorBeat,
+): boolean {
+  if (snapshot.presentCast == null) return false
+  if (pending.cast.length === 0) return false
+  const here = presentOrArrivingIds(snapshot)
+  return !pending.cast.some((slot) => here.has(slot.characterId))
+}
+
+function constrainPendingToPresence(
+  pending: PendingDirectorBeat,
+  snapshot: DirectorSnapshot,
+): PendingDirectorBeat {
+  const here = presentOrArrivingIds(snapshot)
+  const cast =
+    snapshot.presentCast == null
+      ? pending.cast
+      : pending.cast.filter((slot) => here.has(slot.characterId))
+  return {
+    ...pending,
+    cast,
+    mustStage: pending.mustStage.filter((line) => !lineRequiresAbsentPerson(line, snapshot)),
+    mustNot: pending.mustNot.filter(
+      (line) => !lineRequiresAbsentPerson(line, snapshot) && !isRailroadLeaveBan(line),
+    ),
+    guidanceLines: pending.guidanceLines.filter(
+      (line) => !lineRequiresAbsentPerson(line, snapshot),
+    ),
+  }
+}
+
+function presentOrArrivingIds(snapshot: DirectorSnapshot): Set<number> {
+  const ids = new Set<number>()
+  for (const c of snapshot.presentCast ?? []) {
+    if (c.isPlayer) continue
+    ids.add(c.id)
+  }
+  for (const c of snapshot.enRouteCast ?? []) ids.add(c.id)
+  return ids
+}
+
+function lineRequiresAbsentPerson(line: string, snapshot: DirectorSnapshot): boolean {
+  const known = snapshot.knownCast
+  if (!known || known.length === 0) return false
+  const here = presentOrArrivingIds(snapshot)
+  return known.some(
+    (c) => !c.isPlayer && !here.has(c.id) && mentionsName(line, c.name),
+  )
+}
+
+function mentionsName(line: string, name: string): boolean {
+  for (const part of name.toLowerCase().split(/\s+/)) {
+    if (part.length < 3) continue
+    if (new RegExp(`\\b${escapeRegExp(part)}\\b`, 'i').test(line)) return true
+  }
+  return false
+}
+
+function isRailroadLeaveBan(line: string): boolean {
+  return /\bdo not (?:let the player leave|forbid the player(?: from)? leav)/i.test(
+    line,
+  )
+}
+
+function emptyDossierDecision(
+  snapshot: DirectorSnapshot,
+  leftoverIds: Set<number>,
+): DirectorDecision {
+  const empty: DirectorDecision = {
+    ...emptyDirectorBeat(),
+    suggestDormantThreadIds: [...leftoverIds],
+    backgroundThreadIds: [],
+    heavyThreadIds: [],
+  }
+  if (!isRepeatEmptyLocal(snapshot)) return empty
+  return {
+    ...empty,
+    beatKind: 'yield',
+    mustStage: [
+      'End the current procedure. Land a named next place or a named result this turn.',
+    ],
+    mustNot: [
+      'Do not restage the same watch / wait / reading / monitoring loop.',
+      'Do not start another interval, timer, or baseline pass.',
+    ],
+    guidanceLines: [
+      'No active foreground arc. The last beat was already local. Change the board.',
+    ],
+  }
 }
 
 function uniqueLines(lines: string[]): string[] {
@@ -412,33 +532,7 @@ function isPlayerEngagedWithThread(
   snapshot: DirectorSnapshot,
   thread: RankableThread,
 ): boolean {
-  if (playerEngages(snapshot.playerText, thread, snapshot.objectives)) return true
-  if (playerNamesPresent(snapshot.playerText, snapshot.presentCast ?? [])) return true
-  if (
-    snapshot.lastForegroundThreadId === thread.id &&
-    snapshot.lastBeatKind != null &&
-    STAGING_BEATS.has(snapshot.lastBeatKind) &&
-    !isIdleMove(snapshot.playerText)
-  ) {
-    return true
-  }
-  return false
-}
-
-function playerNamesPresent(
-  playerText: string,
-  present: DirectorCastCandidate[],
-): boolean {
-  const text = playerText.toLowerCase()
-  if (!text.trim()) return false
-  for (const c of present) {
-    if (c.isPlayer) continue
-    for (const part of c.name.toLowerCase().split(/\s+/)) {
-      if (part.length < 3) continue
-      if (new RegExp(`\\b${escapeRegExp(part)}\\b`, 'i').test(text)) return true
-    }
-  }
-  return false
+  return playerEngages(snapshot.playerText, thread, snapshot.objectives)
 }
 
 function escapeRegExp(s: string): string {
@@ -627,11 +721,20 @@ function assignCast(args: {
 
   const slots: DirectorCastSlot[] = []
   let reactCount = 0
+  const text = args.playerText ?? ''
+  const playerHasTheFloor =
+    !isPlayerYieldingFloor(text) && !isIdleMove(text)
   for (const c of scored) {
     const addressed = addressedIds.has(c.id)
     let role: DirectorCastSlot['role'] = 'background'
-    if (slots.every((s) => s.role !== 'initiate')) role = 'initiate'
-    else if (addressed || reactCount < DIRECTOR_REACT_CAP) {
+    if (addressed && slots.every((s) => s.role !== 'initiate')) {
+      role = 'initiate'
+    } else if (
+      !playerHasTheFloor &&
+      slots.every((s) => s.role !== 'initiate')
+    ) {
+      role = 'initiate'
+    } else if (addressed || reactCount < DIRECTOR_REACT_CAP) {
       role = 'react'
       if (!addressed) reactCount += 1
     }
@@ -666,8 +769,12 @@ function deriveBeatKind(args: {
   if (args.cast.some((c) => c.role === 'arrive')) return 'arrival'
   if (isPlayerYieldingFloor(args.playerText)) return 'yield'
   if (args.closing || args.phase === 'resolution') return 'close'
-  if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) return 'stall_escalate'
-  if (isIdleMove(args.playerText) && !args.engaged) return 'yield'
+  if (!args.engaged) {
+    const idle = isIdleMove(args.playerText)
+    if (args.stallTurns >= DIRECTOR_STALL_TURNS && idle) return 'stall_escalate'
+    if (idle) return 'yield'
+    return 'local'
+  }
   if (isRevealMove(args.playerText)) return 'reveal'
   if (!args.foreground || args.phase === 'setup') return 'local'
   return 'pressure'
@@ -732,7 +839,7 @@ function buildMustStage(args: {
     )
     return lines
   }
-  if (args.foreground && args.beatKind) {
+  if (args.foreground && args.beatKind && args.engaged) {
     if (
       isRepeatForegroundPressure({
         foreground: args.foreground,
@@ -749,16 +856,27 @@ function buildMustStage(args: {
         `Stage a concrete beat of "${args.foreground.title}" (${args.beatKind}).`,
       )
     }
+  } else if (args.foreground && !args.engaged) {
+    lines.push('Stay with this beat. Do not introduce a new file, finding, or off-room fact.')
   } else if (args.beatKind === 'local') {
     lines.push('Stage local scene pressure only — no new major arc.')
   }
   if (isPlayerYieldingFloor(args.playerText)) {
-    lines.push(
-      'The protagonist yielded the floor. Write through the current procedure or exchange this turn — complete remaining checks, deliver the finding, finish the conversation beat.',
-    )
-    lines.push(
-      'Land one changed board: a named result, a named next place, a logged incident, or new presence. Do not stop mid-check or mid-exchange waiting for another continue. Do not end on a question whose only useful answer is continue.',
-    )
+    if (args.engaged) {
+      lines.push(
+        'The protagonist yielded the floor. Write through the current procedure or exchange this turn — complete remaining checks, deliver the finding, finish the conversation beat.',
+      )
+      lines.push(
+        'Land one changed board: a named result, a named next place, a logged incident, or new presence. Do not stop mid-check or mid-exchange waiting for another continue. Do not end on a question whose only useful answer is continue.',
+      )
+    } else {
+      lines.push(
+        'The protagonist yielded the floor. Finish what is already in frame.',
+      )
+      lines.push(
+        'Do not mint a new file, place, alarm, or finding to satisfy the continue.',
+      )
+    }
   }
   const initiator = args.cast.find((c) => c.role === 'initiate')
   if (initiator) {
@@ -778,7 +896,7 @@ function buildMustStage(args: {
     lines.push(
       'Change the board this turn: a named result, a named next place, or off-stage pressure arriving. Do not restage the same watch / wait / reading loop.',
     )
-  } else if (args.stallTurns >= DIRECTOR_STALL_TURNS && !args.engaged) {
+  } else if (args.beatKind === 'stall_escalate') {
     lines.push(
       'Escalate time, NPC initiative, or environmental cost without railroading.',
     )

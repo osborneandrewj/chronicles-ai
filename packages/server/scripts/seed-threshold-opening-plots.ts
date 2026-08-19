@@ -1,6 +1,7 @@
 // Idempotent local repair for "Project THRESHOLD": take The Clawing Arm off
-// the season floor, revive the Latin/Rome mystery, and seed Booker-shaped
-// opening threads (program antagonist, sessions, Jordan) if missing.
+// the season floor, revive the Latin/Rome mystery, close isolation-protocol
+// clones, and seed Booker-shaped opening threads (program antagonist,
+// sessions, Jordan) if missing.
 //
 //   PERSISTENCE=mongo \
 //   DATABASE_URL='mongodb://localhost:27017/chronicles?replicaSet=rs0' \
@@ -9,13 +10,14 @@
 // Back up story_threads / story_objectives first.
 
 import { initContainer } from '@/composition/container'
+import { serializeDirectorState } from '@/domain/services/director-state'
 
 const WORLD_NAME = 'Project THRESHOLD'
 
 async function main(): Promise<void> {
   console.log(`[seed] PERSISTENCE=${process.env.PERSISTENCE ?? '(default sqlite)'}`)
   const container = await initContainer()
-  const { worlds, dossiers, dossierWriter } = container
+  const { worlds, dossiers, dossierWriter, characters } = container
 
   const summaries = await worlds.listWorlds()
   const target = summaries.find((w) => w.name.toLowerCase() === WORLD_NAME.toLowerCase())
@@ -76,6 +78,14 @@ async function main(): Promise<void> {
     detail:
       'The Latin, the Aquilas vision, and the sessions are one mystery. Ask who has heard this before, what the chamber is for, and what Lena already knows.',
   })
+  await closeProtocolLoops(worldId, dossierWriter)
+  await ensureObjective(worldId, dossierWriter, 'What the Sessions Are For', {
+    title: 'Leave the chamber and demand a real answer',
+    detail:
+      'The isolation cycles and baselines are busywork. Get out, sit down to dinner, and press what the sessions actually do — Rome, Lena, the chamber — not another timer.',
+  })
+  await reopenRomeObjective(worldId, dossierWriter)
+  await setReleasePending(worldId, worlds, dossierWriter, characters)
 
   const dossier = await dossiers.forWorld(worldId)
   const active = dossier.threads.filter((t) => t.status === 'active')
@@ -166,6 +176,116 @@ async function reviveRomeMystery(
     resolved_turn_id: null,
   })
   console.log(`[seed] Revived The Unexplained Tremor as active mystery (id ${row.id}).`)
+}
+
+const PROTOCOL_LOOP_TITLES = [
+  'Locked in Isolation — Monitoring Cycle Begins',
+  'The Isolation Protocol',
+  'The Isolation Session',
+  'The Double-Verification Protocol',
+  'The Fragment Recovery Protocol',
+  'Facility Isolation Protocol',
+  'Bunker Lockdown After External Contact',
+]
+
+async function closeProtocolLoops(
+  worldId: number,
+  writer: Awaited<ReturnType<typeof initContainer>>['dossierWriter'],
+): Promise<void> {
+  for (const title of PROTOCOL_LOOP_TITLES) {
+    const row = await writer.threadByTitle(worldId, title)
+    if (!row) {
+      console.log(`[seed] Protocol thread "${title}" not found — skip.`)
+      continue
+    }
+    if (row.status === 'resolved' || row.status === 'failed') {
+      console.log(`[seed] "${title}" already ${row.status} — skip.`)
+      continue
+    }
+    await writer.updateThread({
+      id: row.id,
+      kind: row.kind,
+      status: 'resolved',
+      summary:
+        'Isolation, timers, and monitoring passes ran themselves out. They were procedure, not the plot; the sessions, Rome, and Lena remain.',
+      stakes: row.stakes,
+      rewards: row.rewards,
+      consequences: row.consequences,
+      hidden: row.hidden,
+      relevance_tags_json: row.relevance_tags_json,
+      resolved_turn_id: null,
+    })
+    console.log(`[seed] Resolved protocol loop "${title}" (id ${row.id}).`)
+  }
+}
+
+async function reopenRomeObjective(
+  worldId: number,
+  writer: Awaited<ReturnType<typeof initContainer>>['dossierWriter'],
+): Promise<void> {
+  const row = await writer.objectiveByTitle(worldId, 'Learn why Rome speaks through him')
+  if (!row) return
+  const thread = await writer.threadByTitle(worldId, 'The Unexplained Tremor')
+  await writer.updateObjective({
+    id: row.id,
+    thread_id: thread?.id ?? null,
+    status: 'active',
+    detail:
+      'The Latin, the Aquilas vision, and the sessions are still unanswered. The baselines did not explain them. Ask who has heard this before, what the chamber is for, and what Lena already knows.',
+    blocker: null,
+    completed_turn_id: null,
+  })
+  console.log(`[seed] Re-opened objective "Learn why Rome speaks through him" (id ${row.id}).`)
+}
+
+async function setReleasePending(
+  worldId: number,
+  worlds: Awaited<ReturnType<typeof initContainer>>['worlds'],
+  writer: Awaited<ReturnType<typeof initContainer>>['dossierWriter'],
+  characters: Awaited<ReturnType<typeof initContainer>>['characters'],
+): Promise<void> {
+  const sessions = await writer.threadByTitle(worldId, 'What the Sessions Are For')
+  const castRows = await characters.forWorld(worldId)
+  const ellis = castRows.find((c) => c.name.toLowerCase() === 'ellis shaw')
+  const jordan = castRows.find((c) => c.name.toLowerCase() === 'jordan lacy')
+  const cast = [
+    ellis
+      ? { characterId: ellis.id, name: ellis.name, role: 'initiate' as const }
+      : null,
+    jordan
+      ? { characterId: jordan.id, name: jordan.name, role: 'react' as const }
+      : null,
+  ].filter((c): c is NonNullable<typeof c> => c != null)
+  await worlds.setDirectorState(
+    worldId,
+    serializeDirectorState({
+      pending: {
+        beatKind: 'yield',
+        foregroundThreadId: sessions?.id ?? null,
+        mustStage: [
+          'Ellis ends the isolation cycle and unseals the chamber.',
+          'Jordan walks Andrew toward the mess for dinner.',
+        ],
+        mustNot: [
+          'Do not start another monitoring interval, timer, or deep session.',
+          'Do not restage vitals, traces, or protocol recitation.',
+        ],
+        cast,
+        guidanceLines: [
+          'The tests are done. Honor the request for dinner. Pressure is the sessions, Rome, and Lena — not another baseline.',
+        ],
+        reason: 'empty_dossier',
+        sourceTurnId: 1354,
+      },
+      lastBrainTurnId: 1354,
+      lastBrainReason: 'empty_dossier',
+      lastBeatKind: 'local',
+      lastForegroundThreadId: null,
+      stallStreak: 0,
+      agencyLocked: false,
+    }),
+  )
+  console.log('[seed] Pending beat: unseal the chamber and go to dinner.')
 }
 
 async function ensureThread(

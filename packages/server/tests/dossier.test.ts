@@ -230,7 +230,7 @@ describe('story dossier state', () => {
       flaring: new Set(),
     })
 
-    expect(block).toContain('private read (known only to Mara Vale; never let another NPC act on it): believes the relay fragment was planted as bait')
+    expect(block).toContain('private read (known only to Mara Vale; never state on the page; never let another NPC act on it): believes the relay fragment was planted as bait')
     expect(block).toContain('private subtext (backstory pressure; color tone and choices only, never state on the page): rain on wheat recalls the informant')
     expect(block).toContain('relationship to protagonist: trusts Andras with evidence')
     expect(block).toContain('agenda:')
@@ -241,7 +241,7 @@ describe('story dossier state', () => {
     const { worldId, turnId } = seedWorld()
     await applyArchivistPatch(worldId, turnId, {
       characters: [
-        { name: 'Mara Vale', description: 'Field analyst.', current_place_name: 'Covenant Security' },
+        { name: 'Mara Vale', description: 'Field analyst.', current_place_name: 'Wheat field near a spire' },
       ],
     })
     db.prepare(
