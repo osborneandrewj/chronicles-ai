@@ -546,7 +546,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
 
   const npcAgentError =
     npcAgentSettled && 'error' in npcAgentSettled ? npcAgentSettled.error : null
-  let npcAgentDraft: NpcAgentDraft | null =
+  const npcAgentDraft: NpcAgentDraft | null =
     keepNpcAgent && npcAgentSettled && 'patch' in npcAgentSettled ? npcAgentSettled : null
   const discardedAgentUsage =
     !keepNpcAgent && npcAgentSettled && 'usage' in npcAgentSettled

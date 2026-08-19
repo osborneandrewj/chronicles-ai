@@ -16,6 +16,13 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.14.2',
+    date: '2026-08-19',
+    highlights: [
+      'The hosted app now includes the recent camera and turn-speed work. Those versions had not actually gone live.',
+    ],
+  },
+  {
     version: '0.14.1',
     date: '2026-08-18',
     highlights: [
