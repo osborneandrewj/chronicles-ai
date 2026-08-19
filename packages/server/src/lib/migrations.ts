@@ -1075,6 +1075,15 @@ export const migrations: Migration[] = [
       addColumnIfMissing(db, 'worlds', 'ui_skin', 'TEXT')
     },
   },
+  {
+    // Host refusals: short JSON string list of hard will-not lines. Author-once
+    // in the character repo. Null until a host file (or first write) sets them.
+    version: 41,
+    name: 'character_refusals',
+    up: (db) => {
+      addColumnIfMissing(db, 'characters', 'refusals', 'TEXT')
+    },
+  },
 ]
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no `ADD COLUMN IF NOT EXISTS`,

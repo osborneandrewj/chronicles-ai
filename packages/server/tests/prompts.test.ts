@@ -174,6 +174,8 @@ describe('prompts — dialogue depth & character voice', () => {
   it('npc-agent authors speech_register once and uses speech_hint on talk plans', () => {
     const p = loadPrompt('npc-agent-system')
     expect(p).toMatch(/speech_register once/i)
+    expect(p).toMatch(/personal_goals once/i)
+    expect(p).toMatch(/do not write refusals/i)
     expect(p).toMatch(/do not rewrite/i)
     expect(p).toMatch(/speech_hint/i)
     expect(p).toMatch(/never write the full line/i)

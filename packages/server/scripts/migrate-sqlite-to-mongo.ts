@@ -261,6 +261,8 @@ async function main(): Promise<void> {
       lastKnownSituation: str(c.last_known_situation),
       traits: parseJson<Record<string, unknown> | null>(c.traits_json, null),
       dailyLoop: parseJson<Record<string, unknown> | null>(c.daily_loop, null),
+      speechRegister: str(c.speech_register),
+      refusals: str(c.refusals),
       appearanceCount: reqNum(c.appearance_count ?? 0),
       lastSeenTurnId: num(c.last_seen_turn_id),
       lastAgentTickTurnId: num(c.last_agent_tick_turn_id),

@@ -91,8 +91,8 @@ const NpcUpdateSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Replace personal_goals (newline-separated, multi-line). Include any prior goals you want to keep. ' +
-        'Most patches omit this — only update when narration revealed something genuinely new.',
+      'Author ONCE when personal_goals is empty/null: the durable core drive (not this scene\'s active_goal). ' +
+        'Once set, omit forever — the apply layer ignores rewrites.',
     ),
   private_beliefs: z
     .string()
@@ -1111,9 +1111,6 @@ export async function applyNpcAgentPatch(
         // Unknown place: silently drop. Archivist owns place creation; the
         // NPC agent only relocates within the known set.
       }
-      if (u.personal_goals !== undefined) {
-        fields.personal_goals = u.personal_goals
-      }
       if (u.private_beliefs !== undefined) {
         fields.private_beliefs = u.private_beliefs
       }
@@ -1186,6 +1183,9 @@ export async function applyNpcAgentPatch(
       }
       if (u.daily_loop !== undefined) {
         await characters.setDailyLoopIfEmpty(existing.id, JSON.stringify(u.daily_loop))
+      }
+      if (u.personal_goals !== undefined && u.personal_goals.trim()) {
+        await characters.setPersonalGoalsIfEmpty(existing.id, u.personal_goals.trim())
       }
       if (u.speech_register !== undefined) {
         const capped = capSpeechRegister(u.speech_register)

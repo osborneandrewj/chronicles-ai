@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.16.0',
+    date: '2026-08-19',
+    highlights: [
+      'People in a park keep a core: a daily loop, a want that is not the plot, and a few hard will-nots. Those do not get rewritten mid-story.',
+      'If you still have the floor, someone you did not address will not seize the beat. The director will not force them through a line they refuse.',
+    ],
+  },
+  {
     version: '0.15.0',
     date: '2026-08-18',
     highlights: [

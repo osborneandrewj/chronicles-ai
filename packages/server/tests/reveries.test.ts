@@ -72,6 +72,21 @@ describe('computeReverieFlares', () => {
     expect(computeReverieFlares(candidates, ['x'], { currentTurnId: 100 })).toEqual([2])
   })
 
+  it('prefers a cornerstone when scores are otherwise close', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('x'), intensity: 0.5, is_cornerstone: 0 },
+      { id: 2, character_id: 10, match_tags: tags('x'), intensity: 0.5, is_cornerstone: 1 },
+    ]
+    expect(computeReverieFlares(candidates, ['x'], {})).toEqual([2])
+  })
+
+  it('does not flare a cornerstone with zero tag overlap', () => {
+    const candidates = [
+      { id: 1, character_id: 10, match_tags: tags('rain'), intensity: 1, is_cornerstone: 1 },
+    ]
+    expect(computeReverieFlares(candidates, ['coffee'], {})).toEqual([])
+  })
+
   it('ignores the cooldown when no currentTurnId is supplied (legacy behaviour)', () => {
     const candidates = [
       { id: 1, character_id: 10, match_tags: tags('x'), intensity: 1, last_flared_turn_id: 99 },

@@ -28,6 +28,7 @@ import {
   shouldRunCloseBiasPass,
 } from '@/domain/services/close-bias'
 import { decideDirector, directorBeatToMetadata } from '@/domain/services/director'
+import { parseRefusals } from '@/domain/services/host-refusals'
 import { resolveAgencyLock } from '@/domain/services/incapacitation'
 import { applySettledFindingsToSnapshot } from '@/domain/services/settled-findings'
 import {
@@ -445,6 +446,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
       id: c.id,
       name: c.name,
       isPlayer: c.is_player === 1,
+      refusals: parseRefusals(c.refusals),
     })),
     enRouteCast: postPromotionState.knownCharacters
       .filter((c) => c.in_transit_to_place_id != null)
@@ -629,6 +631,7 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     match_tags: r.match_tags,
     intensity: r.intensity,
     last_flared_turn_id: r.last_flared_turn_id,
+    is_cornerstone: r.is_cornerstone,
   }))
   const presentNpcIds = narratorState.presentCharacters
     .filter((c) => c.is_player !== 1)
