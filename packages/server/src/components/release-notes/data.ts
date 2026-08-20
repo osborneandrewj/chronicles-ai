@@ -16,6 +16,14 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
+    version: '0.18.0',
+    date: '2026-08-19',
+    highlights: [
+      'People already in the park stay the extras. A nameless technician at the vault is the archive tech who was already there, not a new blank row.',
+      'Someone who is only a file does not walk into the room.',
+    ],
+  },
+  {
     version: '0.17.0',
     date: '2026-08-19',
     highlights: [

@@ -450,11 +450,18 @@ export async function narrateTurn(ctx: NarrationContext): Promise<NarratorStream
     })),
     enRouteCast: postPromotionState.knownCharacters
       .filter((c) => c.in_transit_to_place_id != null)
-      .map((c) => ({ id: c.id, name: c.name })),
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: c.status,
+        agencyLevel: c.agency_level,
+      })),
     knownCast: postPromotionState.knownCharacters.map((c) => ({
       id: c.id,
       name: c.name,
       isPlayer: c.is_player === 1,
+      status: c.status,
+      agencyLevel: c.agency_level,
     })),
     pendingBeat: directorState.pending,
     lastBeatKind: directorState.lastBeatKind,

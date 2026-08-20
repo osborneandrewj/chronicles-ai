@@ -4,7 +4,7 @@
 
 **Status:** vision roadmap · **Date:** 2026-06-05 · **Versioning:** 0.x (minor = feature milestone, patch = fix — see `docs/RELEASING.md`). This roadmap is the product spine; it sits above the per-milestone docs in `docs/plans/milestones/`.
 
-> **Current product (v0.17):** The player-facing container is a **park**. `/worlds/new` is a catalog; first entry is Project THRESHOLD, seeded from an authored host roster (not a genre-grid generator). Persistence stays `worlds` / `world_id`. Player sentence: *Enter a park. Live among its people. Leave with a chronicle.*
+> **Current product (v0.18):** The player-facing container is a **park**. `/worlds/new` is a catalog; first entry is Project THRESHOLD, seeded from an authored host roster. Descriptor walk-ons reuse the seated extra drawer; off-stage files do not arrive. Persistence stays `worlds` / `world_id`. Player sentence: *Enter a park. Live among its people. Leave with a chronicle.*
 
 > Derived from a 6-strand parallel design study of the current codebase (audit + spatial + seeding + director + player-model + book). Architecture vocabulary follows the onion layout (`domain/` entities + pure services + ports, `application/use-cases/`, `infrastructure/` adapters, `composition/`).
 

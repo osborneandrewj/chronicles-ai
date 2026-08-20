@@ -41,6 +41,7 @@ import {
 import { normalizeTransitPlacesInPatch } from '@/domain/services/patch-sanitizer'
 import { decideSceneTransition } from '@/domain/services/scene-transition'
 import { resolveNewThreadKind } from '@/domain/services/basic-plots'
+import { pickDrawerExtra, shouldSkipDescriptorMint } from '@/domain/services/host-drawer'
 
 // ApplyArchivistPatch (Phase 4) — the structural world-state update that follows
 // a narrator turn, carved out of `lib/archivist.applyArchivistPatch` onto the P4a
@@ -576,6 +577,17 @@ export async function applyArchivistPatch(
             ? await upsertPlace(c.current_place_name, undefined, undefined)
             : null
         let existing = await resolveCharacter(c.name)
+        if (!existing && c.is_player !== true) {
+          const seated = await listCharacters()
+          const extra = pickDrawerExtra(c.name, placeId, seated)
+          if (extra) {
+            existing = extra
+            const aliases = mergeLineBlocks(extra.aliases, c.name)
+            if (aliases) await characters.setAliases(extra.id, aliases)
+          } else if (shouldSkipDescriptorMint(c.name, seated)) {
+            continue
+          }
+        }
 
         // Single-player invariant (A9): a patch marking a character as the
         // player must land on the one is_player=1 row and rename it in place —

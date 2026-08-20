@@ -2,6 +2,7 @@
 // Deterministic; fail-open empty beat. Soft guidance only — no hard climax
 // fiction. Structure/closure gap, not prose volume.
 
+import type { Character } from '@/domain/entities/character'
 import type {
   DirectorBeat,
   DirectorBeatKind,
@@ -50,6 +51,8 @@ export type DirectorCastCandidate = {
   isPlayer?: boolean
   /** Parsed will-not lines; omit when none. */
   refusals?: string[]
+  status?: Character['status']
+  agencyLevel?: Character['agency_level']
 }
 
 export type DirectorSnapshot = {
@@ -753,6 +756,8 @@ function assignCast(args: {
   const presentIds = new Set(npcs.map((c) => c.id))
   for (const c of args.enRoute) {
     if (presentIds.has(c.id) || !c.name.trim()) continue
+    if (c.status === 'inactive' || c.status === 'dead') continue
+    if (c.agencyLevel === 'dormant') continue
     if (args.foreground && mentioned(c.name)) {
       slots.push({ characterId: c.id, name: c.name, role: 'arrive' })
     }
