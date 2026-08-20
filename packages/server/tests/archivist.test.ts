@@ -920,6 +920,57 @@ describe('applyArchivistPatch', () => {
     expect(ink.current_attitude).toBe('polite but probing')
   })
 
+  it('reuses a seated extra instead of minting a descriptor at that place', async () => {
+    const harbour = getPlacesForWorld(worldId)[0]!
+    db.prepare(
+      `INSERT INTO characters (world_id, name, is_player, current_place_id, agency_level, refusals, status)
+       VALUES (?, 'Nia Brett', 0, ?, 'npc', ?, 'active')`,
+    ).run(
+      worldId,
+      harbour.id,
+      JSON.stringify(['will not invent a name for a tab that has none']),
+    )
+    const before = getCharactersForWorld(worldId).length
+    await applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'the technician',
+          description: 'Someone at a drawer.',
+          current_place_name: harbour.name,
+        },
+      ],
+    })
+    const chars = getCharactersForWorld(worldId)
+    expect(chars).toHaveLength(before)
+    expect(chars.find((c) => c.name === 'Nia Brett')).toBeTruthy()
+    expect(chars.find((c) => c.name.toLowerCase() === 'the technician')).toBeUndefined()
+  })
+
+  it('does not mint a descriptor extra when the drawer has no one in that room', async () => {
+    const harbour = getPlacesForWorld(worldId)[0]!
+    db.prepare(
+      `INSERT INTO characters (world_id, name, is_player, current_place_id, agency_level, refusals, status)
+       VALUES (?, 'Nia Brett', 0, ?, 'npc', ?, 'active')`,
+    ).run(
+      worldId,
+      harbour.id,
+      JSON.stringify(['will not invent a name for a tab that has none']),
+    )
+    const before = getCharactersForWorld(worldId).length
+    await applyArchivistPatch(worldId, turnId, {
+      characters: [
+        {
+          name: 'the night clerk',
+          description: 'A figure at a door.',
+          current_place_name: 'Blast Doors',
+        },
+      ],
+    })
+    const chars = getCharactersForWorld(worldId)
+    expect(chars).toHaveLength(before)
+    expect(chars.find((c) => /night clerk/i.test(c.name))).toBeUndefined()
+  })
+
   it('insert defaults: omitted goal/attitude → NULL on a new row', async () => {
     await applyArchivistPatch(worldId, turnId, {
       characters: [{ name: 'Silent Watcher', description: 'A figure on the cliff path.' }],

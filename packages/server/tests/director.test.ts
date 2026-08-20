@@ -225,6 +225,29 @@ describe('decideDirector', () => {
     expect(d.mustNot.every((l) => !/must climax|force climax/i.test(l))).toBe(true)
   })
 
+  it('does not arrive an inactive off-stage host', () => {
+    const d = decideDirector({
+      threads: [
+        thread({
+          id: 7,
+          title: 'The Hale File',
+          kind: 'mystery',
+          summary: 'Marcus Hale is a folder in the vault',
+          source_turn_id: 10,
+        }),
+      ],
+      objectives: [],
+      clockMinutes: 100,
+      currentTurnId: 20,
+      playerText: 'continue',
+      presentCast: [{ id: 12, name: 'Ellis Shaw' }],
+      enRouteCast: [
+        { id: 99, name: 'Marcus Hale', status: 'inactive', agencyLevel: 'dormant' },
+      ],
+    })
+    expect(d.cast.find((c) => c.name === 'Marcus Hale')).toBeUndefined()
+  })
+
   it('gives the addressed present NPC the initiate slot and their thread the floor', () => {
     const d = decideDirector({
       threads: [
